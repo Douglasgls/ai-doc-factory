@@ -39,6 +39,9 @@ export interface ReviewPendingDocument {
   suggestedConfidence: number
   extractedFields: { key: string; value: string }[]
   personName: string
+  imagemUrl?: string
+  loteId?: number
+  paginaIni?: number
 }
 
 // Aliases para retrocompatibilidade

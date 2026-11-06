@@ -1,37 +1,100 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { Check, X, Plus } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { Check, X, Plus, ExternalLink, Loader2 } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
+
+export interface CategoryOption {
+  slug: string
+  name: string
+}
 
 interface ManualReviewPageProps {
   documents: ReviewPendingDocument[]
   onBack: () => void
-  onApprove: (docId: string, finalCategory: string, personName: string) => void
-  availableCategories: string[]
+  onApprove: (
+    docId: string,
+    finalCategory: string,
+    personName: string,
+    updatedFields?: Record<string, string | null>
+  ) => void | Promise<void>
+  availableCategories: (string | CategoryOption)[]
 }
 
 interface DetailPanelProps {
   doc: ReviewPendingDocument
-  availableCategories: string[]
-  onConfirm: (docId: string, category: string, name: string) => void
-  onAcceptSuggestion: (doc: ReviewPendingDocument) => void
+  categories: CategoryOption[]
+  onConfirm: (
+    docId: string,
+    category: string,
+    name: string,
+    fields?: Record<string, string | null>
+  ) => void | Promise<void>
+  onAcceptSuggestion: (doc: ReviewPendingDocument) => void | Promise<void>
 }
 
 const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   doc,
-  availableCategories,
+  categories,
   onConfirm,
   onAcceptSuggestion,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState(doc.suggestedType)
   const [personName, setPersonName] = useState(doc.personName)
   const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const handleRemoveField = (index: number) => {
     setExtractedFields((prev) => prev.filter((_, i) => i !== index))
   }
 
   const handleAddField = () => {
-    setExtractedFields((prev) => [...prev, { key: 'Campo', value: '' }])
+    setExtractedFields((prev) => [...prev, { key: 'campo', value: '' }])
+  }
+
+  const suggestedCategoryName = useMemo(() => {
+    const found = categories.find(
+      (c) => c.slug.toLowerCase() === doc.suggestedType.toLowerCase()
+    )
+    return found ? found.name : doc.suggestedType
+  }, [categories, doc.suggestedType])
+
+  const handleConfirmClick = async () => {
+    setIsSubmitting(true)
+    setActionError(null)
+    try {
+      const fieldsMap: Record<string, string | null> = {}
+      for (const field of extractedFields) {
+        const sanitizedKey = field.key
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, '_')
+          .slice(0, 40)
+        if (sanitizedKey) {
+          const val = field.value.trim()
+          fieldsMap[sanitizedKey] = val ? val.slice(0, 500) : null
+        }
+      }
+      if (personName.trim()) {
+        fieldsMap['nome'] = personName.trim().slice(0, 500)
+      }
+      await onConfirm(doc.id, selectedCategory, personName, fieldsMap)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Erro ao confirmar documento')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleAcceptClick = async () => {
+    setIsSubmitting(true)
+    setActionError(null)
+    try {
+      await onAcceptSuggestion(doc)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Erro ao aceitar sugestão')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -46,13 +109,42 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
         </p>
       </div>
 
-      {/* Alert / Diagnosis Box (sem tom amarelo/marrom) */}
+      {/* Document Image Preview (quando disponível na API) */}
+      {doc.imagemUrl && (
+        <div className="rounded-xl overflow-hidden border border-[#ebe5ef] dark:border-[#2f1e39] bg-[#f8f5fa] dark:bg-[#150c18] p-3 space-y-2">
+          <div className="flex items-center justify-between text-xs font-semibold text-[#6e6378] dark:text-[#a093a8]">
+            <span>Visualização da página ({doc.pages} pág.)</span>
+            <a
+              href={doc.imagemUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#9333ea] dark:text-[#d67bf3] hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>Abrir original</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+          <div className="flex justify-center bg-black/5 dark:bg-black/30 rounded-lg p-2 max-h-72 overflow-hidden">
+            <img
+              src={doc.imagemUrl}
+              alt={doc.filename}
+              className="max-h-64 object-contain rounded shadow-xs"
+              onError={(e) => {
+                const container = e.currentTarget.parentElement?.parentElement
+                if (container) container.style.display = 'none'
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Alert / Diagnosis Box */}
       <div className="p-4 rounded-xl bg-[#f8f5fa] dark:bg-[#201326] border border-[#ece4f1] dark:border-[#382240] text-xs sm:text-sm space-y-1">
         <p className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">
           {doc.issueDescription}
         </p>
         <p className="text-[#6e6378] dark:text-[#a093a8]">
-          Tipo sugerido pela IA: <strong className="font-bold text-[#9333ea] dark:text-[#d67bf3]">{doc.suggestedType}</strong> · confiança {Math.round(doc.suggestedConfidence * 100)}%
+          Tipo sugerido pela IA: <strong className="font-bold text-[#9333ea] dark:text-[#d67bf3]">{suggestedCategoryName}</strong> · confiança {Math.round(doc.suggestedConfidence * 100)}%
         </p>
       </div>
 
@@ -117,9 +209,9 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="w-full px-3.5 py-2.5 rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#150c18] text-[#2d0a33] dark:text-white text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#9333ea] cursor-pointer"
           >
-            {availableCategories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
+            {categories.map((cat) => (
+              <option key={cat.slug} value={cat.slug}>
+                {cat.name}
               </option>
             ))}
           </select>
@@ -139,23 +231,39 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
         </div>
       </div>
 
-      {/* Action Buttons (sem favicon ou logo) */}
+      {/* Error Message */}
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-xs font-medium text-red-600 dark:text-red-400">
+          {actionError}
+        </div>
+      )}
+
+      {/* Action Buttons */}
       <div className="flex flex-wrap items-center gap-3 pt-3">
         <button
           type="button"
-          onClick={() => onConfirm(doc.id, selectedCategory, personName)}
-          className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
+          disabled={isSubmitting}
+          onClick={handleConfirmClick}
+          className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] disabled:opacity-50 flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
         >
-          <Check className="w-4 h-4 stroke-[2.5]" />
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Check className="w-4 h-4 stroke-[2.5]" />
+          )}
           <span>Confirmar classificação</span>
         </button>
 
         <button
           type="button"
-          onClick={() => onAcceptSuggestion(doc)}
-          className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border border-[#d88cf5] dark:border-[#c026d3] text-[#7c1782] dark:text-[#f38df9] hover:bg-[#f6ebfa] dark:hover:bg-[#281530] flex items-center gap-2 transition-all cursor-pointer"
+          disabled={isSubmitting}
+          onClick={handleAcceptClick}
+          className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border border-[#d88cf5] dark:border-[#c026d3] text-[#7c1782] dark:text-[#f38df9] hover:bg-[#f6ebfa] dark:hover:bg-[#281530] disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer"
         >
-          <span>Aceitar sugestão ({doc.suggestedType})</span>
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : null}
+          <span>Aceitar sugestão ({suggestedCategoryName})</span>
         </button>
       </div>
     </div>
@@ -172,17 +280,28 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   const [selectedCheckboxes, setSelectedCheckboxes] = useState<Record<string, boolean>>({})
   const [bulkCategory, setBulkCategory] = useState<string>('')
 
+  const normalizedCategories: CategoryOption[] = useMemo(() => {
+    return availableCategories.map((c) =>
+      typeof c === 'string'
+        ? { slug: c.toLowerCase().replace(/\s+/g, '_'), name: c }
+        : c
+    )
+  }, [availableCategories])
+
   // Selected document
   const currentDoc =
     documents.find((d) => d.id === selectedDocId) || documents[0]
 
-  const handleAcceptSuggestion = useCallback((doc: ReviewPendingDocument) => {
-    onApprove(doc.id, doc.suggestedType, doc.personName)
-    const remaining = documents.filter((d) => d.id !== doc.id)
-    if (remaining.length > 0) {
-      setSelectedDocId(remaining[0].id)
-    }
-  }, [documents, onApprove])
+  const handleAcceptSuggestion = useCallback(
+    async (doc: ReviewPendingDocument) => {
+      await onApprove(doc.id, doc.suggestedType, doc.personName)
+      const remaining = documents.filter((d) => d.id !== doc.id)
+      if (remaining.length > 0) {
+        setSelectedDocId(remaining[0].id)
+      }
+    },
+    [documents, onApprove]
+  )
 
   // Keyboard navigation & shortcuts (↑ / ↓ to navigate, 'A' to accept suggestion)
   useEffect(() => {
@@ -228,12 +347,13 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
     setSelectedCheckboxes((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
-  const handleConfirmClassification = (
+  const handleConfirmClassification = async (
     docId: string,
     category: string,
-    name: string
+    name: string,
+    fields?: Record<string, string | null>
   ) => {
-    onApprove(docId, category, name)
+    await onApprove(docId, category, name, fields)
     const remaining = documents.filter((d) => d.id !== docId)
     if (remaining.length > 0) {
       setSelectedDocId(remaining[0].id)
@@ -241,15 +361,15 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   }
 
   // Handle bulk action approval
-  const handleApplyBulk = () => {
+  const handleApplyBulk = async () => {
     if (!bulkCategory) return
     const idsToProcess = Object.keys(selectedCheckboxes).filter((id) => selectedCheckboxes[id])
-    idsToProcess.forEach((id) => {
+    for (const id of idsToProcess) {
       const doc = documents.find((d) => d.id === id)
       if (doc) {
-        onApprove(doc.id, bulkCategory, doc.personName)
+        await onApprove(doc.id, bulkCategory, doc.personName)
       }
-    })
+    }
     setSelectedCheckboxes({})
     setBulkCategory('')
   }
@@ -319,9 +439,9 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
                     className="w-full px-3.5 py-2 rounded-xl border border-[#c026d3] text-sm text-[#2d0a33] dark:text-white bg-white dark:bg-[#150c18] focus:outline-none focus:ring-1 focus:ring-[#c026d3] cursor-pointer"
                   >
                     <option value="">Classificar como...</option>
-                    {availableCategories.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
+                    {normalizedCategories.map((cat) => (
+                      <option key={cat.slug} value={cat.slug}>
+                        {cat.name}
                       </option>
                     ))}
                   </select>
@@ -424,7 +544,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
             <ReviewDetailPanel
               key={currentDoc.id}
               doc={currentDoc}
-              availableCategories={availableCategories}
+              categories={normalizedCategories}
               onConfirm={handleConfirmClassification}
               onAcceptSuggestion={handleAcceptSuggestion}
             />
