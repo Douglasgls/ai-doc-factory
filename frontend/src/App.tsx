@@ -249,7 +249,11 @@ export function App() {
     } catch (err) {
       console.error('Erro ao buscar dados:', err)
       if (!silent) {
-        setError('Não foi possível carregar os dados do servidor.')
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : 'Não foi possível carregar os dados do servidor.'
+        )
       }
     } finally {
       if (!silent) {
@@ -342,35 +346,49 @@ export function App() {
       )
       const targetSlug = matchedCat ? matchedCat.slug : finalCategorySlugOrName
 
-      // Build campos update payload if fields or personName were edited
+      // Build campos update payload only for fields that were added, modified, or removed.
+      // Never re-send masked identifiers ('cpf', 'rg', 'pis' containing '*') because the backend rejects masked values.
       const camposPayload: Record<string, string | null> = {}
       const seenKeys = new Set<string>()
+      const normalizedInitial: Record<string, string> = {}
+
+      if (initialCampos) {
+        Object.entries(initialCampos).forEach(([k, v]) => {
+          const nk = normalizeCampoKey(k)
+          if (nk) normalizedInitial[nk] = String(v).trim()
+        })
+      }
 
       if (updatedFields) {
         updatedFields.forEach(({ key, value }) => {
           const normKey = normalizeCampoKey(key)
           const trimmedVal = value.trim()
           if (normKey && trimmedVal) {
-            camposPayload[normKey] = trimmedVal
             seenKeys.add(normKey)
+            const isMaskedIdentifier =
+              (normKey === 'cpf' || normKey === 'rg' || normKey === 'pis') &&
+              trimmedVal.includes('*')
+            const isUnchanged = normalizedInitial[normKey] === trimmedVal
+            if (!isMaskedIdentifier && !isUnchanged) {
+              camposPayload[normKey] = trimmedVal
+            }
           }
         })
       }
 
       const trimmedPerson = personName.trim()
       if (trimmedPerson && trimmedPerson !== 'Não identificado') {
-        camposPayload['nome'] = trimmedPerson
         seenKeys.add('nome')
+        if (normalizedInitial['nome'] !== trimmedPerson && !trimmedPerson.includes('*')) {
+          camposPayload['nome'] = trimmedPerson
+        }
       }
 
-      if (initialCampos) {
-        Object.keys(initialCampos).forEach((origKey) => {
-          const normOrig = normalizeCampoKey(origKey)
-          if (normOrig && !seenKeys.has(normOrig)) {
-            camposPayload[normOrig] = null
-          }
-        })
-      }
+      Object.keys(normalizedInitial).forEach((normOrig) => {
+        if (normOrig && !seenKeys.has(normOrig)) {
+          camposPayload[normOrig] = null
+        }
+      })
 
       if (Object.keys(camposPayload).length > 0) {
         await apiService.updateDocumentCampos(
