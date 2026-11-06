@@ -19,11 +19,11 @@ TREINO; o `avaliar` só deve tocar o conjunto de teste na medição final.
 import argparse
 import json
 import sys
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # permite importar app/ e scripts/ ao rodar direto
 from app.classificar import montar_texto  # noqa: E402
+from scripts.api_http import abrir  # noqa: E402
 from scripts.avaliar_classificacao import documentos_reais, imprimir, ler_paginas, por_qualidade, resumo  # noqa: E402
 from scripts.avaliar_segmentacao import ler_gabarito  # noqa: E402
 from scripts.relatorio_cobertura import docs_da_api  # noqa: E402
@@ -32,7 +32,7 @@ SEED = 42
 
 
 def _get(api: str, caminho: str) -> dict:
-    with urllib.request.urlopen(f"{api}{caminho}") as r:
+    with abrir(f"{api}{caminho}") as r:
         return json.load(r)
 
 

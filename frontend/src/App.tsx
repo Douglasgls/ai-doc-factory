@@ -5,7 +5,8 @@ import { UploadModal } from './components/UploadModal'
 import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage from './pages/ManualReviewPage'
-import { apiService } from './services/api'
+import LoginPage from './pages/LoginPage'
+import { apiService, authToken, AUTH_EXPIRED_EVENT } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
 
@@ -18,6 +19,9 @@ export function App() {
     }
     return true // Default dark mode
   })
+
+  // Autenticação: o token fica em sessionStorage; sem ele só o login aparece e nenhuma chamada de dados é feita
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authToken.get() !== null)
 
   // Navigation view state: 'home' | 'categoria' | 'revisao'
   const [currentView, setCurrentView] = useState<'home' | 'categoria' | 'revisao'>('home')
@@ -53,8 +57,30 @@ export function App() {
     }
   }, [isDark])
 
+  // Qualquer 401 (token expirado ou inválido) limpa os dados e volta ao login
+  useEffect(() => {
+    const handleExpired = () => {
+      setIsAuthenticated(false)
+      setCategories([])
+      setDetailedDocs([])
+      setReviewPendingDocs([])
+      setCompanies([])
+      setSelectedCategory(null)
+      setCurrentView('home')
+      setIsUploadModalOpen(false)
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired)
+  }, [])
+
+  const handleLogout = () => {
+    authToken.clear()
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+  }
+
   // Fetch data from backend
   useEffect(() => {
+    if (!isAuthenticated) return
     const fetchData = async () => {
       setIsLoading(true)
       setError(null)
@@ -144,7 +170,7 @@ export function App() {
     }
 
     fetchData()
-  }, [])
+  }, [isAuthenticated])
 
   const toggleTheme = () => {
     setIsDark((prev) => !prev)
@@ -279,6 +305,17 @@ export function App() {
     return detailedDocs.filter((d) => d.category === selectedCategory.id)
   }, [detailedDocs, selectedCategory])
 
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#fbf9fc] dark:bg-[#140c17] text-[#2d0a33] dark:text-[#f7f3f9] relative font-sans antialiased transition-colors">
+        <BackgroundWave />
+        <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+          <LoginPage onSuccess={() => setIsAuthenticated(true)} />
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#fbf9fc] dark:bg-[#140c17] text-[#2d0a33] dark:text-[#f7f3f9] relative font-sans antialiased transition-colors selection:bg-[#9333ea]/30 selection:text-white">
       {/* Bernhoeft background fluid wave */}
@@ -288,6 +325,7 @@ export function App() {
       <Header
         isDark={isDark}
         onToggleTheme={toggleTheme}
+        onLogout={handleLogout}
         onOpenUpload={() => setIsUploadModalOpen(true)}
         onOpenReview={handleOpenReview}
         reviewCount={reviewCount}

@@ -4,6 +4,7 @@ import psycopg
 from fastapi import HTTPException
 
 from app import conformidade, config
+from app.anonimizacao import mascarar_estrutura
 
 
 def _carregar_conformidade(conn):
@@ -33,7 +34,7 @@ def _empresas():
 
 def listar_empresas() -> list[dict]:
     resultados, _, _ = _empresas()
-    return [_resumo(c, res) for c, res in sorted(resultados.items())]
+    return mascarar_estrutura([_resumo(c, res) for c, res in sorted(resultados.items())])
 
 
 def conformidade_empresa(cnpj: str) -> dict:
@@ -41,7 +42,8 @@ def conformidade_empresa(cnpj: str) -> dict:
     resultados, _, _ = _empresas()
     if chave is None or chave not in resultados:
         raise HTTPException(404, "empresa não encontrada")
-    return {"cnpj": chave, **resultados[chave]}
+    # o cálculo usa o CPF real (chave dos grupos de consistência); só a resposta sai mascarada
+    return mascarar_estrutura({"cnpj": chave, **resultados[chave]})
 
 
 def conformidade_lote(lote_id: int) -> dict:
@@ -54,6 +56,7 @@ def conformidade_lote(lote_id: int) -> dict:
         nesse_lote = sorted(d["id"] for d in grupos[cnpj] if d["lote_id"] == lote_id)
         if nesse_lote:
             empresas.append({**_resumo(cnpj, res), "documentos": nesse_lote})
-    return {"lote_id": lote_id, "empresas": empresas,
-            "sem_empresa": [{"documento": s["id"], "tipo": s["tipo"], "estado": s["estado"], "motivo": s["motivo"]}
-                            for s in sem if s["lote_id"] == lote_id]}
+    return mascarar_estrutura({
+        "lote_id": lote_id, "empresas": empresas,
+        "sem_empresa": [{"documento": s["id"], "tipo": s["tipo"], "estado": s["estado"], "motivo": s["motivo"]}
+                        for s in sem if s["lote_id"] == lote_id]})

@@ -1,10 +1,11 @@
 import React from 'react'
-import { Upload, Sun, Moon } from 'lucide-react'
+import { Upload, Sun, Moon, LogOut } from 'lucide-react'
 // import { Search } from 'lucide-react'
 
 interface HeaderProps {
   isDark: boolean
   onToggleTheme: () => void
+  onLogout: () => void
   onOpenUpload: () => void
   onOpenReview: () => void
   reviewCount: number
@@ -17,6 +18,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   isDark,
   onToggleTheme,
+  onLogout,
   onOpenUpload,
   //onOpenReview,
   //reviewCount,
@@ -129,6 +131,18 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <Moon className="w-5 h-5 text-[#3e0b48] hover:text-[#52105e] transition-colors" />
             )}
+          </button>
+
+          {/* Sair */}
+          <button
+            type="button"
+            onClick={onLogout}
+            aria-label="Sair"
+            title="Sair"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-[#6e6378] dark:text-[#d3c7dc] hover:bg-[#f3edf6] dark:hover:bg-[#281831] transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span className="hidden sm:inline">Sair</span>
           </button>
         </div>
       </div>

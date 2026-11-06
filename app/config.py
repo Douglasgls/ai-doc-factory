@@ -61,5 +61,12 @@ GEMINI_ANALISE_MODEL = os.getenv("GEMINI_ANALISE_MODEL", "gemini-3.5-flash")
 PONTO_MAX_PAGINAS = int(os.getenv("PONTO_MAX_PAGINAS", "6"))  # páginas (imagens) enviadas ao Gemini
 PONTO_TEXTO_MAX = int(os.getenv("PONTO_TEXTO_MAX", "20000"))  # caracteres de OCR enviados
 
+# Autenticação: um único administrador vindo do ambiente. Falha fechada: sem estas variáveis não há senha nem
+# segredo padrão, o login responde 503 e toda rota protegida recusa o acesso.
+AUTH_USUARIO = os.getenv("AUTH_USUARIO", "")
+AUTH_SENHA = os.getenv("AUTH_SENHA", "")
+AUTH_SEGREDO = os.getenv("AUTH_SEGREDO", "")  # assina o JWT (HS256)
+AUTH_EXPIRA_MIN = int(os.getenv("AUTH_EXPIRA_MIN", "480"))
+
 # CORS: origens permitidas, separadas por vírgula (padrão: dev server do Vite). Nunca "*" com credenciais.
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]

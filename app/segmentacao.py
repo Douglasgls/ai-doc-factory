@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from app import config, llm, prompts
+from app.anonimizacao import anonimizar_texto
 
 log = logging.getLogger(__name__)
 
@@ -92,7 +93,9 @@ def perguntar_llm_mesmo_documento(fim_anterior: str, inicio_atual: str) -> bool 
     """
     if config.CLASSIFICADOR == "regras":
         return None  # modo sem rede: nenhum trecho do documento sai do sistema
-    estado = {"pagina_anterior": {"fim": fim_anterior}, "pagina_atual": {"inicio": inicio_atual}}
+    # dados pessoais não saem: só as fatias enviadas ao LLM são anonimizadas (as regras locais usam o texto original)
+    estado = {"pagina_anterior": {"fim": anonimizar_texto(fim_anterior)},
+              "pagina_atual": {"inicio": anonimizar_texto(inicio_atual)}}
     try:
         p = llm.jev_sim_nao(estado, prompts.PERGUNTA_FRONTEIRA, prompts.CRITERIOS_FRONTEIRA)
     except llm.LLMErro as e:

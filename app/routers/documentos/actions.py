@@ -2,6 +2,7 @@ import psycopg
 from fastapi import HTTPException
 
 from app import config
+from app.anonimizacao import mascarar_campos, mascarar_documentos, mascarar_estrutura
 from app.analise import enfileirar_analise
 from app.extracao import enfileirar_extracao
 from app.routers import r
@@ -28,7 +29,8 @@ def campos_por_documento(conn, ids: list[int]) -> dict[int, dict]:
 
 def extras_documento(campos: dict, nome_arquivo: str, ini: int, fim: int, criado_em) -> dict:
     """Campos aditivos expostos pelas respostas de documento."""
-    return {"campos": campos, "pessoa": campos.get("nome"), "nome_arquivo": nome_arquivo,
+    # CPF, RG e PIS saem mascarados; o nome segue visível (decisão: a tela de revisão precisa dele)
+    return {"campos": mascarar_campos(campos), "pessoa": campos.get("nome"), "nome_arquivo": nome_arquivo,
             "n_paginas": fim - ini + 1, "processado_em": criado_em}
 
 
@@ -53,7 +55,7 @@ def obter_documento(documento_id: int) -> dict:
         "probabilidades": d[13],
         **extras_documento(campos, d[14], d[3], d[4], d[15]),
         "paginas": [
-            {"numero": n, "imagem_url": f"/lotes/{d[1]}/paginas/{n}/imagem", "texto": t}
+            {"numero": n, "imagem_url": f"/lotes/{d[1]}/paginas/{n}/imagem", "texto": mascarar_documentos(t)}
             for n, t in paginas
         ],
     }
@@ -70,7 +72,7 @@ def obter_analise_ponto(documento_id: int) -> dict:
         if doc[0] == "folha_ponto":
             return {"documento_id": documento_id, "estado": "pendente"}
         raise HTTPException(404, "documento não é uma folha de ponto analisada")
-    return {"documento_id": documento_id, **dict(zip(_COLUNAS_ANALISE, row))}
+    return mascarar_estrutura({"documento_id": documento_id, **dict(zip(_COLUNAS_ANALISE, row))})
 
 
 SEM_TIPO = "sem_tipo"

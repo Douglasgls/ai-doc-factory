@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Check, X, Plus } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
+import { fetchPageImage } from '../services/api'
 
 interface ManualReviewPageProps {
   documents: ReviewPendingDocument[]
@@ -35,8 +36,27 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
     setExtractedFields((prev) => [...prev, { key: 'Campo', value: '' }])
   }
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-  const imageUrl = `${API_URL}/api/lotes/${doc.loteId}/paginas/${doc.startPage + currentPage}/imagem`;
+  // <img src> não envia Authorization: baixa a imagem autenticada e usa um object URL (revogado ao trocar/desmontar)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [imageFailed, setImageFailed] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    setImageUrl(null)
+    setImageFailed(false)
+    fetchPageImage(doc.loteId, doc.startPage + currentPage, controller.signal)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        setImageUrl(objectUrl)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setImageFailed(true)
+      })
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [doc.loteId, doc.startPage, currentPage])
 
   return (
     <div className="lg:col-span-7 space-y-6">
@@ -55,14 +75,17 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
 
         {/* Visualizer Mock (Simulando o formato físico solicitado pelo usuário) */}
         <div className="relative aspect-[3/4] w-full bg-[#f3f0f5] dark:bg-[#150c18] rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] overflow-hidden group shadow-inner">
-          <img 
-            src={imageUrl} 
-            alt="Documento" 
-            className="w-full h-full object-contain p-4"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = 'https://placehold.co/600x800?text=Imagem+indispon%C3%ADvel';
-            }}
-          />
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt="Documento"
+              className="w-full h-full object-contain p-4"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-sm text-[#6e6378] dark:text-[#a093a8]">
+              {imageFailed ? 'Imagem indisponível' : 'Carregando imagem...'}
+            </div>
+          )}
           
           {doc.pages > 1 && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md text-white text-[10px] font-bold">

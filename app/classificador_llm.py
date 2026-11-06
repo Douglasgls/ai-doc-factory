@@ -6,6 +6,7 @@ a confiança autodeclarada do Gemini não é pedida nem lida. Toda decisão de r
 import logging
 
 from app import config, llm, prompts
+from app.anonimizacao import anonimizar_texto
 from app.classificador_regras import Resultado
 
 log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ _SCHEMA_GEMINI = {
 def _jev(texto: str) -> Resultado:
     questions = {"tipo": {"type": "choice", "instructions": prompts.INSTRUCOES_TIPO,
                           "criteria": prompts.DESCRICOES}}
-    resp = llm.jev_decidir({"documento": {"texto": texto}}, questions)  # texto não confiável, em campo próprio
+    resp = llm.jev_decidir({"documento": {"texto": anonimizar_texto(texto)}}, questions)  # texto não confiável, em campo próprio
     try:
         resposta = resp["answers"]["tipo"]
         tipo = resposta["choice"]

@@ -41,8 +41,9 @@ A comunicação é feita via `fetch` centralizada em `src/services/api.ts`.
 As variáveis de ambiente são gerenciadas via arquivo `.env`:
 
 - `VITE_API_URL`: Endereço do servidor backend (ex: http://127.0.0.1:8000).
-- `VITE_API_PREFIX`: Prefixo das rotas (ex: /api).
-- `VITE_ENABLE_MOCK_LOGIN`: Habilita bypass de autenticação para desenvolvimento.
+- `VITE_API_PREFIX`: Prefixo das rotas (vazio por padrão: a API não usa prefixo).
+
+O login usa `POST /auth/login`; o token fica em `sessionStorage` e `authFetch` o envia em todas as chamadas.
 
 ## 📝 Scripts Disponíveis
 

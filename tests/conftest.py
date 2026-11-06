@@ -20,6 +20,29 @@ def sem_rede(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def autenticacao(monkeypatch):
+    """Valores falsos de autenticação e a dependência de login substituída, para os testes de rotas não
+    precisarem de token. tests/test_autenticacao.py remove o override (fixture `auth_real`)."""
+    from app.api import app
+    from app.routers.auth.actions import exigir_usuario
+    monkeypatch.setattr(config, "AUTH_USUARIO", "usuario-teste")
+    monkeypatch.setattr(config, "AUTH_SENHA", "senha-falsa-teste")
+    monkeypatch.setattr(config, "AUTH_SEGREDO", "segredo-falso-de-teste-com-mais-de-32-bytes")
+    monkeypatch.setattr(config, "AUTH_EXPIRA_MIN", 480)
+    app.dependency_overrides[exigir_usuario] = lambda: "usuario-teste"
+    yield
+    app.dependency_overrides.pop(exigir_usuario, None)
+
+
+@pytest.fixture
+def auth_real():
+    """Desliga o override: a autenticação passa a valer de verdade."""
+    from app.api import app
+    from app.routers.auth.actions import exigir_usuario
+    app.dependency_overrides.pop(exigir_usuario, None)
+
+
+@pytest.fixture(autouse=True)
 def extracoes(monkeypatch):
     """Não enfileira extração de verdade (o worker do compose chamaria o Gemini). Devolve os ids pedidos."""
     from app import extracao

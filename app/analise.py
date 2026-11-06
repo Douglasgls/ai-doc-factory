@@ -17,6 +17,7 @@ import redis
 from psycopg.types.json import Jsonb
 
 from app import config, llm, ponto, prompts
+from app.anonimizacao import anonimizar_texto
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def _validar_extracao(dado) -> dict:
 
 
 def extrair_com_gemini(texto: str, imagens: list[bytes], perfil: dict) -> tuple[dict, str, dict]:
-    prompt = prompts.prompt_gemini_ponto(texto[:config.PONTO_TEXTO_MAX], json.dumps(perfil, ensure_ascii=False),
+    prompt = prompts.prompt_gemini_ponto(anonimizar_texto(texto[:config.PONTO_TEXTO_MAX]), json.dumps(perfil, ensure_ascii=False),
                                          ponto.TIPOS_DIVERGENCIA)
     resp = llm.gemini_gerar(prompt, SCHEMA_GEMINI, imagens=imagens, modelo=config.GEMINI_ANALISE_MODEL)
     dado = _validar_extracao(llm.texto_gemini(resp))
@@ -83,7 +84,7 @@ def extrair_com_gemini(texto: str, imagens: list[bytes], perfil: dict) -> tuple[
 
 def julgar_com_jev(contagens: dict, analise: str) -> tuple[dict, str, dict]:
     """Uma única requisição, uma pergunta Score por dimensão. Devolve (respostas, modelo, usage)."""
-    state = {"contagens": contagens, "analise_gemini": analise}  # texto não confiável em campo próprio
+    state = {"contagens": contagens, "analise_gemini": anonimizar_texto(analise)}  # texto não confiável em campo próprio
     resp = llm.jev_decidir(state, prompts.PERGUNTAS_PONTO)
     respostas = {}
     for dim, pergunta in prompts.PERGUNTAS_PONTO.items():

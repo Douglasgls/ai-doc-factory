@@ -58,11 +58,11 @@ def test_campos_nas_tres_respostas(banco):
     conn, lote = banco
     lid, did = lote()
     _campo(conn, did, "nome", "Maria Silva")
-    _campo(conn, did, "cpf", "123")
+    _campo(conn, did, "cpf", "52998224725")
     _, sem = lote(ini=1, fim=1)
 
     d = client.get(f"/documentos/{did}").json()
-    assert d["campos"] == {"nome": "Maria Silva", "cpf": "123"}
+    assert d["campos"] == {"nome": "Maria Silva", "cpf": "***.982.247-**"}  # CPF sai mascarado
     assert d["pessoa"] == "Maria Silva"
     assert d["nome_arquivo"] == "arq.pdf"
     assert d["n_paginas"] == 3

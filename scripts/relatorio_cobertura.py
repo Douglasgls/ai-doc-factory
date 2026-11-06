@@ -17,13 +17,13 @@ import argparse
 import csv
 import json
 import sys
-import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # permite importar app/ ao rodar o script direto
 from app import config  # noqa: E402
 from app.roteamento import decidir  # noqa: E402
+from scripts.api_http import abrir  # noqa: E402
 
 LIMIARES_PADRAO = (0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)
 
@@ -103,7 +103,7 @@ def imprimir(linhas: list[dict]) -> None:
 
 
 def docs_da_api(api: str, lote_api: str) -> list[dict]:
-    with urllib.request.urlopen(f"{api}/lotes/{lote_api}") as r:
+    with abrir(f"{api}/lotes/{lote_api}") as r:
         return json.load(r)["documentos"]
 
 

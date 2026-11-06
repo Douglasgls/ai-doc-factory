@@ -12,8 +12,11 @@ import argparse
 import csv
 import json
 import sys
-import urllib.request
 from collections import defaultdict
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # permite importar scripts/ ao rodar direto
+from scripts.api_http import abrir  # noqa: E402
 
 VERDADEIRO = {"1", "true", "t", "sim", "s", "yes", "y"}
 
@@ -66,7 +69,7 @@ def somar(ms: list[dict]) -> dict:
 
 
 def previsto_da_api(api: str, lote_api: str) -> list[tuple[int, int]]:
-    with urllib.request.urlopen(f"{api}/lotes/{lote_api}") as r:
+    with abrir(f"{api}/lotes/{lote_api}") as r:
         docs = json.load(r)["documentos"]
     return [(d["pagina_ini"], d["pagina_fim"]) for d in docs]
 
