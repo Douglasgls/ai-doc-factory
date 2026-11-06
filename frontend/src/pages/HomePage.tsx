@@ -1,4 +1,6 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { ChevronRight } from 'lucide-react'
+import ConformidadeEmpresaModal from '../components/ConformidadeEmpresaModal'
 import { ManualReviewBanner } from '../components/ManualReviewBanner'
 import { MetricsCard } from '../components/MetricsCard'
 import { FilterBar, type FilterType } from '../components/FilterBar'
@@ -32,6 +34,7 @@ const HomePage: React.FC<HomePageProps> = ({
   onOpenCategory,
   companies,
 }) => {
+  const [selecionada, setSelecionada] = useState<Company | null>(null)
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
       {/* Page Title & Subtitle */}
@@ -126,21 +129,47 @@ const HomePage: React.FC<HomePageProps> = ({
               </thead>
               <tbody className="divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
                 {companies.map((company) => (
-                  <tr key={company.cnpj} className="hover:bg-[#fdfbfe] dark:hover:bg-[#251831] transition-colors cursor-pointer">
+                  <tr
+                    key={company.cnpj}
+                    onClick={() => setSelecionada(company)}
+                    className="hover:bg-[#fdfbfe] dark:hover:bg-[#251831] transition-colors cursor-pointer"
+                  >
                     <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc]">{company.razao_social}</div>
-                      {company.provisorio && (
-                        <span className="text-[10px] text-[#9333ea] dark:text-[#d67bf3] font-medium italic">Score provisório</span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelecionada(company)
+                        }}
+                        aria-label={`Ver como a nota de ${company.razao_social} foi calculada`}
+                        className="text-left text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc] hover:underline focus-visible:outline-2 focus-visible:outline-[#9333ea] rounded cursor-pointer"
+                      >
+                        {company.razao_social}
+                      </button>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {company.provisorio && (
+                          <span
+                            title="Esta nota ainda pode mudar: há documentos não analisados ou critérios sem nada para avaliar. Abra os detalhes para ver o motivo."
+                            className="text-[10px] text-[#9333ea] dark:text-[#d67bf3] font-medium italic cursor-help"
+                          >
+                            Score provisório
+                            <span className="sr-only">: esta nota ainda pode mudar; abra os detalhes para ver o motivo.</span>
+                          </span>
+                        )}
+                        <span className="text-[10px] text-[#6e6378] dark:text-[#a093a8] inline-flex items-center gap-0.5">
+                          Ver como a nota foi calculada <ChevronRight className="w-3 h-3" aria-hidden="true" />
+                        </span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-[#6e6378] dark:text-[#a093a8] font-mono">{company.cnpj}</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        company.classificacao == null ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' :
                         company.classificacao === 'Regular' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
                         company.classificacao === 'Atenção' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
                         'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                       }`}>
-                        {company.classificacao}
+                        {company.classificacao ?? 'Sem nota'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -155,7 +184,9 @@ const HomePage: React.FC<HomePageProps> = ({
                             style={{ width: `${company.score}%` }}
                           />
                         </div>
-                        <span className="text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc]">{company.score}%</span>
+                        <span className="text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc]">
+                          {company.score == null ? '—' : `${company.score}%`}
+                        </span>
                       </div>
                     </td>
                   </tr>
@@ -164,6 +195,14 @@ const HomePage: React.FC<HomePageProps> = ({
             </table>
           </div>
         </section>
+      )}
+
+      {selecionada && (
+        <ConformidadeEmpresaModal
+          cnpj={selecionada.cnpj}
+          razaoSocial={selecionada.razao_social}
+          onClose={() => setSelecionada(null)}
+        />
       )}
     </div>
   )
