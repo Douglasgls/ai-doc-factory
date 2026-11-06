@@ -16,6 +16,7 @@ Hoje existe apenas o backend (API + workers). O que está pronto, o que é parci
 | `api` | FastAPI: upload, consulta, busca e revisão |
 | `worker_ocr_seg` | Consome `segmentar_lote`: rasteriza, faz OCR, segmenta em documentos |
 | `worker_classify` | Consome `classificar_documento`: classifica, roteia por confiança, fecha o lote |
+| `migrate` | One-shot: roda `alembic upgrade head` e sai; `api` e os workers só sobem depois que ele termina com sucesso |
 | `postgres` | Dados e busca full-text (config `portuguese`) |
 | `redis` | Filas (listas, com ack via `BLMOVE`, 3 tentativas e depois `dlq`) |
 
@@ -122,7 +123,7 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Na última execução: `93 passed`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
@@ -130,7 +131,23 @@ Com `CLASSIFICADOR=regras` no `.env`, a classificação usa palavras-chave (`app
 
 ### 6. Mudança de schema e dados locais
 
-O `sql/schema.sql` só é aplicado na primeira inicialização do volume do Postgres, e não há migrações. Se o schema mudar, é preciso recriar o banco:
+O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo.
+
+Criar uma nova revisão (dentro do container, o arquivo gerado fica na imagem; copie-o para `migrations/versions/` do repositório):
+
+```bash
+docker compose run --rm migrate alembic revision -m "descricao curta"
+```
+
+Edite `upgrade()`/`downgrade()` com SQL e rebuild (`docker compose up -d --build`). Para aplicar manualmente: `docker compose run --rm migrate alembic upgrade head`; para voltar uma: `alembic downgrade -1`.
+
+**Banco que já existe** (criado pelo antigo `sql/schema.sql`): não rode o baseline de novo, apenas marque-o como aplicado:
+
+```bash
+docker compose run --rm migrate alembic stamp head
+```
+
+Para recomeçar do zero:
 
 ```bash
 docker compose down -v
@@ -210,7 +227,6 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 - Os dados sintéticos são otimistas. A validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.
 - Um worker por fila: não há escala horizontal testada.
 - Sem autenticação: qualquer cliente que alcance a API pode enviar, ler e revisar lotes. Não exponha a API fora de um ambiente local.
-- Sem migrações: `sql/schema.sql` só vale em banco novo (ver `docker compose down -v`).
 - Sem CI.
 - O Jev e o Gemini recebem texto e imagem de páginas dos documentos. Use `CLASSIFICADOR=regras` se o conteúdo não puder sair da máquina.
 - A confiança do classificador por regras é uma heurística sem calibração, usada só para roteamento.
