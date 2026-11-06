@@ -32,30 +32,11 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Logo & Navigation Tabs */}
         <div className="flex items-center gap-6 sm:gap-8">
-          {/* Logo Bernhoeft */}
+          {/* Marca EviDocs */}
           <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
-            <img
-              src="/logo.png"
-              alt="Bernhoeft"
-              className="h-6 sm:h-7 w-auto object-contain dark:brightness-0 dark:invert transition-all"
-              onError={(e) => {
-                // Fallback SVG caso a imagem não carregue
-                e.currentTarget.style.display = 'none'
-                const parent = e.currentTarget.parentElement
-                if (parent && !parent.querySelector('.logo-fallback')) {
-                  const fallback = document.createElement('div')
-                  fallback.className = 'logo-fallback flex items-center gap-2'
-                  fallback.innerHTML = `
-                    <div class="w-6 h-6 border-2 border-[#5c1363] dark:border-white relative flex items-center justify-center font-bold text-xs">
-                      <div class="absolute inset-0.5 border border-dashed border-[#5c1363] dark:border-white"></div>
-                      B
-                    </div>
-                    <span class="font-semibold text-lg tracking-tight text-[#2d0a33] dark:text-white">Bernhoeft</span>
-                  `
-                  parent.appendChild(fallback)
-                }
-              }}
-            />
+            <span className="font-extrabold text-xl tracking-tight text-[#2d0a33] dark:text-white">
+              EviDocs
+            </span>
           </div>
 
           {/* Navigation Tabs */}

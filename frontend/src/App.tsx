@@ -4,7 +4,7 @@ import { BackgroundWave } from './components/BackgroundWave'
 import { UploadModal } from './components/UploadModal'
 import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
-import ManualReviewPage from './pages/ManualReviewPage'
+import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
@@ -338,13 +338,23 @@ export function App() {
     initialCampos?: Record<string, string>
   ) => {
     try {
-      // Resolve category slug
-      const matchedCat = categories.find(
-        (c) =>
-          c.slug === finalCategorySlugOrName ||
-          c.name.toLowerCase() === finalCategorySlugOrName.toLowerCase()
-      )
-      const targetSlug = matchedCat ? matchedCat.slug : finalCategorySlugOrName
+      // Resolve category slug strictly to one of the 7 official backend types
+      const matchedCat =
+        categories.find(
+          (c) =>
+            c.slug === finalCategorySlugOrName ||
+            c.name.toLowerCase() === finalCategorySlugOrName.toLowerCase()
+        ) ||
+        OFFICIAL_CATEGORY_OPTIONS.find(
+          (c) =>
+            c.slug === finalCategorySlugOrName ||
+            c.name.toLowerCase() === finalCategorySlugOrName.toLowerCase()
+        )
+      const targetSlug = matchedCat
+        ? matchedCat.slug
+        : OFFICIAL_CATEGORY_OPTIONS.some((c) => c.slug === finalCategorySlugOrName)
+          ? finalCategorySlugOrName
+          : OFFICIAL_CATEGORY_OPTIONS[0].slug
 
       // Build campos update payload only for fields that were added, modified, or removed.
       // Never re-send masked identifiers ('cpf', 'rg', 'pis' containing '*') because the backend rejects masked values.
@@ -462,7 +472,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#fbf9fc] dark:bg-[#140c17] text-[#2d0a33] dark:text-[#f7f3f9] relative font-sans antialiased transition-colors selection:bg-[#9333ea]/30 selection:text-white">
-      {/* Bernhoeft background fluid wave */}
+      {/* Background fluid wave */}
       <BackgroundWave />
 
       {/* Top Navbar */}
