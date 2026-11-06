@@ -36,12 +36,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-2xl p-7 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-xs space-y-5"
       >
-        <div className="flex flex-col items-center gap-4">
-          <img
-            src="/logo.png"
-            alt="Bernhoeft"
-            className="h-8 w-auto object-contain dark:brightness-0 dark:invert"
-          />
+        <div className="flex flex-col items-center gap-2">
+          <span className="text-xl font-extrabold tracking-tight text-[#3e0b48] dark:text-[#f38df9]">
+            EviDocs
+          </span>
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-extrabold tracking-tight text-[#2d0a33] dark:text-[#fdfcfe]">Entrar</h1>
             <p className="text-sm text-[#6f6379] dark:text-[#9f91a6]">Acesse o painel de documentos.</p>

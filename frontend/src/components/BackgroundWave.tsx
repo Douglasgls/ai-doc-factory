@@ -3,7 +3,7 @@ import React from 'react'
 export const BackgroundWave: React.FC = () => {
   return (
     <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-      {/* Curved abstract dynamic wave mimicking the Bernhoeft branded backdrop */}
+      {/* Curved abstract dynamic wave backdrop */}
       <svg
         className="absolute top-0 right-0 w-[140vw] sm:w-[110vw] lg:w-[90vw] h-[120vh] -translate-y-12 translate-x-1/4 opacity-70 dark:opacity-40 transition-opacity duration-300"
         viewBox="0 0 1200 1000"

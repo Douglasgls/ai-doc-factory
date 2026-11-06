@@ -1,4 +1,5 @@
 import type { Company } from '../types';
+import type { AnalisePonto } from '../components/auditoriaPonto';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const API_PREFIX = import.meta.env.VITE_API_PREFIX ?? '';
@@ -82,7 +83,7 @@ export interface LoteResponse {
 
 export interface DocumentoResponse {
   id: number;
-  lote_id?: number;
+  lote_id: number;
   ordem: number;
   pagina_ini: number;
   pagina_fim: number;
@@ -98,6 +99,7 @@ export interface DocumentoResponse {
   nome_arquivo?: string;
   n_paginas?: number;
   processado_em?: string;
+  paginas: { numero: number; imagem_url?: string; texto_ocr?: string | null }[];
 }
 
 export interface GrupoDocumentoResponse {
@@ -418,7 +420,7 @@ export const apiService = {
   /**
    * Obtém a análise de folha de ponto de um documento
    */
-  getAnalisePonto: async (documentoId: number): Promise<AnalisePontoResponse> => {
+  getAnalisePonto: async (documentoId: number): Promise<AnalisePonto> => {
     const response = await authFetch(`/documentos/${documentoId}/analise-ponto`);
     if (!response.ok) {
       throw new Error(await parseErrorMessage(response, 'Análise não encontrada'));

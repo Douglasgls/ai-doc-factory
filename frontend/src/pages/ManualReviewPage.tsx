@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { Check, X, Plus } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
@@ -7,6 +7,18 @@ export interface CategoryOption {
   slug: string
   name: string
 }
+
+export const OFFICIAL_CATEGORY_OPTIONS: CategoryOption[] = [
+  { slug: 'aso', name: 'ASO (Atestado de Saúde Ocupacional)' },
+  { slug: 'folha_pagamento', name: 'Folha de pagamento' },
+  { slug: 'folha_ponto', name: 'Folha de ponto' },
+  { slug: 'holerite', name: 'Holerite' },
+  { slug: 'recibo_ferias', name: 'Recibo de férias' },
+  { slug: 'atestado_medico', name: 'Atestado médico' },
+  { slug: 'contrato_trabalho', name: 'Contrato de trabalho' },
+]
+
+const VALID_CATEGORY_SLUGS = new Set(OFFICIAL_CATEGORY_OPTIONS.map((c) => c.slug))
 
 interface ManualReviewPageProps {
   documents: ReviewPendingDocument[]
@@ -31,30 +43,53 @@ interface DetailPanelProps {
     updatedFields: { key: string; value: string }[],
     initialCampos?: Record<string, string>
   ) => void
-  onAcceptSuggestion: (
-    doc: ReviewPendingDocument,
-    personName: string,
-    updatedFields: { key: string; value: string }[]
-  ) => void
 }
 
 const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   doc,
   availableCategories,
   onConfirm,
-  onAcceptSuggestion,
 }) => {
-  const isValidSuggestion = availableCategories.some(
-    (c) => c.slug === doc.suggestedType
-  )
+  const isValidSuggestion = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
   const [selectedCategory, setSelectedCategory] = useState(
     isValidSuggestion
       ? doc.suggestedType
-      : availableCategories[0]?.slug || doc.suggestedType
+      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
   )
   const [personName, setPersonName] = useState(doc.personName)
   const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
   const [currentPage, setCurrentPage] = useState(0)
+
+  useEffect(() => {
+    const valid = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
+      ? doc.suggestedType
+      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
+    setSelectedCategory((prev) => (VALID_CATEGORY_SLUGS.has(prev) ? prev : valid))
+  }, [doc.id, doc.suggestedType, availableCategories])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        ['INPUT', 'SELECT', 'TEXTAREA'].includes(
+          (e.target as HTMLElement)?.tagName
+        )
+      ) {
+        return
+      }
+      if (e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        onConfirm(
+          doc.id,
+          selectedCategory,
+          personName,
+          extractedFields,
+          doc.initialCampos
+        )
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [doc.id, doc.initialCampos, selectedCategory, personName, extractedFields, onConfirm])
 
   const handleRemoveField = (index: number) => {
     setExtractedFields((prev) => prev.filter((_, i) => i !== index))
@@ -270,11 +305,17 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
             <span>Confirmar classificação</span>
           </button>
 
-          {isValidSuggestion && (
+          {isValidSuggestion && selectedCategory === doc.suggestedType && (
             <button
               type="button"
               onClick={() =>
-                onAcceptSuggestion(doc, personName, extractedFields)
+                onConfirm(
+                  doc.id,
+                  selectedCategory,
+                  personName,
+                  extractedFields,
+                  doc.initialCampos
+                )
               }
               className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border border-[#d88cf5] dark:border-[#c026d3] text-[#7c1782] dark:text-[#f38df9] hover:bg-[#f6ebfa] dark:hover:bg-[#281530] flex items-center gap-2 transition-all cursor-pointer"
             >
@@ -301,37 +342,16 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   >({})
   const [bulkCategory, setBulkCategory] = useState<string>('')
 
+  const categoryOptions = useMemo(() => {
+    const valid = availableCategories.filter((c) => VALID_CATEGORY_SLUGS.has(c.slug))
+    return valid.length > 0 ? valid : OFFICIAL_CATEGORY_OPTIONS
+  }, [availableCategories])
+
   // Selected document
   const currentDoc =
     documents.find((d) => d.id === selectedDocId) || documents[0]
 
-  const handleAcceptSuggestion = useCallback(
-    (
-      doc: ReviewPendingDocument,
-      personName?: string,
-      updatedFields?: { key: string; value: string }[]
-    ) => {
-      const targetSlug = availableCategories.some(
-        (c) => c.slug === doc.suggestedType
-      )
-        ? doc.suggestedType
-        : availableCategories[0]?.slug || doc.suggestedType
-      onApprove(
-        doc.id,
-        targetSlug,
-        personName ?? doc.personName,
-        updatedFields ?? doc.extractedFields,
-        doc.initialCampos
-      )
-      const remaining = documents.filter((d) => d.id !== doc.id)
-      if (remaining.length > 0) {
-        setSelectedDocId(remaining[0].id)
-      }
-    },
-    [availableCategories, documents, onApprove]
-  )
-
-  // Keyboard navigation & shortcuts (↑ / ↓ to navigate, 'A' to accept suggestion)
+  // Keyboard navigation (↑ / ↓ to navigate)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -354,17 +374,29 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
         if (currentIndex > 0) {
           setSelectedDocId(documents[currentIndex - 1].id)
         }
-      } else if (e.key.toLowerCase() === 'a') {
-        e.preventDefault()
-        if (currentDoc) {
-          handleAcceptSuggestion(currentDoc)
-        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [documents, currentDoc, handleAcceptSuggestion])
+  }, [documents, currentDoc])
+
+  const handleConfirmClassification = useCallback(
+    (
+      docId: string,
+      categorySlug: string,
+      name: string,
+      updatedFields: { key: string; value: string }[],
+      initialCampos?: Record<string, string>
+    ) => {
+      onApprove(docId, categorySlug, name, updatedFields, initialCampos)
+      const remaining = documents.filter((d) => d.id !== docId)
+      if (remaining.length > 0) {
+        setSelectedDocId(remaining[0].id)
+      }
+    },
+    [documents, onApprove]
+  )
 
   const handleSelectAll = (checked: boolean) => {
     const updated: Record<string, boolean> = {}
@@ -377,20 +409,6 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   const toggleSelectDoc = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     setSelectedCheckboxes((prev) => ({ ...prev, [id]: !prev[id] }))
-  }
-
-  const handleConfirmClassification = (
-    docId: string,
-    categorySlug: string,
-    name: string,
-    updatedFields: { key: string; value: string }[],
-    initialCampos?: Record<string, string>
-  ) => {
-    onApprove(docId, categorySlug, name, updatedFields, initialCampos)
-    const remaining = documents.filter((d) => d.id !== docId)
-    if (remaining.length > 0) {
-      setSelectedDocId(remaining[0].id)
-    }
   }
 
   // Handle bulk action approval
@@ -480,7 +498,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
                     className="w-full px-3.5 py-2 rounded-xl border border-[#c026d3] text-sm text-[#2d0a33] dark:text-white bg-white dark:bg-[#150c18] focus:outline-none focus:ring-1 focus:ring-[#c026d3] cursor-pointer"
                   >
                     <option value="">Classificar como...</option>
-                    {availableCategories.map((cat) => (
+                    {categoryOptions.map((cat) => (
                       <option key={cat.slug} value={cat.slug}>
                         {cat.name}
                       </option>
@@ -585,9 +603,8 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
             <ReviewDetailPanel
               key={currentDoc.id}
               doc={currentDoc}
-              availableCategories={availableCategories}
+              availableCategories={categoryOptions}
               onConfirm={handleConfirmClassification}
-              onAcceptSuggestion={handleAcceptSuggestion}
             />
           )}
         </div>
