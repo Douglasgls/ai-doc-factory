@@ -31,7 +31,17 @@ def processar_um(r: redis.Redis, fila: str, handler: Callable[[dict], None], tim
     bruto = r.blmove(fila, proc, timeout, "RIGHT", "LEFT")
     if bruto is None:
         return False
-    job = json.loads(bruto)
+    try:
+        job = json.loads(bruto)
+        if not isinstance(job, dict) or "payload" not in job:
+            raise ValueError("job não é um objeto com 'payload'")
+        job["tentativas"] = int(job.get("tentativas", 0))
+    except (ValueError, TypeError) as e:
+        # job ilegível: dlq direta (conteúdo bruto preservado), sem derrubar o worker nem voltar à fila
+        log.error("job inválido em %s (%s) -> dlq", fila, e)
+        r.lpush(DLQ, json.dumps({"fila": fila, "invalido": True, "erro": str(e), "bruto": str(bruto)}))
+        r.lrem(proc, 1, bruto)
+        return True
     try:
         handler(job["payload"])
     except Exception:
