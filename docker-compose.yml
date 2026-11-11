@@ -1,5 +1,6 @@
 x-app: &app
   build: .
+  restart: unless-stopped
   environment:
     DATABASE_URL: postgresql://${POSTGRES_USER:-docfactory}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/${POSTGRES_DB:-docfactory}
     REDIS_URL: redis://redis:6379/0
@@ -34,6 +35,7 @@ x-worker-health: &worker-health
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-docfactory}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
@@ -49,6 +51,7 @@ services:
 
   redis:
     image: redis:7
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -87,6 +90,7 @@ services:
     healthcheck: *worker-health
 
   frontend:
+    restart: unless-stopped
     build:
       context: ./frontend
       args:
