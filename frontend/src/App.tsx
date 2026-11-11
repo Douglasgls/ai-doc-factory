@@ -6,6 +6,9 @@ import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
+import { LotesStatusPanel } from './components/LotesStatusPanel'
+import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
+import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
@@ -63,6 +66,7 @@ export function App() {
   const [detailedDocs, setDetailedDocs] = useState<DetailedDocument[]>([])
   const [reviewPendingDocs, setReviewPendingDocs] = useState<ReviewPendingDocument[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
+  const [failedDocs, setFailedDocs] = useState<FailedDocument[]>([])
   const [autoClassifiedCount, setAutoClassifiedCount] = useState<number>(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -98,6 +102,7 @@ export function App() {
       setDetailedDocs([])
       setReviewPendingDocs([])
       setCompanies([])
+      setFailedDocs([])
       setAutoClassifiedCount(0)
       setSelectedCategory(null)
       setCurrentView('home')
@@ -120,12 +125,26 @@ export function App() {
       setError(null)
     }
     try {
-      const [tiposData, empresasData, docsAgrupados, reviewData] = await Promise.all([
+      const [tiposData, empresasData, docsAgrupados, reviewData, docsComErro] = await Promise.all([
         apiService.getTipos(),
         apiService.getEmpresas(),
         apiService.getDocumentosAgrupados(undefined, false),
         apiService.getReviewQueue(),
+        apiService.getDocumentosAgrupados(undefined, true),
       ])
+
+      // Documentos em estado 'erro' ficam fora das pastas; o aviso garante que não sumam da tela
+      setFailedDocs(
+        docsComErro.grupos.flatMap((g) =>
+          g.documentos.map((d) => ({
+            id: d.id,
+            loteId: d.lote_id,
+            filename: d.nome_arquivo || `Lote ${d.lote_id}`,
+            paginaIni: d.pagina_ini,
+            paginaFim: d.pagina_fim,
+          }))
+        )
+      )
 
       setCompanies(empresasData)
 
@@ -423,30 +442,14 @@ export function App() {
     }
   }
 
-  // Handle upload completion with background polling until lote finishes processing
-  const handleUploadSuccess = (_filename: string, loteId: number) => {
-    fetchData(true)
+  // Acompanha cada lote enviado até concluido/erro e atualiza a lista a cada consulta
+  const refreshSilently = useCallback(() => fetchData(true), [fetchData])
+  const { lotes: lotesEnviados, track: trackLote, recheck: recheckLote, dismiss: dismissLote } =
+    useLotePolling(refreshSilently)
 
-    let attempts = 0
-    const maxAttempts = 40
-    const interval = setInterval(async () => {
-      attempts += 1
-      try {
-        const loteStatus = await apiService.getLoteStatus(loteId)
-        await fetchData(true)
-        if (
-          loteStatus.estado === 'concluido' ||
-          loteStatus.estado === 'erro' ||
-          attempts >= maxAttempts
-        ) {
-          clearInterval(interval)
-        }
-      } catch {
-        if (attempts >= maxAttempts) {
-          clearInterval(interval)
-        }
-      }
-    }, 1500)
+  const handleUploadSuccess = (filename: string, loteId: number) => {
+    void fetchData(true)
+    trackLote(loteId, filename)
   }
 
   // Active documents for the category view
@@ -497,6 +500,8 @@ export function App() {
 
       {/* Main Content Area */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 relative z-10">
+        <LotesStatusPanel lotes={lotesEnviados} onRecheck={recheckLote} onDismiss={dismissLote} />
+        {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
             <div className="w-12 h-12 border-4 border-[#9333ea] border-t-transparent rounded-full animate-spin"></div>
