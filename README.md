@@ -102,7 +102,7 @@ curl -F "arquivo=@meu_lote.pdf" http://localhost:8000/lotes
 curl http://localhost:8000/lotes/1
 ```
 
-O processamento é assíncrono: repita o `GET /lotes/1` até `"estado":"concluido"` (um lote pequeno leva alguns segundos). A resposta traz os documentos com intervalo de páginas, estado, tipo, confiança e probabilidades. Reenviar o mesmo arquivo não cria outro lote (a identidade é o SHA-256 dos bytes): a API devolve o existente com `"existente":true`.
+O processamento é assíncrono: repita o `GET /lotes/1` até `"estado":"concluido"` (um lote pequeno leva alguns segundos). A resposta traz os documentos com intervalo de páginas, estado, tipo, confiança e probabilidades. Reenviar o mesmo arquivo não cria outro lote (a identidade é o SHA-256 dos bytes): a API devolve o existente com `"existente":true`. Se esse lote estiver em `erro`, o reenvio o reprocessa (volta a `recebido` e a resposta traz `"reprocessando":true`); em `ocr`, `classificando` e `concluido` nada é reprocessado.
 
 Exemplo de resposta (lote de 3 páginas, `CLASSIFICADOR=regras`, resumida):
 
