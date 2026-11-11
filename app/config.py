@@ -40,6 +40,10 @@ SEG_SIM_ALTO = float(os.getenv("SEG_SIM_ALTO", "0.60"))
 # verso com só um carimbo ("PROTOCOLADO" = 11). Valor tirado do lote de ajuste L0001: NÃO calibrado.
 SEG_BRANCO_MAX_ALNUM = int(os.getenv("SEG_BRANCO_MAX_ALNUM", "12"))
 
+# "Página k de N" só vale nas primeiras e últimas SEG_PAG_LINHAS linhas não vazias da página (cabeçalho/rodapé);
+# frase no corpo é ignorada. Valor inicial NÃO calibrado.
+SEG_PAG_LINHAS = int(os.getenv("SEG_PAG_LINHAS", "3"))
+
 # Fronteira ambígua (Goal 1, passo 3): resposta do Jev (probabilidade de "mesmo documento") decidida em código.
 # Valores iniciais NÃO calibrados.
 SEG_LLM_CONTINUA = float(os.getenv("SEG_LLM_CONTINUA", "0.70"))  # >= : continua o documento
