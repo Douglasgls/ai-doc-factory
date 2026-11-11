@@ -74,3 +74,20 @@ def test_reconciliacao_cobre_todas_as_paginas():
     docs = segmentar(textos)
     cobertas = [p for d in docs for p in range(d.pagina_ini, d.pagina_fim + 1)]
     assert cobertas == list(range(1, len(textos) + 1))
+
+
+def _cnpj_texto(cnpj, resto):
+    return f"EMPRESA CNPJ {cnpj} {resto}"
+
+
+def test_documento_aberto_pela_cascata_nao_herda_paginacao_do_anterior():
+    a, b = "11222333000181", "45997418000153"  # CNPJs válidos e diferentes
+    assert segmentacao.validar_cnpj(a) and segmentacao.validar_cnpj(b)
+    textos = [_cnpj_texto(a, "holerite Página 1 de 2"), _cnpj_texto(a, "holerite Página 2 de 2"),
+              _cnpj_texto(b, "atestado médico repouso"), _cnpj_texto(b, "atestado médico Página 2 de 3")]
+    assert iv(segmentar(textos)) == [(1, 2, False), (3, 4, False)]
+
+
+def test_rodape_quebrado_em_duas_linhas():
+    meio = "\n".join(f"linha {i}" for i in range(10))
+    assert paginacao(f"{meio}\nEmpresa X\nPágina 2\nde 3") == (2, 3)

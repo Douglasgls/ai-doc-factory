@@ -35,8 +35,11 @@ def paginacao(texto: str) -> tuple[int, int] | None:
     linhas = [ln for ln in texto.splitlines() if ln.strip()]
     n_lin = config.SEG_PAG_LINHAS
     if len(linhas) > 2 * n_lin:
-        linhas = linhas[:n_lin] + linhas[-n_lin:]
-    achados = [a for ln in linhas for a in _PAGINACAO.findall(ln)]
+        blocos = ["\n".join(linhas[:n_lin]), "\n".join(linhas[-n_lin:])]  # cabeçalho, rodapé
+    else:
+        blocos = ["\n".join(linhas)]
+    # a regex aceita quebra de linha dentro da expressão ("Página 1\nde 3"); vale a última ocorrência
+    achados = [a for b in blocos for a in _PAGINACAO.findall(b)]
     if not achados:
         return None
     k, n = achados[-1]
@@ -117,7 +120,8 @@ def perguntar_llm_mesmo_documento(fim_anterior: str, inicio_atual: str) -> bool 
 
 
 def segmentar(textos: list[str]) -> list[Documento]:
-    """Cascata: branco/carimbo herda -> 'Página k de N' -> CNPJ + TF-IDF -> ambíguo (Jev; sem resposta abre e marca).
+    """Cascata: branco/carimbo herda -> 'Página k de N' (k>1 só continua se coerente com a última página paginada do
+    documento: mesmo N e k maior; senão abre e marca ambíguo) -> CNPJ + TF-IDF -> ambíguo (Jev; sem resposta abre e marca).
 
     Sem paginação: dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento, mesmo com similaridade
     alta (sem perguntar ao Jev); com similaridade alta e algum CNPJ inválido (provável erro de OCR), continua.
@@ -155,6 +159,7 @@ def segmentar(textos: list[str]) -> list[Documento]:
                 inicios.append((i, True))
             pag_doc = pag
         else:
+            abertos = len(inicios)
             sim = _cosseno(vetores[ref], vetores[i])
             conhecidos = cnpjs[ref] is not None and cnpjs[i] is not None
             if conhecidos and cnpjs[ref] != cnpjs[i] and validar_cnpj(cnpjs[ref]) and validar_cnpj(cnpjs[i]):
@@ -171,6 +176,8 @@ def segmentar(textos: list[str]) -> list[Documento]:
                     inicios.append((i, True))
                 elif not mesmo:
                     inicios.append((i, False))
+            if len(inicios) > abertos:
+                pag_doc = None  # documento novo sem paginação legível: não herda a do anterior
         ref = i
     docs = []
     for j, (ini, amb) in enumerate(inicios):
