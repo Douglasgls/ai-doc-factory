@@ -2,11 +2,11 @@
 
 Leia primeiro o `CLAUDE.md`, que é a especificação e as regras de trabalho. O `README.md` explica como rodar e traz os números medidos (seção Resultados).
 
-**Regras principais:** PRs pequenos contra `master`, commits de até ~800 linhas, sem assinatura nos commits, só backend por enquanto, chaves só no `.env` (o repositório é público) e nenhuma métrica sem script rodado.
+**Regras principais:** PRs pequenos contra `master`, commits de até ~800 linhas, sem assinatura nos commits, o `CLAUDE.md` diz só backend por enquanto, mas há um frontend React na `master` (ver Decisões em aberto), chaves só no `.env` (o repositório é público) e nenhuma métrica sem script rodado.
 
 ## Estado da `master`
 
-Conferido no commit `0f497ff`: os 7 serviços sobem em um banco novo e 222 testes passam com `CLASSIFICADOR=regras`, sem rede. Os PRs #1 a #16 e #18 foram mergeados; não há PR aberto do backend.
+O `docker-compose.yml` no commit `645f3f4` define 8 serviços: `postgres`, `redis`, `api`, `worker_ocr_seg`, `worker_classify`, `worker_analise`, `worker_extracao` e `frontend`. A subida dos serviços em banco novo foi conferida no commit `0f497ff` (7 serviços, ainda sem o `frontend`), e não foi repetida no `645f3f4`. No `645f3f4`, em 2026-11-11, `372 passed, 1 skipped` com `CLASSIFICADOR=regras`, sem rede, rodando **fora do Docker** (Postgres e Redis locais, Python 3.13). Pelo `git log`, os merges vão dos PRs #1 a #16 e #18 a #23, #25, #26, #28, #29, #32, #34, #35, #36, #38, #39 e #40 (não consegui verificar PRs abertos).
 
 | Parte | Situação | O que falta |
 |---|---|---|
@@ -18,7 +18,7 @@ Conferido no commit `0f497ff`: os 7 serviços sobem em um banco novo e 222 teste
 | Goal 6: risco da folha de ponto, por folha | Implementado | Conferir a base legal; sem gabarito de divergências |
 | Goal 7: conformidade da empresa prestadora | Implementado | Conferir a extração; prazo do ASO na NR-7 |
 | Upload de PDF, JPEG, PNG e TIFF | Pronto | HEIC e várias imagens por lote estão fora |
-| UI | Fora do escopo | `frontend/` é outro projeto, com o template inicial do Vite |
+| UI | Implementada (React) | `frontend/` com login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa; serviço `frontend` no compose. A UI Streamlit do `CLAUDE.md` não existe. Sem testes automatizados |
 
 ## O que falta, em ordem
 
@@ -38,7 +38,7 @@ O gerador `gerador_sintetico.zip` foi enviado pelo Emmanuel, e outra versão est
 | Treino | `python gerar_lotes.py --saida treino --n-lotes 20 --seed 202` | 204 páginas | Baseline |
 | Teste | `python gerar_lotes.py --saida teste --n-lotes 10 --seed 303` | 97 páginas | Medição final, **já usado** (não reutilizar) |
 
-- Os lotes gerados estão em uma pasta temporária desta sessão: `C:\Users\Deadp\AppData\Local\Temp\claude\54c912630c87047b\372c3078-4da6-4eb5-90c6-0dceca4f0f44\scratchpad\lotes`. Copie-os ou gere de novo, com o `requirements.txt` do gerador e o `poppler-utils`.
+- Os lotes gerados não estão no repositório (estavam em uma pasta temporária que não existe mais). É preciso gerá-los de novo com o gerador, com o `requirements.txt` dele e o `poppler-utils`.
 - Cada conjunto tem seu `anotacoes.csv` e um `documentos.jsonl` com os metadados, que ainda não foi usado e pode servir de gabarito para a extração do Goal 7.
 - Os nomes `L0001`, `L0002` e assim por diante se repetem em cada pasta, e o ID na API é outro. Use `--lote ID_CSV:ID_API` nos scripts.
 - O `L0001.pdf` recebido já foi usado para ajustes e não pode entrar na medição final. Os `L0002` e `L0003` do gabarito colado na conversa não foram gerados.
@@ -80,7 +80,8 @@ O F1 macro foi 1,000 em 9 documentos, o que não diz nada sobre o classificador 
 - **Worker frágil:** um job malformado na fila derruba o worker, sem política de reinício.
 - **Extração lenta:** a fila `extrair_campos` termina depois do lote, então as empresas aparecem aos poucos em `GET /empresas`.
 - **Completude por empresa:** só verifica se existe um documento de cada tipo, não por funcionário.
-- **Sem autenticação, migrações ou CI.**
+- **Sem migrações nem CI.**
+- **Autenticação mínima:** `app/routers/auth/`, login em `POST /auth/login` com JWT e um único administrador (`AUTH_USUARIO`, `AUTH_SENHA`, `AUTH_SEGREDO`); sem papéis nem revogação de token (ver README, "Limitações").
 
 ## Decisões em aberto
 
@@ -89,6 +90,7 @@ O F1 macro foi 1,000 em 9 documentos, o que não diz nada sobre o classificador 
 - **Tolerância de 10 min no intervalo:** não é aplicada; precisa ser conferida.
 - **Ordem de cortes:** os Goals 6 e 7 não têm posição definida.
 - **Frontend:** houve commits direto na `master`. Alinhar com o time, porque o combinado era só backend e passar por PR.
+- **`CLAUDE.md` desatualizado:** ainda diz "por enquanto, só backend" e cita a UI Streamlit e o serviço `ui`, mas a `master` tem o frontend React e o serviço `frontend` no compose. O `CLAUDE.md` não foi alterado; o time precisa decidir se o frontend React substitui o Streamlit e atualizar o arquivo.
 
 ## Pontos de atenção
 

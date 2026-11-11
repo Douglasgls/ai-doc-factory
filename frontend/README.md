@@ -8,12 +8,10 @@ O projeto segue uma arquitetura modular com separação rigorosa de responsabili
 
 ### Estrutura de Pastas
 
-- `src/pages`: Componentes que representam as telas principais da aplicação (HomePage, CategoryPage, ManualReviewPage).
-- `src/components`: Componentes de UI reutilizáveis e modulares (Header, Cards, Modais, etc.).
+- `src/pages`: Componentes que representam as telas principais da aplicação (HomePage, CategoryPage, ManualReviewPage, LoginPage).
+- `src/components`: Componentes de UI reutilizáveis e modulares (Header, Cards, Modais de upload, auditoria de ponto e conformidade da empresa, etc.), com a lógica pura dos modais em `auditoriaPonto.ts` e `conformidadeEmpresa.ts`.
 - `src/services`: Camada de comunicação técnica. Contém o `api.ts` para chamadas ao backend.
-- `src/hooks`: Lógica de estado e efeitos encapsulada para reutilização.
-- `src/utils`: Funções puras, formatadores e processamentos independentes.
-- `src/data`: Dados de inicialização e mocks para desenvolvimento.
+- `src/data`: `mockData.ts`, com dados de exemplo que nenhum arquivo importa hoje (a interface usa a API real).
 - `src/types.ts`: Definições de interfaces e tipos globais (TypeScript).
 
 ## 🛠️ Tecnologias Principais
@@ -42,6 +40,8 @@ As variáveis de ambiente são gerenciadas via arquivo `.env`:
 
 - `VITE_API_URL`: Endereço do servidor backend (ex: http://127.0.0.1:8000).
 - `VITE_API_PREFIX`: Prefixo das rotas (vazio por padrão: a API não usa prefixo).
+
+No Docker, o serviço `frontend` do `docker-compose.yml` recebe os dois como argumentos de build (Nginx na porta `FRONTEND_PORT`, padrão 5173).
 
 O login usa `POST /auth/login`; o token fica em `sessionStorage` e `authFetch` o envia em todas as chamadas.
 
