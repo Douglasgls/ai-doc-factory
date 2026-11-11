@@ -152,11 +152,12 @@ PERGUNTAS_PONTO = {
             "Considerando só `contagens.descanso` (contagens já calculadas), qual situação do descanso semanal de "
             "24 horas descreve a folha? Compare `semanas_sem_descanso_de_24h` com `semanas_completas_avaliadas` (sempre 1 ou mais)."
             + AVISO_ANALISE),
+        # (sem descanso, avaliadas) -> nível: (0,n)->0; (1,1)->1; (1,4)->1; (2,4)->2; (3,4)->2; (2,2)->3; (4,4)->3
         "criteria": [
-            "Nenhuma das semanas completas avaliadas está sem descanso de 24 horas",
-            "Menos da metade das semanas completas avaliadas está sem descanso de 24 horas (por exemplo, 1 de 3)",
-            "Metade ou mais das semanas completas avaliadas, mas não todas, está sem descanso de 24 horas",
-            "Todas as semanas completas avaliadas estão sem descanso de 24 horas, inclusive quando só uma semana foi avaliada",
+            "Nenhuma semana completa avaliada está sem descanso de 24 horas",
+            "Exatamente uma semana completa avaliada está sem descanso de 24 horas, inclusive quando só uma semana foi avaliada",
+            "Mais de uma semana completa avaliada está sem descanso de 24 horas, mas não todas",
+            "Todas as semanas completas avaliadas estão sem descanso de 24 horas, e são duas ou mais",
         ],
     },
     "registro": {

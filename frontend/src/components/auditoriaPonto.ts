@@ -191,3 +191,12 @@ export const agruparDivergencias = (divergencias: Divergencia[]): Grupo[] => {
     }
   })
 }
+
+/** Texto sob o risco geral: avisa que o score é parcial quando alguma dimensão não foi avaliada. */
+export const textoBaseRisco = (scores: AnalisePonto['scores_dimensao']): string => {
+  const total = ORDEM_DIMENSOES.length
+  const naoAvaliadas = ORDEM_DIMENSOES.filter((d) => scores?.[d]?.nao_avaliada).length
+  return naoAvaliadas === 0
+    ? `É o maior risco entre as ${total} dimensões abaixo.`
+    : `É o maior risco entre as ${total - naoAvaliadas} dimensões avaliadas; ${naoAvaliadas} não avaliada${naoAvaliadas > 1 ? 's' : ''}.`
+}

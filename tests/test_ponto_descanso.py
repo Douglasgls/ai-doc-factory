@@ -67,5 +67,5 @@ def test_score_geral_nao_avaliada_nao_entra_no_maximo_nem_forca_revisao():
 def test_niveis_do_descanso_cobrem_uma_semana_avaliada_e_reprovada():
     niveis = prompts.PERGUNTAS_PONTO["descanso"]["criteria"]
     assert len(niveis) == 4 and "nenhuma semana completa pôde ser avaliada" not in " ".join(niveis)
-    assert "só uma semana foi avaliada" in niveis[3]
+    assert "só uma semana foi avaliada" in niveis[1]
     assert prompts.VERSAO_PROMPT_PONTO_JEV == "jev-ponto-v4"
