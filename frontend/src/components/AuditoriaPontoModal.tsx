@@ -12,6 +12,7 @@ import {
   formatarMarca,
   formatarMinutos,
   nivelDeRisco,
+  rotuloSemValor,
   rotuloTipo,
   type AnalisePonto,
   type DiaApurado,
@@ -399,7 +400,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                         >
                           <div className={`text-[10px] ${MUTED}`}>{ROTULO_DIMENSAO[chave]}</div>
                           <div className={`text-sm font-bold ${n ? COR_TEXTO[n] : MUTED}`}>
-                            {pct != null ? `${pct}%` : 'Indeterminada'}
+                            {pct != null ? `${pct}%` : rotuloSemValor(dim)}
                           </div>
                         </div>
                       )

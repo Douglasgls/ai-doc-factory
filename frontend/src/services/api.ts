@@ -162,6 +162,8 @@ export interface ScoreDimensaoPonto {
   n_niveis?: number;
   normalizado?: number | null;
   indeterminada?: boolean;
+  nao_avaliada?: boolean;
+  motivo?: string | null;
 }
 
 export interface TotaisPontoResponse {

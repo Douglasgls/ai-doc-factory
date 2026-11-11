@@ -98,7 +98,8 @@ def test_fluxo_completo_com_mock(doc, rede):
     assert [(d["tipo"], d["data"], d["minutos"]) for d in divs] == [
         ("horas_extras_acima_limite", "2025-11-03", 120), ("intervalo_intrajornada_insuficiente", "2025-11-03", 30)]
     assert all(d["base_legal"] for d in divs) and difs == []
-    assert set(scores) == set(prompts.DIMENSOES_PONTO) and scores["horas_extras"]["normalizado"] == pytest.approx(2 / 3)
+    assert set(scores) == set(prompts.DIMENSOES_PONTO) and scores["descanso"]["nao_avaliada"] is True  # 2 dias: sem semana completa
+    assert scores["horas_extras"]["normalizado"] == pytest.approx(2 / 3)
     assert geral == pytest.approx(2 / 3) and not revisao  # máximo, não média
     assert (mg, mj) == ("gemini-servido-9", "jev-servido-1")  # modelo realmente servido
     assert (vg, vj) == (prompts.VERSAO_PROMPT_PONTO_GEMINI, prompts.VERSAO_PROMPT_PONTO_JEV)
@@ -107,7 +108,7 @@ def test_fluxo_completo_com_mock(doc, rede):
     # uma única requisição ao Jev, com state nomeado e contagens prontas
     assert len(rede["corpos"]["jev"]) == 1
     jev = rede["corpos"]["jev"][0]
-    assert set(jev["state"]) == {"contagens", "analise_gemini"} and set(jev["questions"]) == set(prompts.DIMENSOES_PONTO)
+    assert set(jev["state"]) == {"contagens", "analise_gemini"} and set(jev["questions"]) == set(prompts.DIMENSOES_PONTO) - {"descanso"}
     assert all(q["type"] == "score" for q in jev["questions"].values())
     assert "gemini-analise-teste" in rede["urls"][0]
     # o documento não muda

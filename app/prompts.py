@@ -88,7 +88,7 @@ CRITERIOS_FRONTEIRA = {
 # --- Análise de folha de ponto (Goal 6) ---
 # Mudou qualquer texto abaixo, suba a versão: ela é gravada em analise_ponto.
 VERSAO_PROMPT_PONTO_GEMINI = "gemini-ponto-v2"
-VERSAO_PROMPT_PONTO_JEV = "jev-ponto-v3"
+VERSAO_PROMPT_PONTO_JEV = "jev-ponto-v4"
 
 
 def prompt_gemini_ponto(texto: str, perfil_json: str, tipos: tuple) -> str:
@@ -150,13 +150,13 @@ PERGUNTAS_PONTO = {
         "type": "score",
         "instructions": (
             "Considerando só `contagens.descanso` (contagens já calculadas), qual situação do descanso semanal de "
-            "24 horas descreve a folha? Se nenhuma semana completa foi avaliada, não há descumprimento comprovado."
+            "24 horas descreve a folha? Compare `semanas_sem_descanso_de_24h` com `semanas_completas_avaliadas` (sempre 1 ou mais)."
             + AVISO_ANALISE),
         "criteria": [
-            "Todas as semanas completas avaliadas têm descanso de 24 horas, ou nenhuma semana completa pôde ser avaliada",
-            "Uma semana completa avaliada sem descanso de 24 horas, entre várias avaliadas",
-            "Várias semanas completas avaliadas sem descanso de 24 horas, mas não todas",
-            "Todas as semanas completas avaliadas, e há mais de uma, sem descanso de 24 horas",
+            "Nenhuma das semanas completas avaliadas está sem descanso de 24 horas",
+            "Menos da metade das semanas completas avaliadas está sem descanso de 24 horas (por exemplo, 1 de 3)",
+            "Metade ou mais das semanas completas avaliadas, mas não todas, está sem descanso de 24 horas",
+            "Todas as semanas completas avaliadas estão sem descanso de 24 horas, inclusive quando só uma semana foi avaliada",
         ],
     },
     "registro": {

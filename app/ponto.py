@@ -396,12 +396,15 @@ def comparar_com_gemini(apurado, divergencias_gemini):
 
 # ---------------------------------------------------------------- score
 
-def score_geral(respostas_jev, conf_min=None):
+def score_geral(respostas_jev, conf_min=None, nao_avaliadas=None):
     """Máximo entre as dimensões normalizadas (sem média: problema grave não pode ser diluído).
 
     respostas_jev: {dimensao: {"score": int, "n_niveis": int, "confianca": float}}.
     normalizado = score / (n_niveis - 1). Dimensão com confiança < conf_min fica indeterminada (não entra
     no máximo) e força revisão. Se houver indeterminada, o score geral é um piso; se todas, é None.
+    nao_avaliadas: {dimensao: motivo} das dimensões que o código não mandou ao Jev por falta de dados. Ficam
+    marcadas (nao_avaliada), não entram no máximo e, sozinhas, não forçam revisão (reservada à confiança baixa);
+    o score geral é parcial e a lista vai em "nao_avaliadas".
     """
     conf_min = CONFIG_PONTO["conf_min_dimensao"] if conf_min is None else conf_min
     dims, normalizados = {}, []
@@ -410,14 +413,18 @@ def score_geral(respostas_jev, conf_min=None):
         if n < 2 or not 0 <= s <= n - 1:
             raise ValueError(f"dimensão {nome}: score {s} inválido para {n} níveis")
         if r["confianca"] < conf_min:
-            dims[nome] = {"normalizado": None, "indeterminada": True}
+            dims[nome] = {"normalizado": None, "indeterminada": True, "nao_avaliada": False}
         else:
             v = s / (n - 1)
-            dims[nome] = {"normalizado": v, "indeterminada": False}
+            dims[nome] = {"normalizado": v, "indeterminada": False, "nao_avaliada": False}
             normalizados.append(v)
     indeterminadas = [k for k, v in dims.items() if v["indeterminada"]]
+    for nome, motivo in (nao_avaliadas or {}).items():
+        dims[nome] = {"score": None, "confianca": None, "n_niveis": None, "probabilidades": None,
+                      "normalizado": None, "indeterminada": True, "nao_avaliada": True, "motivo": motivo}
     return {"score_geral": max(normalizados) if normalizados else None, "dimensoes": dims,
-            "indeterminadas": indeterminadas, "requer_revisao": bool(indeterminadas) or not dims}
+            "indeterminadas": indeterminadas, "nao_avaliadas": list(nao_avaliadas or {}),
+            "requer_revisao": bool(indeterminadas) or not respostas_jev}
 
 
 # ---------------------------------------------------------------- contagens para o Jev
