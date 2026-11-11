@@ -39,7 +39,7 @@ export const FailedDocumentsBanner: React.FC<FailedDocumentsBannerProps> = ({ do
             {count === 1 ? '1 documento falhou no processamento' : `${count} documentos falharam no processamento`}
           </h3>
           <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5">
-            Eles não aparecem nas pastas nem na fila de revisão.
+            {count === 1 ? 'Ele não aparece' : 'Eles não aparecem'} nas pastas nem na fila de revisão.
           </p>
         </div>
       </div>

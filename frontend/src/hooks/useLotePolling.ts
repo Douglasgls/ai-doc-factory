@@ -5,7 +5,9 @@ import {
   isEstadoFinal,
   nextPollDelay,
   POLL_INITIAL_MS,
+  shouldRefreshList,
   shouldWarnNetwork,
+  type LoteSnapshot,
   type TrackedLote,
 } from './lotePollingLogic'
 
@@ -13,6 +15,7 @@ interface PollRun {
   startedAt: number
   attempt: number
   errors: number
+  last: LoteSnapshot | null
 }
 
 /**
@@ -45,7 +48,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     (id: number) => {
       const existing = timers.current.get(id)
       if (existing) clearTimeout(existing)
-      const run: PollRun = { startedAt: Date.now(), attempt: 0, errors: 0 }
+      const run: PollRun = { startedAt: Date.now(), attempt: 0, errors: 0, last: null }
       runs.current.set(id, run)
 
       const stale = () => !active.current || runs.current.get(id) !== run
@@ -63,7 +66,10 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
             docsPendentes: status.docs_pendentes,
             networkError: null,
           })
-          await onProgressRef.current()
+          const snapshot: LoteSnapshot = { estado: status.estado, docsPendentes: status.docs_pendentes }
+          const refresh = shouldRefreshList(run.last, snapshot)
+          run.last = snapshot
+          if (refresh) await onProgressRef.current()
           if (isEstadoFinal(status.estado)) {
             runs.current.delete(id)
             return

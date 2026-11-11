@@ -23,6 +23,21 @@ export const hasTimedOut = (startedAt: number, now: number, timeoutMs: number = 
 export const shouldWarnNetwork = (consecutiveErrors: number): boolean =>
   consecutiveErrors >= NETWORK_ERRORS_BEFORE_WARNING
 
+export interface LoteSnapshot {
+  estado: string | null
+  docsPendentes: number | null
+}
+
+/**
+ * Recarregar a lista só quando algo mudou desde a consulta anterior do mesmo lote
+ * (`previous` null = primeira consulta) e sempre ao chegar em estado final.
+ */
+export const shouldRefreshList = (previous: LoteSnapshot | null, next: LoteSnapshot): boolean =>
+  isEstadoFinal(next.estado) ||
+  previous === null ||
+  previous.estado !== next.estado ||
+  previous.docsPendentes !== next.docsPendentes
+
 export type LoteTrackedStatus = 'processando' | 'concluido' | 'erro' | 'timeout'
 
 export interface TrackedLote {
