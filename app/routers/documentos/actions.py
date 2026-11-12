@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from app import config
 from app.anonimizacao import mascarar_campos, mascarar_documentos, mascarar_estrutura
 from app.analise import enfileirar_analise
+from app.eventos import limpar_cancelado
 from app.extracao import enfileirar_extracao
 from app.routers import r
 from app.routers.documentos.schemas import AtualizacaoCampos
@@ -116,7 +117,7 @@ def atualizar_tipo(documento_id: int, revisao: Revisao) -> dict:
     """Corrige o tipo em qualquer estado, exceto 'segmentado' e 'erro'. tipo_original só é gravado se ainda NULL."""
     with psycopg.connect(config.DATABASE_URL) as conn:
         atual = conn.execute(
-            "SELECT estado, tipo FROM documento WHERE id = %s FOR UPDATE", (documento_id,)).fetchone()
+            "SELECT estado, tipo, lote_id FROM documento WHERE id = %s FOR UPDATE", (documento_id,)).fetchone()
         if atual is None:
             raise HTTPException(404, "documento não encontrado")
         if atual[0] in ("segmentado", "erro"):
@@ -125,6 +126,7 @@ def atualizar_tipo(documento_id: int, revisao: Revisao) -> dict:
             "UPDATE documento SET estado = 'revisado', tipo_original = COALESCE(tipo_original, tipo), "
             "tipo = %s, revisor = %s, revisado_em = now() WHERE id = %s",
             (revisao.tipo, revisao.revisor, documento_id))
+    limpar_cancelado(atual[2], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
     if revisao.tipo == "folha_ponto" and atual[1] != "folha_ponto":
         enfileirar_analise(documento_id, r)  # nunca levanta
     enfileirar_extracao(documento_id, r)  # depois do commit; nunca levanta
