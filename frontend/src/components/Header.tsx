@@ -23,6 +23,7 @@ interface HeaderProps {
   onRetryLote?: (id: number) => void
   onRecheckLote?: (id: number) => void
   onDismissLote?: (id: number) => void
+  onDismissAcaoErroLote?: (id: number) => void
   onClearFinishedLotes?: () => void
   onNavigateCategory?: (slug: string) => void
 }
@@ -46,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   onRetryLote = () => {},
   onRecheckLote = () => {},
   onDismissLote = () => {},
+  onDismissAcaoErroLote = () => {},
   onClearFinishedLotes = () => {},
   onNavigateCategory,
 }) => {
@@ -122,6 +124,7 @@ export const Header: React.FC<HeaderProps> = ({
             onRetry={onRetryLote}
             onRecheck={onRecheckLote}
             onDismiss={onDismissLote}
+            onDismissAcaoErro={onDismissAcaoErroLote}
             onClearFinished={onClearFinishedLotes}
             onNavigateCategory={onNavigateCategory}
             onNavigateReview={onOpenReview}

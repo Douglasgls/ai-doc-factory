@@ -51,6 +51,8 @@ export interface TrackedLote {
   docsPendentes: number | null
   timedOut: boolean
   networkError: string | null
+  /** Erro de uma ação do usuário (cancelar/tentar novamente). Não é apagado pelas atualizações de estado do lote. */
+  acaoErro?: string | null
   etapaAtual?: string | null
   mensagemAtual?: string | null
   paginaAtual?: number | null
