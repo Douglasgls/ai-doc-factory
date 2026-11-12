@@ -1,3 +1,5 @@
+import type { DocumentoResponse, LoteEventoProgresso } from '../services/api'
+
 /** Lógica pura do acompanhamento de lotes (sem React), isolada para ser testável. */
 
 export const POLL_INITIAL_MS = 1500
@@ -38,7 +40,7 @@ export const shouldRefreshList = (previous: LoteSnapshot | null, next: LoteSnaps
   previous.estado !== next.estado ||
   previous.docsPendentes !== next.docsPendentes
 
-export type LoteTrackedStatus = 'processando' | 'concluido' | 'erro' | 'timeout'
+export type LoteTrackedStatus = 'processando' | 'concluido' | 'erro' | 'timeout' | 'cancelado'
 
 export interface TrackedLote {
   id: number
@@ -47,11 +49,35 @@ export interface TrackedLote {
   docsPendentes: number | null
   timedOut: boolean
   networkError: string | null
+  etapaAtual?: string | null
+  mensagemAtual?: string | null
+  paginaAtual?: number | null
+  totalPaginas?: number | null
+  totalDocumentos?: number | null
+  documentos?: DocumentoResponse[]
+  historicoEventos?: LoteEventoProgresso[]
+  cancelado?: boolean
+  sseAtivo?: boolean
+  horarioEnvio?: string
 }
 
+const ETAPAS_EM_ANDAMENTO = new Set([
+  'recebido',
+  'ocr',
+  'segmentacao',
+  'classificando',
+  'extracao',
+  'analise_ponto',
+])
+
+export const isEtapaEmAndamento = (etapa: string | null | undefined): boolean =>
+  Boolean(etapa && ETAPAS_EM_ANDAMENTO.has(etapa))
+
 export const trackedStatus = (lote: TrackedLote): LoteTrackedStatus => {
+  if (lote.cancelado || lote.etapaAtual === 'cancelado') return 'cancelado'
   if (lote.estado === 'erro') return 'erro'
-  if (lote.estado === 'concluido') return 'concluido'
   if (lote.timedOut) return 'timeout'
+  if (isEtapaEmAndamento(lote.etapaAtual)) return 'processando'
+  if (lote.estado === 'concluido') return 'concluido'
   return 'processando'
 }

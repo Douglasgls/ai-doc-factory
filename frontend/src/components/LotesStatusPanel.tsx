@@ -44,10 +44,11 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({ lotes, onRec
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[#2d0a33] dark:text-[#f8f5fc] leading-snug break-words">
                   {status === 'erro' && `O processamento do lote ${nome} falhou. Envie o arquivo novamente para reprocessar.`}
+                  {status === 'cancelado' && `O processamento do lote ${nome} foi cancelado pelo usuário.`}
                   {status === 'concluido' && `Lote ${nome} processado.`}
                   {status === 'timeout' && `O lote ${nome} ainda está em processamento.`}
                   {status === 'processando' &&
-                    `Processando o lote ${nome}${lote.estado ? ` (${lote.estado}${lote.docsPendentes ? `, ${lote.docsPendentes} documento(s) pendente(s)` : ''})` : ''}...`}
+                    `Processando o lote ${nome}${lote.mensagemAtual ? ` — ${lote.mensagemAtual}` : lote.estado ? ` (${lote.estado}${lote.docsPendentes ? `, ${lote.docsPendentes} documento(s) pendente(s)` : ''})` : ''}...`}
                 </p>
                 {status === 'timeout' && (
                   <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5">

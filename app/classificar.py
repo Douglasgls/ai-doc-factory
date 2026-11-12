@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 
 from app import config
 from app.analise import enfileirar_analise
+from app.eventos import lote_cancelado, publicar_evento
 from app.roteamento import decidir
 
 TEXTO_MAX = 6000  # caracteres das primeiras páginas enviados ao classificador
@@ -36,13 +37,14 @@ def _imagem_primeira_pagina(lote_id: int, pagina: int) -> bytes | None:
         return None
 
 
-def _fan_in(conn, lote_id: int) -> None:
+def _fan_in(conn, lote_id: int) -> int:
     restantes = conn.execute(
         "UPDATE lote SET docs_pendentes = docs_pendentes - 1 WHERE id = %s RETURNING docs_pendentes",
         (lote_id,),
     ).fetchone()[0]
     if restantes == 0:
         conn.execute("UPDATE lote SET estado = 'concluido' WHERE id = %s", (lote_id,))
+    return restantes
 
 
 def marcar_erro(payload: dict) -> None:
@@ -54,7 +56,14 @@ def marcar_erro(payload: dict) -> None:
             (payload["documento_id"],),
         ).fetchone()
         if row is not None:
-            _fan_in(conn, row[0])
+            restantes = _fan_in(conn, row[0])
+            publicar_evento(
+                row[0],
+                "erro" if restantes > 0 else "concluido",
+                f"Falha ao classificar documento #{payload['documento_id']}.",
+                documento_id=payload["documento_id"],
+                docs_pendentes=restantes,
+            )
 
 
 def classificar_documento(payload: dict) -> None:
@@ -65,8 +74,16 @@ def classificar_documento(payload: dict) -> None:
         ).fetchone()
         if doc is None or doc[0] != "segmentado":
             return  # já decidido ou revisado: job repetido não faz nada
+        if lote_cancelado(doc[2]):
+            return
         textos = [t for (t,) in conn.execute(
             "SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
+    publicar_evento(
+        doc[2],
+        "classificando",
+        f"Classificando documento #{doc_id} (pág. {doc[3]})...",
+        documento_id=doc_id,
+    )
     resultado = _classificar(montar_texto(textos), _imagem_primeira_pagina(doc[2], doc[3]))
     decisao = decidir(resultado.confianca, resultado.tipo, desacordo=resultado.desacordo,
                       segmentacao_ambigua=doc[1])
@@ -81,7 +98,28 @@ def classificar_documento(payload: dict) -> None:
         ).fetchone()
         if row is None:
             return
-        _fan_in(conn, row[0])
+        restantes = _fan_in(conn, row[0])
+    rotulo_tipo = config.TIPOS_INFO.get(decisao.tipo or "", {}).get("nome", decisao.tipo or "Desconhecido")
+    if restantes > 0:
+        publicar_evento(
+            row[0],
+            "classificando",
+            f"Documento #{doc_id}: {rotulo_tipo} ({restantes} pendente(s))",
+            documento_id=doc_id,
+            tipo=decisao.tipo,
+            estado_documento=decisao.estado,
+            docs_pendentes=restantes,
+        )
+    else:
+        publicar_evento(
+            row[0],
+            "extracao",
+            f"Classificação concluída ({rotulo_tipo}) · extraindo campos com IA...",
+            documento_id=doc_id,
+            tipo=decisao.tipo,
+            estado_documento=decisao.estado,
+            docs_pendentes=0,
+        )
     if decisao.estado == "classificado" and decisao.tipo == "folha_ponto":
         enfileirar_analise(doc_id)  # fora do fan-in e da transação; nunca levanta
     # classificado e em_revisao: CNPJ e demais campos não dependem do tipo confirmado

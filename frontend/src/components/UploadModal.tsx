@@ -1,11 +1,12 @@
 import React, { useState } from 'react'
-import { X, UploadCloud, File, CheckCircle2, Loader2, AlertCircle, Trash2 } from 'lucide-react'
+import { X, UploadCloud, File, Loader2, AlertCircle, Trash2 } from 'lucide-react'
 import { apiService } from '../services/api'
 
 interface UploadModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccessUpload: (filename: string, loteId: number) => void
+  onUploadFiles?: (files: File[]) => void
 }
 
 const ACCEPTED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff']
@@ -19,13 +20,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   isOpen,
   onClose,
   onSuccessUpload,
+  onUploadFiles,
 }) => {
   const [files, setFiles] = useState<File[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
-  const [isSuccess, setIsSuccess] = useState(false)
-  const [uploadedCount, setUploadedCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   if (!isOpen) return null
@@ -104,12 +104,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   const handleUpload = async () => {
     if (files.length === 0 || isUploading) return
+
+    // Fecha o modal imediatamente e delega o envio + acompanhamento em tempo real ao painel do Header
+    if (onUploadFiles) {
+      const selected = [...files]
+      setFiles([])
+      setError(null)
+      setIsDragging(false)
+      onClose()
+      onUploadFiles(selected)
+      return
+    }
+
     setIsUploading(true)
     setError(null)
     setUploadProgress({ current: 0, total: files.length })
 
     const remainingFiles = [...files]
-    let successTotal = 0
 
     try {
       for (let i = 0; i < files.length; i++) {
@@ -117,21 +128,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setUploadProgress({ current: i + 1, total: files.length })
         const response = await apiService.uploadLote(currentFile)
         onSuccessUpload(currentFile.name, response.lote_id)
-        successTotal += 1
         remainingFiles.shift()
       }
 
       setIsUploading(false)
       setUploadProgress(null)
-      setUploadedCount(successTotal)
-      setIsSuccess(true)
-
-      setTimeout(() => {
-        setIsSuccess(false)
-        setFiles([])
-        setUploadedCount(0)
-        onClose()
-      }, 1500)
+      setFiles([])
+      onClose()
     } catch (err) {
       setIsUploading(false)
       setUploadProgress(null)
@@ -163,20 +166,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           Arraste e solte um ou vários PDFs/imagens ou clique para selecionar do computador
         </p>
 
-        {isSuccess ? (
-          <div className="my-8 text-center">
-            <CheckCircle2 className="w-14 h-14 mx-auto text-emerald-500 mb-2 animate-bounce" />
-            <h4 className="font-bold text-base text-[#2d0a33] dark:text-white">
-              {uploadedCount > 1
-                ? `${uploadedCount} lotes enviados com sucesso!`
-                : 'Lote enviado com sucesso!'}
-            </h4>
-            <p className="text-xs text-[#6e6378] dark:text-[#9f91a6] mt-1">
-              O pipeline de OCR e IA está processando as páginas.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-5 space-y-4">
+        <div className="mt-5 space-y-4">
             <label
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -305,7 +295,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               </button>
             </div>
           </div>
-        )}
       </div>
     </div>
   )

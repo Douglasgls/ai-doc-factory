@@ -112,6 +112,20 @@ export interface DocumentosAgrupadosResponse {
   grupos: GrupoDocumentoResponse[];
 }
 
+export interface LoteEventoProgresso {
+  lote_id: number;
+  etapa: string;
+  mensagem: string;
+  timestamp: string;
+  pagina_atual?: number;
+  total_paginas?: number;
+  total_documentos?: number;
+  docs_pendentes?: number;
+  documento_id?: number;
+  tipo?: string | null;
+  estado_documento?: string;
+}
+
 export interface LoteStatusResponse {
   id: number;
   nome_arquivo: string;
@@ -119,6 +133,8 @@ export interface LoteStatusResponse {
   docs_pendentes: number;
   empresa_id?: number | null;
   documentos: DocumentoResponse[];
+  ultimo_evento?: LoteEventoProgresso | null;
+  historico_eventos?: LoteEventoProgresso[];
 }
 
 export interface RevisaoItemResponse {
@@ -289,6 +305,90 @@ export const apiService = {
     }
 
     return response.json();
+  },
+
+  /**
+   * Cancela o processamento de um lote em andamento
+   */
+  cancelLote: async (loteId: number): Promise<LoteStatusResponse> => {
+    const response = await authFetch(`/lotes/${loteId}/cancelar`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cancelar lote'));
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Reprocessa um lote que falhou ou foi cancelado a partir do arquivo original salvo no servidor
+   */
+  retryLote: async (loteId: number): Promise<LoteStatusResponse> => {
+    const response = await authFetch(`/lotes/${loteId}/reprocessar`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao reprocessar lote'));
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Assina o stream SSE (Server-Sent Events) de progresso em tempo real de um lote
+   */
+  streamLoteEvents: async (
+    loteId: number,
+    onEvent: (payload: LoteStatusResponse) => void,
+    signal: AbortSignal
+  ): Promise<void> => {
+    const response = await authFetch(`/lotes/${loteId}/eventos`, {
+      headers: { Accept: 'text/event-stream' },
+      signal,
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao conectar ao stream de eventos'));
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (!signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const rawEvent = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+
+          for (const line of rawEvent.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(line.slice(6)) as LoteStatusResponse;
+                onEvent(parsed);
+              } catch {
+                // ignora frame malformado
+              }
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // ignore
+      }
+    }
   },
 
   /**

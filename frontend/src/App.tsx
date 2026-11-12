@@ -6,7 +6,6 @@ import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
-import { LotesStatusPanel } from './components/LotesStatusPanel'
 import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
 import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
@@ -79,8 +78,9 @@ export function App() {
   const [globalSearch, setGlobalSearch] = useState<string>('')
   const [filterType, setFilterType] = useState<FilterType>('todos')
 
-  // Upload modal state
+  // Upload modal & tracker popover state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [isTrackerOpen, setIsTrackerOpen] = useState(false)
 
   // Synchronize dark mode class to <html>
   useEffect(() => {
@@ -442,14 +442,35 @@ export function App() {
     }
   }
 
-  // Acompanha cada lote enviado até concluido/erro e atualiza a lista a cada consulta
+  // Acompanha cada lote enviado via SSE (tempo real) + fallback polling e atualiza a lista
   const refreshSilently = useCallback(() => fetchData(true), [fetchData])
-  const { lotes: lotesEnviados, track: trackLote, recheck: recheckLote, dismiss: dismissLote } =
-    useLotePolling(refreshSilently)
+  const {
+    lotes: lotesEnviados,
+    track: trackLote,
+    uploadFiles: uploadLotes,
+    cancel: cancelLote,
+    retry: retryLote,
+    recheck: recheckLote,
+    dismiss: dismissLote,
+    clearFinished: clearFinishedLotes,
+  } = useLotePolling(refreshSilently)
+
+  const handleNavigateCategoryBySlug = (slug: string) => {
+    const matched = categories.find((c) => c.slug === slug || c.id === slug)
+    if (matched) {
+      handleOpenCategory(matched)
+    }
+  }
 
   const handleUploadSuccess = (filename: string, loteId: number) => {
     void fetchData(true)
     trackLote(loteId, filename)
+    setIsTrackerOpen(true)
+  }
+
+  const handleUploadFiles = (selectedFiles: File[]) => {
+    setIsTrackerOpen(true)
+    uploadLotes(selectedFiles)
   }
 
   // Active documents for the category view
@@ -496,11 +517,20 @@ export function App() {
         }}
         globalSearch={globalSearch}
         onGlobalSearchChange={setGlobalSearch}
+        lotes={lotesEnviados}
+        isTrackerOpen={isTrackerOpen}
+        onToggleTracker={() => setIsTrackerOpen((prev) => !prev)}
+        onMinimizeTracker={() => setIsTrackerOpen(false)}
+        onCancelLote={(id) => void cancelLote(id)}
+        onRetryLote={(id) => void retryLote(id)}
+        onRecheckLote={recheckLote}
+        onDismissLote={dismissLote}
+        onClearFinishedLotes={clearFinishedLotes}
+        onNavigateCategory={handleNavigateCategoryBySlug}
       />
 
       {/* Main Content Area */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 relative z-10">
-        <LotesStatusPanel lotes={lotesEnviados} onRecheck={recheckLote} onDismiss={dismissLote} />
         {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
@@ -575,6 +605,7 @@ export function App() {
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
         onSuccessUpload={handleUploadSuccess}
+        onUploadFiles={handleUploadFiles}
       />
     </div>
   )

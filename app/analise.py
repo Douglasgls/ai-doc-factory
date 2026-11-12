@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 
 from app import config, llm, ponto, prompts
 from app.anonimizacao import anonimizar_texto
+from app.eventos import lote_cancelado, publicar_evento
 
 log = logging.getLogger(__name__)
 
@@ -175,18 +176,38 @@ def analisar_documento(payload: dict) -> None:
                            (doc_id,)).fetchone()
         if doc is None or doc[1] != "folha_ponto" or doc[0] not in ("classificado", "revisado"):
             return  # tipo mudou, documento removido ou ainda não decidido: nada a analisar
+        if lote_cancelado(doc[2]):
+            return
         textos = [t or "" for (t,) in conn.execute(
             "SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
         perfil = ponto.carregar_perfil(conn)
+    publicar_evento(
+        doc[2],
+        "analise_ponto",
+        f"Auditando folha de ponto #{doc_id} (Gemini + CLT + Jev)...",
+        documento_id=doc_id,
+    )
     resultado = analisar("\n".join(textos), _imagens(doc[2], doc[3], doc[4]), perfil)
     resultado["perfil"] = perfil
     with psycopg.connect(config.DATABASE_URL) as conn:
         _gravar(conn, doc_id, "concluida", resultado)  # uma linha por documento: reprocessar substitui
+    publicar_evento(
+        doc[2],
+        "concluido",
+        f"Auditoria da folha de ponto #{doc_id} concluída!",
+        documento_id=doc_id,
+    )
 
 
 def marcar_erro_analise(payload: dict) -> None:
     """ao_esgotar: o job foi para a dlq. Grava a linha como erro (sem sobrescrever documento ou lote)."""
     with psycopg.connect(config.DATABASE_URL) as conn:
-        existe = conn.execute("SELECT 1 FROM documento WHERE id = %s", (payload["documento_id"],)).fetchone()
+        existe = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (payload["documento_id"],)).fetchone()
         if existe:
             _gravar(conn, payload["documento_id"], "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
+            publicar_evento(
+                existe[0],
+                "concluido",
+                f"Auditoria da folha de ponto #{payload['documento_id']} finalizada com alerta.",
+                documento_id=payload["documento_id"],
+            )
