@@ -3,12 +3,13 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.routers.lotes import actions
+from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
 from app.routers.lotes.validations import converter_para_pdf
 
 router = APIRouter(tags=["Lotes"])
 
 
-@router.post("/lotes")
+@router.post("/lotes", response_model=LoteCriadoOut)
 def criar_lote(arquivo: UploadFile = File(...), empresa_id: int | None = Form(None)):
     actions.validar_empresa(empresa_id)  # antes de gravar ou enfileirar qualquer coisa
     dados = arquivo.file.read()
@@ -16,7 +17,7 @@ def criar_lote(arquivo: UploadFile = File(...), empresa_id: int | None = Form(No
     return actions.criar_lote(dados, pdf, arquivo.filename, empresa_id)
 
 
-@router.get("/lotes/{lote_id}")
+@router.get("/lotes/{lote_id}", response_model=LoteOut)
 def obter_lote(lote_id: int):
     return actions.obter_lote(lote_id)
 
