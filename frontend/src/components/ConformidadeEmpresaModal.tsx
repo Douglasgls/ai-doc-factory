@@ -221,31 +221,34 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
     [g]
   )
 
-  // Tipos que estão em análise / revisão pendente
-  const tiposEmAnalise = useMemo(() => {
+  // Tipos confirmados que estão em análise / revisão manual
+  const tiposEmRevisaoConfirmada = useMemo(() => {
     if (!g) return []
     const slugs = new Set<string>()
     for (const p of g.pendencias) {
-      const regra = regraDaPendencia(p)
-      if ((regra === 'pendente_obrigatorio' || regra === 'pendente_revisao') && p.tipo) {
+      if (regraDaPendencia(p) === 'pendente_revisao' && p.tipo) {
         slugs.add(p.tipo)
       }
     }
-    if (dados) {
-      for (const [tipo, aval] of Object.entries(dados.por_tipo)) {
-        if (aval.criterios.completude.pendente && aval.criterios.completude.aplicavel) {
-          slugs.add(tipo)
-        }
+    return [...slugs]
+  }, [g])
+
+  // Tipos obrigatórios que ainda podem ser cobertos por documento pendente de identificação
+  const tiposPendenteObrigatorio = useMemo(() => {
+    if (!g) return []
+    const slugs = new Set<string>()
+    for (const p of g.pendencias) {
+      if (regraDaPendencia(p) === 'pendente_obrigatorio' && p.tipo) {
+        slugs.add(p.tipo)
       }
     }
     return [...slugs]
-  }, [dados, g])
+  }, [g])
 
   const qtdPendenciasRevisao = useMemo(() => {
     if (!g) return 0
-    const rev = g.pendencias.filter((p) => regraDaPendencia(p) === 'pendente_revisao').length
-    return Math.max(rev, tiposEmAnalise.length)
-  }, [g, tiposEmAnalise])
+    return g.pendencias.filter((p) => regraDaPendencia(p) === 'pendente_revisao').length
+  }, [g])
 
   // Título e subtítulo principais do card de nota (100% baseados nos dados reais)
   const { tituloHero, subtituloHero, etiquetaHero } = useMemo(() => {
@@ -328,19 +331,23 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
   // Texto natural para o banner amarelo ("Este resultado ainda pode mudar")
   const textoBannerProvisorio = useMemo(() => {
     if (!g || !g.provisorio) return ''
-    if (tiposEmAnalise.length === 1) {
-      const nomeCurto = rotuloEmFrase(tiposEmAnalise[0], rotulos)
-      return `O ${nomeCurto} está em análise. Quando a revisão terminar, a nota será atualizada automaticamente.`
+    if (tiposEmRevisaoConfirmada.length === 1) {
+      const nomeCurto = rotuloEmFrase(tiposEmRevisaoConfirmada[0], rotulos)
+      return `O ${nomeCurto} está em revisão manual. Quando a conferência terminar, a nota será atualizada automaticamente.`
     }
-    if (tiposEmAnalise.length > 1) {
-      const nomes = listaPt(tiposEmAnalise.map((t) => rotuloEmFrase(t, rotulos)))
-      return `Os documentos (${nomes}) estão em análise. Quando a revisão terminar, a nota será atualizada automaticamente.`
+    if (tiposEmRevisaoConfirmada.length > 1) {
+      const nomes = listaPt(tiposEmRevisaoConfirmada.map((t) => rotuloEmFrase(t, rotulos)))
+      return `Os documentos (${nomes}) estão em revisão manual. Quando a conferência terminar, a nota será atualizada automaticamente.`
+    }
+    if (tiposPendenteObrigatorio.length > 0) {
+      const nomes = listaPt(tiposPendenteObrigatorio.map((t) => rotuloEmFrase(t, rotulos)))
+      return `Há documentos em processamento que podem corresponder a ${nomes}. A nota será recalculada após a identificação.`
     }
     return (
       motivos[0] ||
-      'Há documentos em análise. Quando a revisão terminar, a nota será atualizada automaticamente.'
+      'Há documentos em análise ou revisão. Quando o processamento terminar, a nota será atualizada automaticamente.'
     )
-  }, [g, motivos, rotulos, tiposEmAnalise])
+  }, [g, motivos, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio])
 
   // Cards da seção "1. O que você precisa fazer"
   const cardsAcao = useMemo<CardAcao[]>(() => {
@@ -359,18 +366,30 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
       })
     }
 
-    if (tiposEmAnalise.length > 0 || qtdPendenciasRevisao > 0) {
+    if (qtdPendenciasRevisao > 0 || tiposEmRevisaoConfirmada.length > 0) {
       const nomeUnico =
-        tiposEmAnalise.length === 1 ? rotuloEmFrase(tiposEmAnalise[0], rotulos) : null
+        tiposEmRevisaoConfirmada.length === 1 ? rotuloEmFrase(tiposEmRevisaoConfirmada[0], rotulos) : null
       lista.push({
         chave: 'em_analise',
         icone: 'relogio',
         cor: 'ambar',
         titulo: nomeUnico
-          ? `Acompanhe a análise do ${nomeUnico}`
-          : 'Acompanhe os documentos em análise',
-        descricao: 'Não é preciso fazer nada agora. Avisaremos quando a análise terminar.',
-        badge: 'Aguardando',
+          ? `Acompanhe a revisão do ${nomeUnico}`
+          : 'Acompanhe os documentos em revisão manual',
+        descricao: 'Não é preciso fazer nada agora. Avisaremos quando a revisão terminar.',
+        badge: 'Em revisão',
+      })
+    }
+
+    if (tiposPendenteObrigatorio.length > 0 && tiposEmRevisaoConfirmada.length === 0) {
+      const nomes = listaPt(tiposPendenteObrigatorio.map((t) => rotuloEmFrase(t, rotulos)))
+      lista.push({
+        chave: 'aguardando_identificacao',
+        icone: 'relogio',
+        cor: 'ambar',
+        titulo: 'Aguarde a identificação de novos documentos',
+        descricao: `Documentos enviados podem cobrir ${nomes}. A conformidade será atualizada após o reconhecimento.`,
+        badge: 'Processando',
       })
     }
 
@@ -403,12 +422,19 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
     }
 
     return lista
-  }, [ausentes, divergentes, g, qtdPendenciasRevisao, rotulos, tiposEmAnalise, vencidos])
+  }, [ausentes, divergentes, g, qtdPendenciasRevisao, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio, vencidos])
 
   // Fórmula e explicação do "Cálculo atual"
   const { textoCalculo, formulaCalculo } = useMemo(() => {
     if (!g) return { textoCalculo: '', formulaCalculo: '' }
-    const scoreFinal = g.score ?? 0
+    if (g.score == null) {
+      return {
+        textoCalculo:
+          'O cálculo da nota ainda não está disponível porque há documentos em análise ou revisão manual.',
+        formulaCalculo: 'Aguardando análise',
+      }
+    }
+    const scoreFinal = g.score
     if (g.descontos.length === 0) {
       return {
         textoCalculo: 'A nota parte de 100 e não possui nenhum desconto aplicado.',
@@ -455,9 +481,14 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
       const temDivergencia = g.descontos.some(
         (d) => d.tipo === tipo && d.regra === 'campo_divergente'
       )
+      const emRevisaoConfirmada = tiposEmRevisaoConfirmada.includes(tipo)
+      const podeSerIdentificado = tiposPendenteObrigatorio.includes(tipo) || comp.pendente
 
-      if (comp.pendente || tiposEmAnalise.includes(tipo)) {
-        return { ordem: 1, statusLabel: 'Em análise', statusTipo: 'analise' }
+      if (emRevisaoConfirmada) {
+        return { ordem: 1, statusLabel: 'Em revisão', statusTipo: 'analise' }
+      }
+      if (podeSerIdentificado && qtd === 0) {
+        return { ordem: 1, statusLabel: 'Aguardando identificação', statusTipo: 'analise' }
       }
       if (temVencido) {
         return { ordem: 2, statusLabel: 'Vencido', statusTipo: 'problema' }
@@ -478,7 +509,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
         ...mapearStatus(tipo, aval),
       }))
       .sort((a, b) => a.ordem - b.ordem)
-  }, [dados, g, rotulos, tiposEmAnalise])
+  }, [dados, g, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio])
 
   const cnpjFormatado = formatarCnpjVisual(cnpj)
   const subtituloEmpresa =
