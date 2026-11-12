@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
-import ConformidadeEmpresaModal from '../components/ConformidadeEmpresaModal'
+import ConformidadeEmpresaModal, { formatarCnpjVisual } from '../components/ConformidadeEmpresaModal'
 import { ManualReviewBanner } from '../components/ManualReviewBanner'
 import { MetricsCard } from '../components/MetricsCard'
 import { FilterBar, type FilterType } from '../components/FilterBar'
@@ -161,7 +161,9 @@ const HomePage: React.FC<HomePageProps> = ({
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-[#6e6378] dark:text-[#a093a8] font-mono">{company.cnpj}</td>
+                    <td className="px-6 py-4 text-sm text-[#6e6378] dark:text-[#a093a8] font-mono">
+                      {formatarCnpjVisual(company.cnpj)}
+                    </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                         company.classificacao == null ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' :
