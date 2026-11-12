@@ -24,6 +24,139 @@ interface PollRun {
 }
 
 const SESSION_STORAGE_KEY = 'evidocs_tracked_lotes_v1'
+const IDB_NAME = 'evidocs_pending_uploads_db_v1'
+const IDB_STORE = 'pending_files'
+
+function abrirBancoArquivos(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(IDB_NAME, 1)
+      req.onupgradeneeded = () => {
+        const db = req.result
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE)
+        }
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+async function salvarArquivoPendente(id: number, file: File): Promise<void> {
+  const db = await abrirBancoArquivos()
+  if (!db) return
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).put(file, String(id))
+      tx.oncomplete = () => {
+        db.close()
+        resolve()
+      }
+      tx.onerror = () => {
+        db.close()
+        resolve()
+      }
+    } catch {
+      db.close()
+      resolve()
+    }
+  })
+}
+
+async function carregarArquivoPendente(id: number): Promise<File | null> {
+  const db = await abrirBancoArquivos()
+  if (!db) return null
+  return new Promise<File | null>((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readonly')
+      const req = tx.objectStore(IDB_STORE).get(String(id))
+      req.onsuccess = () => {
+        const result = req.result
+        db.close()
+        resolve(result instanceof File ? result : null)
+      }
+      req.onerror = () => {
+        db.close()
+        resolve(null)
+      }
+    } catch {
+      db.close()
+      resolve(null)
+    }
+  })
+}
+
+async function removerArquivoPendente(id: number): Promise<void> {
+  const db = await abrirBancoArquivos()
+  if (!db) return
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).delete(String(id))
+      tx.oncomplete = () => {
+        db.close()
+        resolve()
+      }
+      tx.onerror = () => {
+        db.close()
+        resolve()
+      }
+    } catch {
+      db.close()
+      resolve()
+    }
+  })
+}
+
+async function limparArquivosPendentes(): Promise<void> {
+  const db = await abrirBancoArquivos()
+  if (!db) return
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).clear()
+      tx.oncomplete = () => {
+        db.close()
+        resolve()
+      }
+      tx.onerror = () => {
+        db.close()
+        resolve()
+      }
+    } catch {
+      db.close()
+      resolve()
+    }
+  })
+}
+
+function solicitarArquivoParaReenvio(): Promise<File | null> {
+  if (typeof document === 'undefined') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.pdf,image/png,image/jpeg,image/webp'
+    input.style.display = 'none'
+    let settled = false
+    const finish = (file: File | null) => {
+      if (settled) return
+      settled = true
+      input.remove()
+      resolve(file)
+    }
+    input.addEventListener('change', () => {
+      finish(input.files?.[0] ?? null)
+    })
+    input.addEventListener('cancel', () => finish(null))
+    document.body.appendChild(input)
+    input.click()
+  })
+}
 
 function carregarLotesSessao(): TrackedLote[] {
   try {
@@ -133,7 +266,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         attempt: 0,
         errors: 0,
         last: initialSnapshot,
-        lastEtapa: initialSnapshot?.estado ?? null,
+        lastEtapa: initialSnapshot?.etapaAtual ?? initialSnapshot?.estado ?? null,
         abortController,
       }
       runs.current.set(id, run)
@@ -210,7 +343,11 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         }
         if (stale()) return
         const ultimoEstado = run.last?.estado
-        if (isEstadoFinal(ultimoEstado) && !isEtapaEmAndamento(ultimaEtapaRecebida)) {
+        if (
+          ultimaEtapaRecebida !== null &&
+          isEstadoFinal(ultimoEstado) &&
+          !isEtapaEmAndamento(ultimaEtapaRecebida)
+        ) {
           patch(id, { sseAtivo: false })
           runs.current.delete(id)
           return
@@ -269,6 +406,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         (file, idx) => {
           const tempId = baseTempId - idx
           filesMap.current.set(tempId, file)
+          void salvarArquivoPendente(tempId, file)
           return {
             tempId,
             file,
@@ -307,6 +445,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
               const realId = response.lote_id
               const estadoInicial = response.estado || 'recebido'
               filesMap.current.delete(tempId)
+              void removerArquivoPendente(tempId)
               filesMap.current.set(realId, file)
               setLotes((prev) => {
                 const semDuplicado = prev.filter((l) => l.id !== realId || l.id === tempId)
@@ -347,7 +486,11 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         if (!active.current || idsParaAcompanhar.length === 0) return
         await onProgressRef.current()
         for (const { id: realId, estadoInicial } of idsParaAcompanhar) {
-          startPolling(realId, { estado: estadoInicial, docsPendentes: null })
+          startPolling(realId, {
+            estado: estadoInicial,
+            docsPendentes: null,
+            etapaAtual: estadoInicial === 'concluido' ? 'concluido' : 'recebido',
+          })
         }
       })()
     },
@@ -357,25 +500,51 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   /** Retoma o acompanhamento de um lote que passou do teto de tempo. */
   const recheck = useCallback(
     (id: number) => {
+      const loteAtual = lotes.find((l) => l.id === id)
       patch(id, { timedOut: false, networkError: null })
-      startPolling(id)
+      startPolling(
+        id,
+        loteAtual
+          ? {
+              estado: loteAtual.estado,
+              docsPendentes: loteAtual.docsPendentes,
+              etapaAtual: loteAtual.etapaAtual ?? loteAtual.estado,
+            }
+          : null
+      )
     },
-    [patch, startPolling]
+    [lotes, patch, startPolling]
   )
 
   /** Reenvia ou reprocessa um lote que está efetivamente em erro ou cancelado. */
   const retry = useCallback(
     async (id: number) => {
       const loteAtual = lotes.find((l) => l.id === id)
-      if (loteAtual && loteAtual.estado === 'concluido') {
+      if (loteAtual && trackedStatus(loteAtual) === 'concluido') {
         return
       }
       stopOne(id)
-      const fileInMemory = filesMap.current.get(id)
 
-      // Se o lote falhou antes mesmo de receber um ID do servidor (id <= 0) e temos o File em memória
-      if (id <= 0 && fileInMemory) {
+      // Se o lote falhou antes de receber um ID do servidor (id <= 0), recupera o File da memória,
+      // do IndexedDB (após F5) ou solicita o arquivo ao usuário como último recurso
+      if (id <= 0) {
+        let fileToUpload = filesMap.current.get(id) ?? (await carregarArquivoPendente(id))
+        if (!fileToUpload) {
+          fileToUpload = await solicitarArquivoParaReenvio()
+        }
+        if (!fileToUpload) {
+          patch(id, {
+            estado: 'erro',
+            etapaAtual: 'erro',
+            sseAtivo: false,
+            mensagemAtual: 'Selecione o arquivo novamente para reenviar.',
+          })
+          return
+        }
+        filesMap.current.set(id, fileToUpload)
+        void salvarArquivoPendente(id, fileToUpload)
         patch(id, {
+          nome: fileToUpload.name || loteAtual?.nome || `documento_${Math.abs(id)}.pdf`,
           estado: 'recebido',
           etapaAtual: 'recebido',
           cancelado: false,
@@ -385,11 +554,12 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
           mensagemAtual: 'Reenviando arquivo para análise...',
         })
         try {
-          const response = await apiService.uploadLote(fileInMemory)
+          const response = await apiService.uploadLote(fileToUpload)
           const realId = response.lote_id
           const estadoInicial = response.estado || 'recebido'
           filesMap.current.delete(id)
-          filesMap.current.set(realId, fileInMemory)
+          void removerArquivoPendente(id)
+          filesMap.current.set(realId, fileToUpload)
           setLotes((prev) => {
             const semDuplicado = prev.filter((l) => l.id !== realId || l.id === id)
             return semDuplicado.map((l) =>
@@ -397,6 +567,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
                 ? {
                     ...l,
                     id: realId,
+                    nome: fileToUpload.name || l.nome,
                     estado: estadoInicial,
                     etapaAtual: estadoInicial === 'concluido' ? 'concluido' : 'recebido',
                     cancelado: false,
@@ -406,7 +577,11 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
             )
           })
           await onProgressRef.current()
-          startPolling(realId, { estado: estadoInicial, docsPendentes: null })
+          startPolling(realId, {
+            estado: estadoInicial,
+            docsPendentes: null,
+            etapaAtual: estadoInicial === 'concluido' ? 'concluido' : 'recebido',
+          })
         } catch (err) {
           patch(id, {
             estado: 'erro',
@@ -418,8 +593,6 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         }
         return
       }
-
-      if (id <= 0) return
 
       // Lote registrado no servidor em estado 'erro': aciona POST /lotes/{id}/reprocessar
       patch(id, {
@@ -435,7 +608,11 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
       try {
         const updated = await apiService.retryLote(id)
         await onProgressRef.current()
-        startPolling(id, { estado: updated.estado, docsPendentes: updated.docs_pendentes })
+        startPolling(id, {
+          estado: updated.estado,
+          docsPendentes: updated.docs_pendentes,
+          etapaAtual: updated.ultimo_evento?.etapa ?? updated.estado,
+        })
       } catch (err) {
         patch(id, {
           estado: loteAtual?.estado ?? 'erro',
@@ -500,13 +677,24 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     (id: number) => {
       stopOne(id)
       filesMap.current.delete(id)
+      if (id <= 0) {
+        void removerArquivoPendente(id)
+      }
       setLotes((prev) => prev.filter((l) => l.id !== id))
     },
     [stopOne]
   )
 
   const clearFinished = useCallback(() => {
-    setLotes((prev) => prev.filter((l) => trackedStatus(l) === 'processando'))
+    setLotes((prev) => {
+      prev.forEach((l) => {
+        if (trackedStatus(l) !== 'processando' && l.id <= 0) {
+          filesMap.current.delete(l.id)
+          void removerArquivoPendente(l.id)
+        }
+      })
+      return prev.filter((l) => trackedStatus(l) === 'processando')
+    })
   }, [])
 
   // Persiste a lista de lotes no sessionStorage para sobreviver ao F5
@@ -527,6 +715,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     const handleExpired = () => {
       stopAll()
       filesMap.current.clear()
+      void limparArquivosPendentes()
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
       setLotes([])
     }
@@ -538,13 +727,23 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     }
   }, [stopAll])
 
-  // Ao montar (ex: após F5), retoma o acompanhamento para lotes que estavam em andamento na sessão
+  // Ao montar (ex: após F5), retoma o acompanhamento para lotes em andamento e hidrata arquivos pendentes (id <= 0)
   useEffect(() => {
     if (resumedOnMount.current) return
     resumedOnMount.current = true
     lotes.forEach((lote) => {
-      if (lote.id > 0 && trackedStatus(lote) === 'processando') {
-        startPolling(lote.id, { estado: lote.estado, docsPendentes: lote.docsPendentes })
+      if (lote.id <= 0) {
+        void carregarArquivoPendente(lote.id).then((file) => {
+          if (file) {
+            filesMap.current.set(lote.id, file)
+          }
+        })
+      } else if (trackedStatus(lote) === 'processando') {
+        startPolling(lote.id, {
+          estado: lote.estado,
+          docsPendentes: lote.docsPendentes,
+          etapaAtual: lote.etapaAtual ?? lote.estado,
+        })
       }
     })
   }, [lotes, startPolling])

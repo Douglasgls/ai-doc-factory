@@ -30,6 +30,7 @@ export const shouldWarnNetwork = (consecutiveErrors: number): boolean =>
 export interface LoteSnapshot {
   estado: string | null
   docsPendentes: number | null
+  etapaAtual?: string | null
 }
 
 /**
@@ -75,11 +76,11 @@ export const isEtapaEmAndamento = (etapa: string | null | undefined): boolean =>
   Boolean(etapa && ETAPAS_EM_ANDAMENTO.has(etapa))
 
 export const trackedStatus = (lote: TrackedLote): LoteTrackedStatus => {
+  if (lote.cancelado || lote.etapaAtual === 'cancelado') return 'cancelado'
+  if (lote.estado === 'erro' || lote.etapaAtual === 'erro') return 'erro'
+  if (lote.timedOut) return 'timeout'
   if (lote.estado === 'concluido') {
     return isEtapaEmAndamento(lote.etapaAtual) ? 'processando' : 'concluido'
   }
-  if (lote.cancelado || lote.etapaAtual === 'cancelado') return 'cancelado'
-  if (lote.estado === 'erro') return 'erro'
-  if (lote.timedOut) return 'timeout'
   return 'processando'
 }

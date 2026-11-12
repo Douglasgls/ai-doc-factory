@@ -144,21 +144,42 @@ def caminho_imagem_pagina(lote_id: int, numero: int) -> Path:
     return png
 
 
+def _ha_pos_processamento_pendente(conn, lote_id: int, docs_pendentes: int = 0) -> bool:
+    """Verifica o estado real do processamento do lote (Redis + Postgres), identificando se ainda há
+    documentos em classificação, extração de campos ou análise de folha de ponto em andamento."""
+    if (docs_pendentes or 0) > 0:
+        return True
+    if tarefas_pos_pendentes(lote_id, r):
+        return True
+    ultimo, _ = obter_progresso_lote(lote_id, r)
+    etapa_atual = (ultimo or {}).get("etapa", "")
+    if etapa_atual in ("extracao", "analise_ponto"):
+        return True
+    pendente_db = conn.execute(
+        "SELECT 1 FROM documento d "
+        "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
+        "WHERE d.lote_id = %s AND ("
+        "  d.estado = 'segmentado' "
+        "  OR (d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
+        "      AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')))"
+        ") LIMIT 1",
+        (lote_id,),
+    ).fetchone()
+    return pendente_db is not None
+
+
 def cancelar_lote(lote_id: int) -> dict:
     """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação),
     marcando-o como 'erro' e sinalizando aos workers. Rejeita com 409 se o lote já estiver totalmente finalizado."""
     with psycopg.connect(config.DATABASE_URL) as conn:
-        lote = conn.execute("SELECT id, estado FROM lote WHERE id = %s FOR UPDATE", (lote_id,)).fetchone()
+        lote = conn.execute(
+            "SELECT id, estado, docs_pendentes FROM lote WHERE id = %s FOR UPDATE",
+            (lote_id,),
+        ).fetchone()
         if lote is None:
             raise HTTPException(404, "lote não encontrado")
         if lote[1] == "concluido":
-            ultimo, _ = obter_progresso_lote(lote_id, r)
-            etapa_atual = (ultimo or {}).get("etapa", "")
-            pos_em_andamento = bool(tarefas_pos_pendentes(lote_id, r)) or etapa_atual in (
-                "extracao",
-                "analise_ponto",
-            )
-            if not pos_em_andamento:
+            if not _ha_pos_processamento_pendente(conn, lote_id, lote[2]):
                 raise HTTPException(409, "lote já concluído não pode ser cancelado")
             tem_revisao = conn.execute(
                 "SELECT 1 FROM documento WHERE lote_id = %s AND estado = 'revisado' LIMIT 1",

@@ -429,9 +429,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                 lote.totalDocumentos ?? (lote.documentos ? lote.documentos.length : 0)
               const badgeLabel = obterBadgeEtapa(lote)
               const { labelCategoria, slugCategoria, emRevisao } = resolverDestinoLote(lote)
-              const podeTentarNovamente =
-                (status === 'erro' || status === 'cancelado') &&
-                lote.estado !== 'concluido'
+              const podeTentarNovamente = status === 'erro' || status === 'cancelado'
 
               return (
                 <div key={lote.id} className="py-3.5">

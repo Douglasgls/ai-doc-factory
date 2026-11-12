@@ -114,6 +114,10 @@ def classificar_documento(payload: dict) -> None:
     resultado = _classificar(montar_texto(textos), _imagem_primeira_pagina(doc[2], doc[3]))
     decisao = decidir(resultado.confianca, resultado.tipo, desacordo=resultado.desacordo,
                       segmentacao_ambigua=doc[1])
+    vai_analisar_ponto = decisao.estado == "classificado" and decisao.tipo == "folha_ponto"
+    tarefas = [f"extracao:{doc_id}"]
+    if vai_analisar_ponto:
+        tarefas.append(f"analise:{doc_id}")
     with psycopg.connect(config.DATABASE_URL) as conn:  # transação única: gravação + fan-in
         if lote_cancelado(doc[2]):
             _abortar_se_cancelado(conn, doc[2])
@@ -129,13 +133,9 @@ def classificar_documento(payload: dict) -> None:
         ).fetchone()
         if row is None:
             return
+        registrar_tarefas_pos(row[0], tarefas)
         restantes = _fan_in(conn, row[0])
     lote_id = row[0]
-    vai_analisar_ponto = decisao.estado == "classificado" and decisao.tipo == "folha_ponto"
-    tarefas = [f"extracao:{doc_id}"]
-    if vai_analisar_ponto:
-        tarefas.append(f"analise:{doc_id}")
-    registrar_tarefas_pos(lote_id, tarefas)
     rotulo_tipo = config.TIPOS_INFO.get(decisao.tipo or "", {}).get("nome", decisao.tipo or "Desconhecido")
     if restantes > 0:
         publicar_evento(
