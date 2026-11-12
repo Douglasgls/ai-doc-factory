@@ -136,7 +136,7 @@ Com `CLASSIFICADOR=regras` no `.env`, a classificação usa palavras-chave (`app
 
 ### 6. Mudança de schema e dados locais
 
-O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo.
+O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo. A `0002_modelo_acesso` cria as tabelas `tomador`, `prestador`, `contrato` e `usuario` (base do futuro controle de acesso por organização); a aplicação ainda não as usa.
 
 Criar uma nova revisão (dentro do container, o arquivo gerado fica na imagem; copie-o para `migrations/versions/` do repositório):
 

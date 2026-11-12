@@ -18,6 +18,11 @@ TIPOS = tuple(TIPOS_INFO)
 # não é uma classe válida para a correção humana.
 TIPO_DESCONHECIDO = "desconhecido"
 
+# Vocabulário do modelo de acesso. Precisa bater com os CHECKs de `usuario.nivel` e `usuario.papel`
+# na migração 0002_modelo_acesso (tests/test_modelo_acesso.py confere contra o banco).
+NIVEIS_ACESSO = ("plataforma", "tomador", "prestador")
+PAPEIS = ("admin", "membro")
+
 CONF_AUTO = float(os.getenv("CONF_AUTO", "0.85"))
 CONF_MIN = float(os.getenv("CONF_MIN", "0.50"))
 
