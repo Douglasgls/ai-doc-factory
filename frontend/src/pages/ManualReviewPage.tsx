@@ -394,9 +394,18 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   onApprove,
   availableCategories,
 }) => {
-  // Garante que os mais recentes (maior ID) apareçam sempre no topo
+  // Ordena prioritariamente pelo timestamp de processamento (mais recente primeiro)
+  // e utiliza o id como critério de desempate secundário
   const sortedDocuments = useMemo(
-    () => [...documents].sort((a, b) => Number(b.id) - Number(a.id)),
+    () =>
+      [...documents].sort((a, b) => {
+        const timeA = a.processedTimestamp ?? 0
+        const timeB = b.processedTimestamp ?? 0
+        if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+          return timeB - timeA
+        }
+        return Number(b.id) - Number(a.id)
+      }),
     [documents]
   )
 
