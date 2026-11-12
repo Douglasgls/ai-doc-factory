@@ -1,14 +1,50 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Header } from './components/Header'
 import { BackgroundWave } from './components/BackgroundWave'
 import { UploadModal } from './components/UploadModal'
 import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
-import ManualReviewPage from './pages/ManualReviewPage'
+import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
-import { apiService, authToken, AUTH_EXPIRED_EVENT } from './services/api'
+import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
+import { LotesStatusPanel } from './components/LotesStatusPanel'
+import { trackedStatus } from './hooks/lotePollingLogic'
+import { useLotePolling } from './hooks/useLotePolling'
+import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
+
+function formatDatePtBr(isoString?: string | null): string {
+  if (!isoString) return new Date().toLocaleDateString('pt-BR')
+  const parsed = new Date(isoString)
+  if (Number.isNaN(parsed.getTime())) return new Date().toLocaleDateString('pt-BR')
+  return parsed.toLocaleDateString('pt-BR')
+}
+
+function formatTimeAgo(isoString?: string | null): string {
+  if (!isoString) return 'Recentemente'
+  const parsed = new Date(isoString)
+  if (Number.isNaN(parsed.getTime())) return 'Recentemente'
+  const diffMs = Date.now() - parsed.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes < 1) return 'Agora mesmo'
+  if (diffMinutes < 60) return `Há ${diffMinutes} min`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `Há ${diffHours}h`
+  const diffDays = Math.floor(diffHours / 24)
+  return diffDays === 1 ? 'Há 1 dia' : `Há ${diffDays} dias`
+}
+
+function normalizeCampoKey(rawKey: string): string {
+  return rawKey
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+}
 
 export function App() {
   // Theme state: defaults to true (Dark Mode)
@@ -31,6 +67,8 @@ export function App() {
   const [detailedDocs, setDetailedDocs] = useState<DetailedDocument[]>([])
   const [reviewPendingDocs, setReviewPendingDocs] = useState<ReviewPendingDocument[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
+  const [failedDocs, setFailedDocs] = useState<FailedDocument[]>([])
+  const [autoClassifiedCount, setAutoClassifiedCount] = useState<number>(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,8 +80,9 @@ export function App() {
   const [globalSearch, setGlobalSearch] = useState<string>('')
   const [filterType, setFilterType] = useState<FilterType>('todos')
 
-  // Upload modal state
+  // Upload modal & tracker popover state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [isTrackerOpen, setIsTrackerOpen] = useState(false)
 
   // Synchronize dark mode class to <html>
   useEffect(() => {
@@ -65,6 +104,8 @@ export function App() {
       setDetailedDocs([])
       setReviewPendingDocs([])
       setCompanies([])
+      setFailedDocs([])
+      setAutoClassifiedCount(0)
       setSelectedCategory(null)
       setCurrentView('home')
       setIsUploadModalOpen(false)
@@ -79,98 +120,186 @@ export function App() {
   }
 
   // Fetch data from backend
-  useEffect(() => {
+  const fetchData = useCallback(async (silent: boolean = false) => {
     if (!isAuthenticated) return
-    const fetchData = async () => {
+    if (!silent) {
       setIsLoading(true)
       setError(null)
-      try {
-        const [empresasData, docsAgrupados] = await Promise.all([
-          apiService.getEmpresas(),
-          apiService.getDocumentosAgrupados()
-        ])
+    }
+    try {
+      const [tiposData, empresasData, docsAgrupados, reviewData, docsComErro] = await Promise.all([
+        apiService.getTipos(),
+        apiService.getEmpresas(),
+        apiService.getDocumentosAgrupados(undefined, false),
+        apiService.getReviewQueue(),
+        apiService.getDocumentosAgrupados(undefined, true),
+      ])
 
-        setCompanies(empresasData)
-
-        // Map backend groups to DocumentCategory
-        const mappedCategories: DocumentCategory[] = docsAgrupados.grupos.map((g: any) => {
-          const id = g.tipo || 'desconhecido'
-          const icons: Record<string, DocumentCategory['icon']> = {
-            cnh: 'car',
-            cpf: 'hash',
-            rg: 'idcard',
-            folha_ponto: 'file',
-            holerite: 'briefcase',
-            residencia: 'home',
-          }
-
-          return {
-            id,
-            name: id.toUpperCase().replace('_', ' '),
-            slug: id,
-            count: g.total,
-            totalPercentage: 0, // Will be calculated after
-            icon: icons[id] || 'file'
-          }
-        })
-
-        const totalDocs = mappedCategories.reduce((acc, cat) => acc + cat.count, 0)
-        const categoriesWithPercentage = mappedCategories.map(cat => ({
-          ...cat,
-          totalPercentage: totalDocs > 0 ? Math.round((cat.count / totalDocs) * 100) : 0
-        }))
-
-        setCategories(categoriesWithPercentage)
-
-        // Flatten all documents from groups
-        const allDocs: DetailedDocument[] = docsAgrupados.grupos.flatMap((g: any) => 
-          g.documentos.map((d: any) => ({
-            id: String(d.id),
-            filename: d.nome_arquivo,
-            category: d.tipo || 'desconhecido',
-            personName: d.pessoa || 'Não identificado',
-            pages: d.n_paginas,
-            processedDate: new Date(d.processado_em).toLocaleDateString('pt-BR'),
-            confidence: d.confianca,
-            metadata: {
-              registrationNumber: d.campos?.numero_registro || d.campos?.cpf || '',
-              categoryType: d.campos?.categoria || '',
-              expirationDate: d.campos?.data_vencimento || '',
-            }
+      // Documentos em estado 'erro' ficam fora das pastas; o aviso garante que não sumam da tela
+      setFailedDocs(
+        docsComErro.grupos.flatMap((g) =>
+          g.documentos.map((d) => ({
+            id: d.id,
+            loteId: d.lote_id,
+            filename: d.nome_arquivo || `Lote ${d.lote_id}`,
+            paginaIni: d.pagina_ini,
+            paginaFim: d.pagina_fim,
           }))
         )
-        setDetailedDocs(allDocs)
+      )
 
-        // Fetch review queue
-        const reviewData = await apiService.getReviewQueue()
-        const mappedReviewDocs: ReviewPendingDocument[] = reviewData.map((d: any) => ({
+      setCompanies(empresasData)
+
+      const tipoNameMap = new Map<string, string>()
+      tiposData.forEach((t) => tipoNameMap.set(t.slug, t.nome))
+
+      // Filter grouped documents to classified/reviewed ones so pending review docs aren't double-counted
+      const gruposPorTipo = new Map<string, DocumentoResponse[]>()
+      let autoCount = 0
+
+      docsAgrupados.grupos.forEach((g) => {
+        const docsClassificados = g.documentos.filter(
+          (d) => d.estado === 'classificado' || d.estado === 'revisado'
+        )
+        docsClassificados.forEach((d) => {
+          if (d.estado === 'classificado') {
+            autoCount += 1
+          }
+        })
+        if (g.tipo) {
+          gruposPorTipo.set(g.tipo, docsClassificados)
+        }
+      })
+
+      setAutoClassifiedCount(autoCount)
+
+      // Map official types from GET /tipos into DocumentCategory[]
+      const baseCategories: DocumentCategory[] = tiposData.map((t) => {
+        const docs = gruposPorTipo.get(t.slug) || []
+        return {
+          id: t.slug,
+          name: t.nome,
+          slug: t.slug,
+          count: docs.length,
+          totalPercentage: 0,
+          icon: t.icone || 'file',
+        }
+      })
+
+      const totalDocs = baseCategories.reduce((acc, cat) => acc + cat.count, 0)
+      const categoriesWithPercentage = baseCategories.map((cat) => ({
+        ...cat,
+        totalPercentage: totalDocs > 0 ? Math.round((cat.count / totalDocs) * 100) : 0,
+      }))
+
+      setCategories(categoriesWithPercentage)
+
+      // Keep selectedCategory in sync if user is viewing a category
+      setSelectedCategory((prev) =>
+        prev ? categoriesWithPercentage.find((c) => c.id === prev.id) || prev : null
+      )
+
+      // Flatten all classified/reviewed documents from groups
+      const allDocs: DetailedDocument[] = docsAgrupados.grupos.flatMap((g) =>
+        g.documentos
+          .filter((d) => d.estado === 'classificado' || d.estado === 'revisado')
+          .map((d) => {
+            const campos = d.campos || {}
+            const parsedTime = d.processado_em ? new Date(d.processado_em).getTime() : d.id
+            return {
+              id: String(d.id),
+              loteId: d.lote_id,
+              filename: d.nome_arquivo || `Documento #${d.id}`,
+              category: d.tipo || 'desconhecido',
+              estado: d.estado,
+              personName: d.pessoa || campos.nome || 'Não identificado',
+              pages: d.n_paginas ?? d.pagina_fim - d.pagina_ini + 1,
+              startPage: d.pagina_ini,
+              processedDate: formatDatePtBr(d.processado_em),
+              processedTimestamp: Number.isNaN(parsedTime) ? d.id : parsedTime,
+              confidence: d.confianca ?? 0,
+              campos,
+              metadata: {
+                registrationNumber: campos.matricula || campos.numero_registro || '',
+                categoryType: campos.tipo_prazo || campos.categoria || '',
+                expirationDate: campos.data_termino || campos.data_exame || campos.data_vencimento || '',
+                cpfNumber: campos.cpf || '',
+                rgNumber: campos.rg || '',
+                address: campos.endereco || '',
+                admissionDate: campos.data_admissao || '',
+                examDate: campos.data_exame || '',
+                companyName: campos.razao_social_prestadora || '',
+                companyCnpj: campos.cnpj_prestadora || '',
+              },
+            }
+          })
+      )
+      setDetailedDocs(allDocs)
+
+      // Map review queue from GET /revisao (mais recentes primeiro)
+      const reviewOrdenados = [...reviewData].sort((a, b) => {
+        const timeA = a.processado_em ? new Date(a.processado_em).getTime() : 0
+        const timeB = b.processado_em ? new Date(b.processado_em).getTime() : 0
+        if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+          return timeB - timeA
+        }
+        return b.id - a.id
+      })
+
+      const mappedReviewDocs: ReviewPendingDocument[] = reviewOrdenados.map((d) => {
+        const campos = d.campos || {}
+        const suggestedSlug = d.tipo_sugerido || 'desconhecido'
+        const suggestedLabel =
+          tipoNameMap.get(suggestedSlug) ||
+          (suggestedSlug === 'desconhecido' ? 'Desconhecido' : suggestedSlug)
+
+        return {
           id: String(d.id),
           loteId: d.lote_id,
           filename: d.nome_arquivo || `Documento #${d.id}`,
           issueType: 'confiança_baixa',
-          issueLabel: d.motivo_revisao || 'Revisão Pendente',
-          timeAgo: 'Recentemente',
-          processedDate: new Date(d.criado_em).toLocaleDateString('pt-BR'),
-          pages: (d.pagina_fim - d.pagina_ini) + 1,
+          issueLabel: d.motivo || 'Revisão pendente',
+          timeAgo: formatTimeAgo(d.processado_em),
+          processedDate: formatDatePtBr(d.processado_em),
+          processedTimestamp: d.processado_em ? new Date(d.processado_em).getTime() : undefined,
+          pages: d.n_paginas ?? d.pagina_fim - d.pagina_ini + 1,
           startPage: d.pagina_ini,
-          issueDescription: d.motivo_revisao || 'Documento requer verificação manual.',
-          suggestedType: d.tipo || 'Desconhecido',
-          suggestedConfidence: d.confianca,
-          extractedFields: Object.entries(d.campos || {}).map(([key, value]) => ({ key, value: String(value) })),
-          personName: d.pessoa || 'Não identificado'
-        }))
-        setReviewPendingDocs(mappedReviewDocs)
-
-      } catch (err) {
-        console.error('Erro ao buscar dados:', err)
-        setError('Não foi possível carregar os dados do servidor.')
-      } finally {
+          issueDescription: d.motivo || 'Documento requer verificação manual.',
+          suggestedType: suggestedSlug,
+          suggestedTypeLabel: suggestedLabel,
+          suggestedConfidence: d.confianca ?? 0,
+          extractedFields: Object.entries(campos).map(([key, value]) => ({
+            key,
+            value: String(value),
+          })),
+          initialCampos: campos,
+          personName: d.pessoa || campos.nome || 'Não identificado',
+        }
+      })
+      setReviewPendingDocs(mappedReviewDocs)
+    } catch (err) {
+      console.error('Erro ao buscar dados:', err)
+      if (!silent) {
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : 'Não foi possível carregar os dados do servidor.'
+        )
+      }
+    } finally {
+      if (!silent) {
         setIsLoading(false)
       }
     }
-
-    fetchData()
   }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const timer = setTimeout(() => {
+      void fetchData(false)
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [isAuthenticated, fetchData])
 
   const toggleTheme = () => {
     setIsDark((prev) => !prev)
@@ -183,6 +312,12 @@ export function App() {
 
   const reviewCount = reviewPendingDocs.length
 
+  const accuracyPercentage = useMemo(() => {
+    const totalProcessed = classifiedCount + reviewCount
+    if (totalProcessed === 0) return 0
+    return Math.round((autoClassifiedCount / totalProcessed) * 100)
+  }, [autoClassifiedCount, classifiedCount, reviewCount])
+
   // Filter categories for the Home view
   const filteredCategories = useMemo(() => {
     return categories.filter((cat) => {
@@ -192,7 +327,8 @@ export function App() {
 
       const matchesGlobal =
         !globalSearch ||
-        cat.name.toLowerCase().includes(globalSearch.toLowerCase())
+        cat.name.toLowerCase().includes(globalSearch.toLowerCase()) ||
+        cat.slug.toLowerCase().includes(globalSearch.toLowerCase())
 
       if (filterType === 'com_documentos') {
         return matchesSearch && matchesGlobal && cat.count > 0
@@ -227,76 +363,127 @@ export function App() {
   // Handle manual review approval
   const handleApproveReviewDoc = async (
     docId: string,
-    finalCategoryName: string,
-    personName: string
+    finalCategorySlugOrName: string,
+    personName: string,
+    updatedFields?: { key: string; value: string }[],
+    initialCampos?: Record<string, string>
   ) => {
     try {
-      await apiService.submitReview(Number(docId), finalCategoryName, 'Revisor Humano')
-      
-      // Remove from pending queue
-      setReviewPendingDocs((prev) => prev.filter((d) => d.id !== docId))
+      // Resolve category slug strictly to one of the 7 official backend types
+      const matchedCat =
+        categories.find(
+          (c) =>
+            c.slug === finalCategorySlugOrName ||
+            c.name.toLowerCase() === finalCategorySlugOrName.toLowerCase()
+        ) ||
+        OFFICIAL_CATEGORY_OPTIONS.find(
+          (c) =>
+            c.slug === finalCategorySlugOrName ||
+            c.name.toLowerCase() === finalCategorySlugOrName.toLowerCase()
+        )
+      const targetSlug = matchedCat
+        ? matchedCat.slug
+        : OFFICIAL_CATEGORY_OPTIONS.some((c) => c.slug === finalCategorySlugOrName)
+          ? finalCategorySlugOrName
+          : OFFICIAL_CATEGORY_OPTIONS[0].slug
 
-      // Refresh data to show the new document in its category
-      const docsAgrupados = await apiService.getDocumentosAgrupados()
-      
-      // Update categories count and percentage
-      const mappedCategories: DocumentCategory[] = docsAgrupados.grupos.map((g: any) => {
-        const id = g.tipo || 'desconhecido'
-        const icons: Record<string, DocumentCategory['icon']> = {
-          cnh: 'car',
-          cpf: 'hash',
-          rg: 'idcard',
-          folha_ponto: 'file',
-          holerite: 'briefcase',
-          residencia: 'home',
+      // Build campos update payload only for fields that were added, modified, or removed.
+      // Never re-send masked identifiers ('cpf', 'rg', 'pis' containing '*') because the backend rejects masked values.
+      const camposPayload: Record<string, string | null> = {}
+      const seenKeys = new Set<string>()
+      const normalizedInitial: Record<string, string> = {}
+
+      if (initialCampos) {
+        Object.entries(initialCampos).forEach(([k, v]) => {
+          const nk = normalizeCampoKey(k)
+          if (nk) normalizedInitial[nk] = String(v).trim()
+        })
+      }
+
+      if (updatedFields) {
+        updatedFields.forEach(({ key, value }) => {
+          const normKey = normalizeCampoKey(key)
+          const trimmedVal = value.trim()
+          if (normKey && trimmedVal) {
+            seenKeys.add(normKey)
+            const isMaskedIdentifier =
+              (normKey === 'cpf' || normKey === 'rg' || normKey === 'pis') &&
+              trimmedVal.includes('*')
+            const isUnchanged = normalizedInitial[normKey] === trimmedVal
+            if (!isMaskedIdentifier && !isUnchanged) {
+              camposPayload[normKey] = trimmedVal
+            }
+          }
+        })
+      }
+
+      const trimmedPerson = personName.trim()
+      if (trimmedPerson && trimmedPerson !== 'Não identificado') {
+        seenKeys.add('nome')
+        if (normalizedInitial['nome'] !== trimmedPerson && !trimmedPerson.includes('*')) {
+          camposPayload['nome'] = trimmedPerson
         }
+      }
 
-        return {
-          id,
-          name: id.toUpperCase().replace('_', ' '),
-          slug: id,
-          count: g.total,
-          totalPercentage: 0,
-          icon: icons[id] || 'file'
+      Object.keys(normalizedInitial).forEach((normOrig) => {
+        if (normOrig && !seenKeys.has(normOrig)) {
+          camposPayload[normOrig] = null
         }
       })
 
-      const totalDocs = mappedCategories.reduce((acc, cat) => acc + cat.count, 0)
-      const categoriesWithPercentage = mappedCategories.map(cat => ({
-        ...cat,
-        totalPercentage: totalDocs > 0 ? Math.round((cat.count / totalDocs) * 100) : 0
-      }))
-      setCategories(categoriesWithPercentage)
+      if (Object.keys(camposPayload).length > 0) {
+        await apiService.updateDocumentCampos(
+          Number(docId),
+          camposPayload,
+          'Revisor Humano'
+        )
+      }
 
-      // Update detailed documents
-      const allDocs: DetailedDocument[] = docsAgrupados.grupos.flatMap((g: any) => 
-        g.documentos.map((d: any) => ({
-          id: String(d.id),
-          filename: d.nome_arquivo,
-          category: d.tipo || 'desconhecido',
-          personName: d.pessoa || 'Não identificado',
-          pages: d.n_paginas,
-          processedDate: new Date(d.processado_em).toLocaleDateString('pt-BR'),
-          confidence: d.confianca,
-          metadata: {
-            registrationNumber: d.campos?.numero_registro || d.campos?.cpf || '',
-            categoryType: d.campos?.categoria || '',
-            expirationDate: d.campos?.data_vencimento || '',
-          }
-        }))
-      )
-      setDetailedDocs(allDocs)
+      await apiService.submitReview(Number(docId), targetSlug, 'Revisor Humano')
+
+      // Optimistically remove from pending queue and refresh full state from backend
+      setReviewPendingDocs((prev) => prev.filter((d) => d.id !== docId))
+      await fetchData(true)
     } catch (err) {
       console.error('Erro ao aprovar documento:', err)
-      alert('Erro ao processar a aprovação do documento.')
+      alert(
+        err instanceof Error
+          ? err.message
+          : 'Erro ao processar a aprovação do documento.'
+      )
     }
   }
 
-  // Handle upload completion
+  // Acompanha cada lote enviado via SSE (tempo real) + fallback polling e atualiza a lista
+  const refreshSilently = useCallback(() => fetchData(true), [fetchData])
+  const {
+    lotes: lotesEnviados,
+    track: trackLote,
+    uploadFiles: uploadLotes,
+    cancel: cancelLote,
+    retry: retryLote,
+    recheck: recheckLote,
+    dismiss: dismissLote,
+    dismissAcaoErro: dismissAcaoErroLote,
+    clearFinished: clearFinishedLotes,
+  } = useLotePolling(refreshSilently)
+
+  const handleNavigateCategoryBySlug = (slug: string) => {
+    const matched = categories.find((c) => c.slug === slug || c.id === slug)
+    if (matched) {
+      handleOpenCategory(matched)
+    }
+  }
+
   const handleUploadSuccess = (filename: string, loteId: number) => {
-    console.log(`Lote ${loteId} (${filename}) enviado para processamento.`)
-    // Aqui poderíamos iniciar um polling para verificar o status do lote
-    // Por enquanto, apenas notificamos o sucesso no console
+    void fetchData(true)
+    trackLote(loteId, filename)
+    setIsTrackerOpen(true)
+  }
+
+  const handleUploadFiles = (selectedFiles: File[]) => {
+    setIsTrackerOpen(true)
+    uploadLotes(selectedFiles)
   }
 
   // Active documents for the category view
@@ -304,6 +491,10 @@ export function App() {
     if (!selectedCategory) return []
     return detailedDocs.filter((d) => d.category === selectedCategory.id)
   }, [detailedDocs, selectedCategory])
+
+  const availableCategoryOptions = useMemo(() => {
+    return categories.map((c) => ({ slug: c.slug, name: c.name }))
+  }, [categories])
 
   if (!isAuthenticated) {
     return (
@@ -318,7 +509,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#fbf9fc] dark:bg-[#140c17] text-[#2d0a33] dark:text-[#f7f3f9] relative font-sans antialiased transition-colors selection:bg-[#9333ea]/30 selection:text-white">
-      {/* Bernhoeft background fluid wave */}
+      {/* Background fluid wave */}
       <BackgroundWave />
 
       {/* Top Navbar */}
@@ -339,33 +530,62 @@ export function App() {
         }}
         globalSearch={globalSearch}
         onGlobalSearchChange={setGlobalSearch}
+        lotes={lotesEnviados}
+        isTrackerOpen={isTrackerOpen}
+        onToggleTracker={() => setIsTrackerOpen((prev) => !prev)}
+        onMinimizeTracker={() => setIsTrackerOpen(false)}
+        onCancelLote={(id) => void cancelLote(id)}
+        onRetryLote={(id) => void retryLote(id)}
+        onRecheckLote={recheckLote}
+        onDismissLote={dismissLote}
+        onDismissAcaoErroLote={dismissAcaoErroLote}
+        onClearFinishedLotes={clearFinishedLotes}
+        onNavigateCategory={handleNavigateCategoryBySlug}
       />
 
       {/* Main Content Area */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 relative z-10">
+        <LotesStatusPanel
+          lotes={lotesEnviados.filter((l) => {
+            const s = trackedStatus(l)
+            return s === 'erro' || s === 'cancelado' || s === 'timeout' || Boolean(l.networkError) || Boolean(l.acaoErro)
+          })}
+          onRecheck={recheckLote}
+          onDismiss={dismissLote}
+          onDismissAcaoErro={dismissAcaoErroLote}
+          onRetry={(id) => void retryLote(id)}
+        />
+        {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
             <div className="w-12 h-12 border-4 border-[#9333ea] border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-[#6e6378] dark:text-[#a093a8] font-medium">Carregando dados do servidor...</p>
+            <p className="text-[#6e6378] dark:text-[#a093a8] font-medium">
+              Carregando dados do servidor...
+            </p>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
             <div className="w-16 h-16 bg-red-100 dark:bg-red-950/30 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
               </svg>
             </div>
             <h3 className="text-xl font-bold text-[#2d0a33] dark:text-white">{error}</h3>
-            <button 
-              onClick={() => window.location.reload()}
-              className="px-6 py-2 bg-[#9333ea] text-white rounded-xl font-bold hover:bg-[#7e22ce] transition-colors"
+            <button
+              onClick={() => fetchData(false)}
+              className="px-6 py-2 bg-[#9333ea] text-white rounded-xl font-bold hover:bg-[#7e22ce] transition-colors cursor-pointer"
             >
               Tentar novamente
             </button>
           </div>
         ) : (
           <>
-            {/* VIEW 1: CATEGORIA ESPECÍFICA (Ex: CNH) */}
+            {/* VIEW 1: CATEGORIA ESPECÍFICA */}
             {currentView === 'categoria' && selectedCategory && (
               <CategoryPage
                 category={selectedCategory}
@@ -380,7 +600,7 @@ export function App() {
                 documents={reviewPendingDocs}
                 onBack={handleBackToHome}
                 onApprove={handleApproveReviewDoc}
-                availableCategories={categories.map((c) => c.name)}
+                availableCategories={availableCategoryOptions}
               />
             )}
 
@@ -390,6 +610,7 @@ export function App() {
                 reviewCount={reviewCount}
                 onOpenReview={handleOpenReview}
                 classifiedCount={classifiedCount}
+                accuracyPercentage={accuracyPercentage}
                 categorySearch={categorySearch}
                 onCategorySearchChange={setCategorySearch}
                 filterType={filterType}
@@ -408,6 +629,7 @@ export function App() {
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
         onSuccessUpload={handleUploadSuccess}
+        onUploadFiles={handleUploadFiles}
       />
     </div>
   )

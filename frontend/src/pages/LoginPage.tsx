@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Loader2, LogIn } from 'lucide-react'
+import { Loader2, LogIn, Eye, EyeOff } from 'lucide-react'
 import { login } from '../services/api'
 
 interface LoginPageProps {
@@ -9,6 +9,7 @@ interface LoginPageProps {
 const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
   const [usuario, setUsuario] = useState('')
   const [senha, setSenha] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -35,12 +36,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-2xl p-7 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-xs space-y-5"
       >
-        <div className="flex flex-col items-center gap-4">
-          <img
-            src="/logo.png"
-            alt="Bernhoeft"
-            className="h-8 w-auto object-contain dark:brightness-0 dark:invert"
-          />
+        <div className="flex flex-col items-center gap-2">
+          <span className="text-xl font-extrabold tracking-tight text-[#3e0b48] dark:text-[#f38df9]">
+            EviDocs
+          </span>
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-extrabold tracking-tight text-[#2d0a33] dark:text-[#fdfcfe]">Entrar</h1>
             <p className="text-sm text-[#6f6379] dark:text-[#9f91a6]">Acesse o painel de documentos.</p>
@@ -67,15 +66,26 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
           <label htmlFor="senha" className="text-xs font-semibold text-[#6e6378] dark:text-[#a093a8]">
             Senha
           </label>
-          <input
-            id="senha"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={senha}
-            onChange={(e) => setSenha(e.target.value)}
-            className={inputClass}
-          />
+          <div className="relative">
+            <input
+              id="senha"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              required
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              className={`${inputClass} pr-10`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              tabIndex={-1}
+              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8f8298] dark:text-[#7f7188] hover:text-[#2d0a33] dark:hover:text-[#f5edf9] transition-colors cursor-pointer"
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
 
         {error && (

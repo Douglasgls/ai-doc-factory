@@ -198,3 +198,48 @@ def test_documentos_consecutivos_da_mesma_empresa_separam_por_pagina_1_de_n_e_pe
     sem_paginacao = [_cnpj_texto(c, "recibo de férias gozo"), _cnpj_texto(c, "atestado médico cid repouso")]
     monkeypatch.setattr(segmentacao, "perguntar_llm_mesmo_documento", lambda a, b: False)  # o Jev separa
     assert intervalos(segmentar(sem_paginacao)) == [(1, 1), (2, 2)]
+
+
+# --- CNPJs válidos pelos dígitos verificadores decidem mesmo com similaridade alta ---
+CNPJ_A = "43.182.607/0001-42"
+CNPJ_B = "54.930.781/0001-42"
+CNPJ_A_OCR = "43.182.607/0001-43"  # último dígito trocado: inválido
+
+
+def _sim_alta(monkeypatch):
+    monkeypatch.setattr(segmentacao.config, "SEG_SIM_BAIXO", 0.0)
+    monkeypatch.setattr(segmentacao.config, "SEG_SIM_ALTO", 0.0)  # toda similaridade é "alta"
+    monkeypatch.setattr(segmentacao, "perguntar_llm_mesmo_documento", lambda a, b: pytest.fail("não deveria perguntar"))
+
+
+def test_similaridade_alta_com_dois_cnpjs_validos_diferentes_abre_documento(monkeypatch):
+    _sim_alta(monkeypatch)
+    corpo = "folha de ponto marcações entrada saída horas extras"
+    docs = segmentar([_cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_B, corpo)])
+    assert intervalos(docs) == [(1, 1), (2, 2)] and not docs[1].ambiguo
+
+
+def test_similaridade_alta_com_mesmo_cnpj_continua(monkeypatch):
+    _sim_alta(monkeypatch)
+    corpo = "folha de ponto marcações entrada saída horas extras"
+    assert intervalos(segmentar([_cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_A, corpo)])) == [(1, 2)]
+
+
+def test_similaridade_alta_com_cnpj_invalido_por_ocr_continua(monkeypatch):
+    _sim_alta(monkeypatch)
+    corpo = "folha de ponto marcações entrada saída horas extras"
+    assert intervalos(segmentar([_cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_A_OCR, corpo)])) == [(1, 2)]
+    assert intervalos(segmentar([_cnpj_texto(CNPJ_A_OCR, corpo), _cnpj_texto(CNPJ_B, corpo)])) == [(1, 2)]
+
+
+def test_pagina_k_de_n_tem_prioridade_sobre_cnpj_valido_diferente(monkeypatch):
+    _sim_alta(monkeypatch)
+    textos = [_cnpj_texto(CNPJ_A, "folha Página 1 de 2"), _cnpj_texto(CNPJ_B, "folha Página 2 de 2")]
+    assert intervalos(segmentar(textos)) == [(1, 2)]
+
+
+def test_consecutivos_do_mesmo_tipo_com_cnpjs_diferentes_separam(monkeypatch):
+    _sim_alta(monkeypatch)
+    corpo = "folha de ponto marcações entrada saída horas extras"
+    textos = [_cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_B, corpo)]
+    assert intervalos(segmentar(textos)) == [(1, 2), (3, 3)]

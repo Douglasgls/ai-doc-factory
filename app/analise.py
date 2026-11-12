@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 
 from app import config, llm, ponto, prompts
 from app.anonimizacao import anonimizar_texto
+from app.eventos import concluir_tarefa_pos, lote_cancelado, publicar_evento
 
 log = logging.getLogger(__name__)
 
@@ -46,14 +47,24 @@ SCHEMA_GEMINI = {
 }
 
 
-def enfileirar_analise(documento_id: int, cliente: redis.Redis | None = None) -> None:
-    """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão."""
+def enfileirar_analise(documento_id: int, cliente: redis.Redis | None = None) -> bool:
+    """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão.
+    Se falhar, remove a pendência de análise do lote no Redis para não travar o acompanhamento."""
     try:
         from app.filas import enfileirar
-        cliente = cliente or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-        enfileirar(cliente, config.FILA_ANALISAR, {"documento_id": documento_id})
+        cli = cliente or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+        enfileirar(cli, config.FILA_ANALISAR, {"documento_id": documento_id})
+        return True
     except Exception:
         log.exception("não foi possível enfileirar a análise de ponto do documento %s", documento_id)
+        try:
+            with psycopg.connect(config.DATABASE_URL) as conn:
+                row = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (documento_id,)).fetchone()
+            if row is not None:
+                concluir_tarefa_pos(row[0], f"analise:{documento_id}", cliente)
+        except Exception:
+            pass
+        return False
 
 
 def _validar_extracao(dado) -> dict:
@@ -82,12 +93,22 @@ def extrair_com_gemini(texto: str, imagens: list[bytes], perfil: dict) -> tuple[
     return dado, resp.get("modelVersion") or config.GEMINI_ANALISE_MODEL, llm._uso(resp)
 
 
-def julgar_com_jev(contagens: dict, analise: str) -> tuple[dict, str, dict]:
-    """Uma única requisição, uma pergunta Score por dimensão. Devolve (respostas, modelo, usage)."""
-    state = {"contagens": contagens, "analise_gemini": anonimizar_texto(analise)}  # texto não confiável em campo próprio
-    resp = llm.jev_decidir(state, prompts.PERGUNTAS_PONTO)
+def dimensoes_nao_avaliadas(contagens: dict) -> dict:
+    """Dimensões sem dados para avaliar, {dimensao: motivo}: não vão ao Jev. Falta de dado não é risco baixo."""
+    if contagens["descanso"]["semanas_completas_avaliadas"] == 0:
+        return {"descanso": "sem_semana_completa"}  # descanso semanal só se avalia em semana com os 7 dias
+    return {}
+
+
+def julgar_com_jev(contagens: dict, analise: str, nao_avaliadas=()) -> tuple[dict, str, dict]:
+    """Uma única requisição, uma pergunta Score por dimensão avaliável. Devolve (respostas, modelo, usage)."""
+    perguntas = {d: q for d, q in prompts.PERGUNTAS_PONTO.items() if d not in nao_avaliadas}
+    # texto não confiável em campo próprio; contagens só das dimensões perguntadas
+    state = {"contagens": {d: c for d, c in contagens.items() if d not in nao_avaliadas},
+             "analise_gemini": anonimizar_texto(analise)}
+    resp = llm.jev_decidir(state, perguntas)
     respostas = {}
-    for dim, pergunta in prompts.PERGUNTAS_PONTO.items():
+    for dim, pergunta in perguntas.items():
         try:
             r = resp["answers"][dim]
             respostas[dim] = {"score": float(r["score"]), "confianca": float(r["confidence"]),
@@ -106,17 +127,19 @@ def analisar(texto: str, imagens: list[bytes], perfil: dict) -> dict:
     britanico = ponto.detectar_ponto_britanico(dado["marcacoes"])
     comparacao = ponto.comparar_com_gemini(apuracao, dado["divergencias"])  # vale o código
     contagens = ponto.resumir_contagens(apuracao, britanico)
-    respostas, modelo_jev, uso_jev = julgar_com_jev(contagens, dado["analise"])
+    nao_avaliadas = dimensoes_nao_avaliadas(contagens)
+    respostas, modelo_jev, uso_jev = julgar_com_jev(contagens, dado["analise"], nao_avaliadas)
     try:
-        score = ponto.score_geral(respostas)
+        score = ponto.score_geral(respostas, nao_avaliadas=nao_avaliadas)
     except ValueError as e:
         raise llm.LLMErro(f"score do Jev inválido: {e}") from e
     return {
         "marcacoes": dado["marcacoes"], "intervalo_pre_assinalado": dado["intervalo_pre_assinalado"],
         "totais": {k: v for k, v in apuracao.items() if k != "divergencias"},
         "divergencias": comparacao["divergencias"], "diferencas_gemini": comparacao["diferencas"],
-        "ponto_britanico": britanico, "analise": dado["analise"], "contagens": contagens,
-        "scores_dimensao": {d: {**respostas[d], **score["dimensoes"][d]} for d in respostas},
+        "ponto_britanico": britanico, "analise": dado["analise"], 
+        "contagens": {**contagens, "nao_avaliadas": score["nao_avaliadas"]},  # score geral parcial se não vazio
+        "scores_dimensao": {d: {**respostas.get(d, {}), **v} for d, v in score["dimensoes"].items()},
         "score_geral": score["score_geral"], "requer_revisao": score["requer_revisao"],
         "modelo_gemini": modelo_gemini, "modelo_jev": modelo_jev,
         "custo": {"gemini": uso_gemini, "jev": uso_jev},
@@ -168,6 +191,34 @@ def _gravar(conn, documento_id: int, estado: str, dados: dict, erro: str | None 
     conn.execute(_UPSERT, linha)
 
 
+def _resolver_etapa_pos_analise(lote_id: int, doc_id: int, docs_pendentes: int, ap_pendente: bool) -> str:
+    restantes_pos = concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
+    if docs_pendentes > 0:
+        return "classificando"
+    if any(t.startswith("extracao:") for t in restantes_pos):
+        return "extracao"
+    if ap_pendente or any(t.startswith("analise:") for t in restantes_pos):
+        return "analise_ponto"
+    return "concluido"
+
+
+def _pendencias_lote_analise(conn, lote_id: int) -> tuple[int, bool]:
+    lote_row = conn.execute("SELECT docs_pendentes FROM lote WHERE id = %s", (lote_id,)).fetchone()
+    docs_pendentes = lote_row[0] if lote_row else 0
+    ap_pendente = (
+        conn.execute(
+            "SELECT 1 FROM documento d "
+            "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
+            "WHERE d.lote_id = %s AND d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
+            "AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')) "
+            "LIMIT 1",
+            (lote_id,),
+        ).fetchone()
+        is not None
+    )
+    return docs_pendentes, ap_pendente
+
+
 def analisar_documento(payload: dict) -> None:
     doc_id = payload["documento_id"]
     with psycopg.connect(config.DATABASE_URL) as conn:
@@ -175,18 +226,59 @@ def analisar_documento(payload: dict) -> None:
                            (doc_id,)).fetchone()
         if doc is None or doc[1] != "folha_ponto" or doc[0] not in ("classificado", "revisado"):
             return  # tipo mudou, documento removido ou ainda não decidido: nada a analisar
+        if lote_cancelado(doc[2]):
+            concluir_tarefa_pos(doc[2], f"analise:{doc_id}")
+            return
         textos = [t or "" for (t,) in conn.execute(
             "SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
         perfil = ponto.carregar_perfil(conn)
-    resultado = analisar("\n".join(textos), _imagens(doc[2], doc[3], doc[4]), perfil)
+    lote_id = doc[2]
+    publicar_evento(
+        lote_id,
+        "analise_ponto",
+        f"Auditando folha de ponto #{doc_id} (Gemini + CLT + Jev)...",
+        documento_id=doc_id,
+    )
+    resultado = analisar("\n".join(textos), _imagens(lote_id, doc[3], doc[4]), perfil)
+    if lote_cancelado(lote_id):
+        concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
+        return
     resultado["perfil"] = perfil
     with psycopg.connect(config.DATABASE_URL) as conn:
+        if lote_cancelado(lote_id):
+            concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
+            return
         _gravar(conn, doc_id, "concluida", resultado)  # uma linha por documento: reprocessar substitui
+        docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+    etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
+    publicar_evento(
+        lote_id,
+        etapa,
+        f"Auditoria da folha de ponto #{doc_id} concluída!",
+        documento_id=doc_id,
+    )
 
 
 def marcar_erro_analise(payload: dict) -> None:
     """ao_esgotar: o job foi para a dlq. Grava a linha como erro (sem sobrescrever documento ou lote)."""
+    doc_id = payload["documento_id"]
+    lote_id = None
+    docs_pend = 0
+    ap_pend = False
     with psycopg.connect(config.DATABASE_URL) as conn:
-        existe = conn.execute("SELECT 1 FROM documento WHERE id = %s", (payload["documento_id"],)).fetchone()
+        existe = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (doc_id,)).fetchone()
         if existe:
-            _gravar(conn, payload["documento_id"], "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
+            lote_id = existe[0]
+            if not lote_cancelado(lote_id):
+                _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
+                docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+    if lote_id is not None and not lote_cancelado(lote_id):
+        etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
+        publicar_evento(
+            lote_id,
+            etapa,
+            f"Auditoria da folha de ponto #{doc_id} finalizada com alerta.",
+            documento_id=doc_id,
+        )
+    elif lote_id is not None:
+        concluir_tarefa_pos(lote_id, f"analise:{doc_id}")

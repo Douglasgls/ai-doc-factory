@@ -2,7 +2,7 @@
 
 Projeto de hackathon. Recebe um PDF de lote com muitas páginas escaneadas (ou uma imagem), faz OCR de cada página, separa os documentos do lote, classifica cada um por tipo documental e envia os casos duvidosos para uma fila de revisão humana. O texto das páginas fica no PostgreSQL e pode ser pesquisado.
 
-Hoje existe apenas o backend (API + workers). O que está pronto, o que é parcial e o que ainda não existe está na seção [Estado atual](#estado-atual).
+Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O que está pronto, o que é parcial e o que ainda não existe está na seção [Estado atual](#estado-atual).
 
 ## Stack e serviços
 
@@ -19,6 +19,7 @@ Hoje existe apenas o backend (API + workers). O que está pronto, o que é parci
 | `migrate` | One-shot: roda `alembic upgrade head` e sai; `api` e os workers só sobem depois que ele termina com sucesso |
 | `worker_extracao` | Consome `extrair_campos`: Gemini extrai empresa (CNPJ e razão social), datas e identificação em `documento_campos` (Goal 7); fora do fan-in do lote |
 | `worker_analise` | Consome `analisar_folha_ponto`: Gemini + cálculo em código + Jev, grava `analise_ponto` (Goal 6); fora do fan-in do lote |
+| `frontend` | Interface React servida por Nginx (`FRONTEND_PORT`, padrão 5173): login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa (ver [Frontend](#frontend)) |
 | `postgres` | Dados e busca full-text (config `portuguese`) |
 | `redis` | Filas (listas, com ack via `BLMOVE`, 3 tentativas e depois `dlq`) |
 
@@ -44,7 +45,7 @@ POST /lotes (PDF/imagem)
               fan-in: lote.docs_pendentes = 0 => lote concluido
 ```
 
-**Segmentação em cascata** (`app/segmentacao.py`): página em branco herda o documento anterior; "Página 1 de N" abre documento e "Página k de N" (k>1) continua; senão, similaridade TF-IDF entre páginas consecutivas (abaixo de `SEG_SIM_BAIXO` abre, a partir de `SEG_SIM_ALTO` continua); na faixa ambígua pergunta Sim/Não ao Jev (só com `CLASSIFICADOR=jev`). Se o Jev não responde ou fica no meio, o sistema abre documento novo e marca `segmentacao_ambigua`, o que leva o documento à revisão. Os limiares ainda não foram calibrados.
+**Segmentação em cascata** (`app/segmentacao.py`): página em branco herda o documento anterior; "Página 1 de N" abre documento e "Página k de N" (k>1) continua só se for coerente com a última página paginada do documento (mesmo N e k maior; salto tolerado), senão abre documento novo marcado como ambíguo (revisão); a paginação só vale nas primeiras e últimas `SEG_PAG_LINHAS` linhas da página; senão, sem paginação, dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento mesmo com similaridade alta (sem perguntar ao Jev; se algum CNPJ é inválido, provável erro de OCR, não corta); depois, similaridade TF-IDF entre páginas consecutivas (abaixo de `SEG_SIM_BAIXO` abre, a partir de `SEG_SIM_ALTO` continua; CNPJs diferentes abaixo de `SEG_SIM_ALTO` abrem); na faixa ambígua pergunta Sim/Não ao Jev (só com `CLASSIFICADOR=jev`). Se o Jev não responde ou fica no meio, o sistema abre documento novo e marca `segmentacao_ambigua`, o que leva o documento à revisão. Os limiares ainda não foram calibrados.
 
 **Roteamento** (`app/roteamento.py`): confiança >= `CONF_AUTO` e sem desacordo entre modelos vira `classificado`; entre `CONF_MIN` e `CONF_AUTO`, ou com desacordo, ou segmentação ambígua, vira `em_revisao` com o tipo sugerido; abaixo de `CONF_MIN`, `em_revisao` com tipo `desconhecido`.
 
@@ -103,7 +104,7 @@ curl -F "arquivo=@meu_lote.pdf" http://localhost:8000/lotes
 curl http://localhost:8000/lotes/1
 ```
 
-O processamento é assíncrono: repita o `GET /lotes/1` até `"estado":"concluido"` (um lote pequeno leva alguns segundos). A resposta traz os documentos com intervalo de páginas, estado, tipo, confiança e probabilidades. Reenviar o mesmo arquivo não cria outro lote (a identidade é o SHA-256 dos bytes): a API devolve o existente com `"existente":true`.
+O processamento é assíncrono: repita o `GET /lotes/1` até `"estado":"concluido"` (um lote pequeno leva alguns segundos). A resposta traz os documentos com intervalo de páginas, estado, tipo, confiança e probabilidades. Reenviar o mesmo arquivo não cria outro lote (a identidade é o SHA-256 dos bytes): a API devolve o existente com `"existente":true`. Se esse lote estiver em `erro`, o reenvio o reprocessa (volta a `recebido` e a resposta traz `"reprocessando":true`); em `ocr`, `classificando` e `concluido` nada é reprocessado.
 
 Exemplo de resposta (lote de 3 páginas, `CLASSIFICADOR=regras`, resumida):
 
@@ -127,7 +128,7 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `372 passed, 1 skipped, 1 warning in 9.37s`, no commit `645f3f4`, em 2026-11-11, com `CLASSIFICADOR=regras`. Essa execução foi **fora do Docker**, com Postgres e Redis locais e Python 3.13 (o container usa Python 3.12), com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
@@ -161,7 +162,7 @@ O `-v` apaga os volumes: **todos os dados locais** (lotes, documentos, arquivos 
 
 ### Frontend
 
-A pasta `frontend/` é um projeto separado do backend (Vite + React + TypeScript + Tailwind v4). Tem tela de login e chama a API com o token (ver `frontend/.env.example`; `VITE_API_PREFIX` fica vazio, a API não tem prefixo). Não faz parte do `docker-compose.yml` e não foi testada para este README.
+A pasta `frontend/` é a interface (Vite + React + TypeScript + Tailwind v4), e o `docker-compose.yml` tem o serviço `frontend` (build com Nginx, porta `FRONTEND_PORT`, padrão 5173; `VITE_API_URL` e `VITE_API_PREFIX` entram como argumentos de build; `VITE_API_PREFIX` fica vazio, a API não tem prefixo). Pelo código em `frontend/src`, tem: tela de login (token da API), upload de PDF, JPEG, PNG e TIFF com arrastar e soltar, lista de documentos por tipo, tela de revisão manual (`GET /revisao`, `POST /documentos/{id}/revisao`, correção de campos), modal de auditoria da folha de ponto (`GET /documentos/{id}/analise-ponto`) e modal de conformidade da empresa (`GET /empresas`, `GET /empresas/{cnpj}/conformidade`). Detalhes de desenvolvimento em `frontend/README.md`. A interface não tem testes automatizados nem foi exercitada de ponta a ponta para este README; para desenvolver fora do Docker, veja `frontend/.env.example`.
 
 ## Autenticação
 
@@ -189,6 +190,9 @@ O token é um JWT HS256 (claims `sub`, `iat`, `exp`). No `/docs`, use o botão A
 | `GET /health` | Verifica Postgres e Redis | `curl localhost:8000/health` |
 | `POST /lotes` | Envia PDF, JPEG, PNG ou TIFF (multipágina inclusive); imagens viram `original.pdf`. Arquivo inválido: 400. Campo opcional `empresa_id` vincula o lote a uma empresa cadastrada (404 se não existir; 409 se o lote já pertence a outra) | `curl -F "arquivo=@lote.pdf" localhost:8000/lotes` |
 | `GET /lotes/{id}` | Estado do lote e lista de documentos (intervalo, tipo, confiança, probabilidades) | `curl localhost:8000/lotes/1` |
+| `GET /lotes/{id}/eventos` | Stream SSE (`text/event-stream`) de acompanhamento do lote: cada frame `data: {json}` traz o mesmo corpo de `GET /lotes/{id}` (com `ultimo_evento` e `historico_eventos`); linhas `: keepalive` entre os frames. O último frame traz também `"fim": true` e `"motivo"`: `finalizado` (lote `concluido`, sem documentos pendentes nem extração/análise pendentes), `erro` (lote em `erro`) ou `tempo_esgotado` (conexão aberta por 900 s, contados em tempo real). `?once=true` envia um único frame e fecha. Lote inexistente: 404 | `curl -N localhost:8000/lotes/1/eventos` |
+| `POST /lotes/{id}/cancelar` | Cancela o processamento em andamento e devolve o lote. 404 se não existe; 409 se não há nada a cancelar (lote já finalizado) | `curl -X POST localhost:8000/lotes/1/cancelar` |
+| `POST /lotes/{id}/reprocessar` | Reenfileira um lote em `erro` a partir do `original.pdf` e devolve o lote em `recebido`. 404 se não existe; 409 se o lote não está em `erro` ou tem documentos revisados; 400 se o `original.pdf` não está disponível | `curl -X POST localhost:8000/lotes/1/reprocessar` |
 | `GET /documentos/{id}` | Documento com tipo, confiança, motivo de revisão e páginas (texto e `imagem_url`); também `campos` (extraídos, campo->valor), `pessoa` (`campos.nome` ou null), `nome_arquivo`, `n_paginas` e `processado_em` (criação do lote) | `curl localhost:8000/documentos/2` |
 | `GET /documentos?empresa_id=&falhou=` | Documentos agrupados por tipo (`grupos`; `sem_tipo` para quem não tem); cada item traz também `campos`, `pessoa`, `nome_arquivo`, `n_paginas` e `processado_em`. `empresa_id` filtra pela empresa do lote (404 se não existir); `falhou=true` só estado `erro`, `false` exclui | `curl "localhost:8000/documentos?falhou=false"` |
 | `PATCH /documentos/{id}/tipo` | Corrige o tipo (`{"tipo","revisor"}`) em qualquer estado exceto `segmentado` e `erro` (409); vira `revisado`; `tipo_original` guarda o primeiro tipo; dispara análise de ponto e extração como a revisão | `curl -X PATCH -H "Content-Type: application/json" -d '{"tipo":"aso","revisor":"ana"}' localhost:8000/documentos/1/tipo` |
@@ -225,6 +229,9 @@ Definidas no `.env` (modelo em `.env.example`), repassadas aos containers pelo `
 | `POSTGRES_PASSWORD` | (obrigatória) | Senha do Postgres |
 | `POSTGRES_DB` | `docfactory` | Nome do banco |
 | `API_PORT` | `8000` | Porta da API no host |
+| `FRONTEND_PORT` | `5173` | Porta do frontend no host |
+| `VITE_API_URL` | `http://127.0.0.1:${API_PORT}` | URL da API que o frontend usa (fixada no build) |
+| `VITE_API_PREFIX` | vazio | Prefixo das rotas da API no frontend (a API não usa prefixo) |
 | `CONF_AUTO` | `0.85` | Confiança mínima para classificação automática |
 | `CONF_MIN` | `0.50` | Abaixo disso o tipo vira `desconhecido` e vai para revisão |
 | `CLASSIFICADOR` | `jev` | `jev` (Jev + Gemini) ou `regras` (sem rede) |
@@ -244,14 +251,14 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 | Item | Situação | Observação |
 |---|---|---|
 | Goal 1: início e fim de cada documento | Medido | Cascata implementada (regras, TF-IDF, Jev na faixa ambígua, reconciliação); números em "Resultados". Não há correção de fronteiras na revisão |
-| Goal 2: agrupamento de páginas | Parcial | Persistência de documentos e páginas e consulta por API prontas. Juntar e dividir documentos na revisão não existe. UI Streamlit fora do escopo por enquanto |
+| Goal 2: agrupamento de páginas | Parcial | Persistência de documentos e páginas e consulta por API prontas. Juntar e dividir documentos na revisão não existe. A UI Streamlit não foi implementada; a interface é o `frontend/` React |
 | Goal 3: classificação por tipo | Medido | Jev + Gemini, classificador por regras e baseline TF-IDF + regressão logística (`scripts/baseline_tfidf.py`); números em "Resultados" |
 | Goal 4: OCR pesquisável | Parcial | OCR e busca por texto no banco prontos. PDF pesquisável por documento não implementado: a busca é por texto no banco |
-| Goal 5: confiança e revisão humana | Medido | Roteamento por limiares, `GET /revisao` e `POST /documentos/{id}/revisao`; `scripts/relatorio_cobertura.py` gera a curva. Limiares revistos com os dados de ajuste (ver "Resultados"). Sem tela de revisão |
+| Goal 5: confiança e revisão humana | Medido | Roteamento por limiares, `GET /revisao` e `POST /documentos/{id}/revisao`; `scripts/relatorio_cobertura.py` gera a curva. Limiares revistos com os dados de ajuste (ver "Resultados"). A tela de revisão está no `frontend/` |
 | Goal 6: score de risco de ponto | Implementado | `worker_analise`, tabelas `perfil_jornada` e `analise_ponto`, `GET /documentos/{id}/analise-ponto`. Sem gabarito de divergências, então não há métrica de acurácia; base legal ainda por conferir no texto oficial |
 | Goal 7: score de conformidade da empresa prestadora | Implementado | `worker_extracao`, tabela `documento_campos`, `GET /empresas`, `GET /empresas/{cnpj}/conformidade` e `GET /lotes/{id}/conformidade`. Sem gabarito de extração, então não há métrica de acurácia; prazo do ASO (NR-7) ainda por conferir |
-| UI Streamlit | Não implementado | Fora do escopo por enquanto |
-| `frontend/` | Esqueleto | Template inicial do Vite, separado do backend |
+| UI Streamlit | Não implementado | Substituída pelo `frontend/` React |
+| `frontend/` | Implementado | Login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa; serviço `frontend` no `docker-compose.yml`. Sem testes automatizados |
 
 ## Anonimização
 
@@ -339,6 +346,8 @@ Métricas por documento. Precisão e recall são das fronteiras (início de docu
 | Documentos exatos | 26/30 (0,867) | 60/76 (0,789) |
 
 No teste, os lotes L0001 (2/4 exatos), L0006 (5/10) e L0008 (4/11) concentram os erros; os outros sete lotes têm 4/5 ou mais. O mesmo `L0001` de 4 documentos reais virou 7 previstos.
+
+**Mudança posterior à medição final.** Depois da medição final, a regra do CNPJ na segmentação mudou: sem paginação, dois CNPJs válidos pelos dígitos verificadores e diferentes abrem documento mesmo com similaridade alta (antes a similaridade alta decidia "continua" antes de olhar o CNPJ). As regras de paginação também mudaram depois da medição: "Página k de N" (k>1) só continua o documento quando é coerente com a última página paginada dele (mesmo N e k maior; caso contrário abre documento novo e marca ambíguo), e a paginação só é lida nas primeiras e últimas linhas da página (`SEG_PAG_LINHAS`), não em frases do corpo. Os números do conjunto de teste acima valem para a versão anterior e precisam ser medidos de novo em lotes novos. No conjunto de **ajuste** (não é métrica final), a mesma medição foi repetida com a regra nova: antes, 30 reais / 31 previstos, precisão 0,923, recall 0,960, exatos 26/30; depois, 30 reais / 32 previstos, precisão 0,926, recall 1,000, exatos 28/30.
 
 ### Classificação (Goal 3), conjunto de teste
 

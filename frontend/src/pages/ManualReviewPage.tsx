@@ -1,39 +1,113 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { Check, X, Plus } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Check, X, Plus, ZoomIn } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
+
+export interface CategoryOption {
+  slug: string
+  name: string
+}
+
+export const OFFICIAL_CATEGORY_OPTIONS: CategoryOption[] = [
+  { slug: 'aso', name: 'ASO (Atestado de Saúde Ocupacional)' },
+  { slug: 'folha_pagamento', name: 'Folha de pagamento' },
+  { slug: 'folha_ponto', name: 'Folha de ponto' },
+  { slug: 'holerite', name: 'Holerite' },
+  { slug: 'recibo_ferias', name: 'Recibo de férias' },
+  { slug: 'atestado_medico', name: 'Atestado médico' },
+  { slug: 'contrato_trabalho', name: 'Contrato de trabalho' },
+]
+
+const VALID_CATEGORY_SLUGS = new Set(OFFICIAL_CATEGORY_OPTIONS.map((c) => c.slug))
 
 interface ManualReviewPageProps {
   documents: ReviewPendingDocument[]
   onBack: () => void
-  onApprove: (docId: string, finalCategory: string, personName: string) => void
-  availableCategories: string[]
+  onApprove: (
+    docId: string,
+    finalCategorySlug: string,
+    personName: string,
+    updatedFields?: { key: string; value: string }[],
+    initialCampos?: Record<string, string>
+  ) => void
+  availableCategories: CategoryOption[]
 }
 
 interface DetailPanelProps {
   doc: ReviewPendingDocument
-  availableCategories: string[]
-  onConfirm: (docId: string, category: string, name: string) => void
-  onAcceptSuggestion: (doc: ReviewPendingDocument) => void
+  availableCategories: CategoryOption[]
+  onConfirm: (
+    docId: string,
+    categorySlug: string,
+    name: string,
+    updatedFields: { key: string; value: string }[],
+    initialCampos?: Record<string, string>
+  ) => void
 }
 
 const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   doc,
   availableCategories,
   onConfirm,
-  onAcceptSuggestion,
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState(doc.suggestedType)
+  const isValidSuggestion = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
+  const [selectedCategory, setSelectedCategory] = useState(
+    isValidSuggestion
+      ? doc.suggestedType
+      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
+  )
   const [personName, setPersonName] = useState(doc.personName)
   const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
   const [currentPage, setCurrentPage] = useState(0)
+  const [isZoomEnabled, setIsZoomEnabled] = useState(false)
+  const [isHoveringImage, setIsHoveringImage] = useState(false)
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 })
+
+  const handleImageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isZoomEnabled) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100))
+    const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
+    setZoomOrigin({ x, y })
+  }
+
+  useEffect(() => {
+    const valid = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
+      ? doc.suggestedType
+      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
+    setSelectedCategory((prev) => (VALID_CATEGORY_SLUGS.has(prev) ? prev : valid))
+  }, [doc.id, doc.suggestedType, availableCategories])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        ['INPUT', 'SELECT', 'TEXTAREA'].includes(
+          (e.target as HTMLElement)?.tagName
+        )
+      ) {
+        return
+      }
+      if (e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        onConfirm(
+          doc.id,
+          selectedCategory,
+          personName,
+          extractedFields,
+          doc.initialCampos
+        )
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [doc.id, doc.initialCampos, selectedCategory, personName, extractedFields, onConfirm])
 
   const handleRemoveField = (index: number) => {
     setExtractedFields((prev) => prev.filter((_, i) => i !== index))
   }
 
   const handleAddField = () => {
-    setExtractedFields((prev) => [...prev, { key: 'Campo', value: '' }])
+    setExtractedFields((prev) => [...prev, { key: 'novo_campo', value: '' }])
   }
 
   // <img src> não envia Authorization: baixa a imagem autenticada e usa um object URL (revogado ao trocar/desmontar)
@@ -58,8 +132,13 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
     }
   }, [doc.loteId, doc.startPage, currentPage])
 
+  const suggestedLabel =
+    doc.suggestedTypeLabel ||
+    availableCategories.find((c) => c.slug === doc.suggestedType)?.name ||
+    doc.suggestedType
+
   return (
-    <div className="lg:col-span-7 space-y-6">
+    <div className="space-y-6">
       <div className="rounded-2xl p-6 sm:p-7 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-xs space-y-6">
         {/* Document Header */}
         <div className="flex justify-between items-start">
@@ -73,34 +152,87 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
           </div>
         </div>
 
-        {/* Visualizer Mock (Simulando o formato físico solicitado pelo usuário) */}
-        <div className="relative aspect-[3/4] w-full bg-[#f3f0f5] dark:bg-[#150c18] rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] overflow-hidden group shadow-inner">
+        {/* Visualizer (Imagem real da página no backend) */}
+        <div
+          onMouseEnter={() => setIsHoveringImage(true)}
+          onMouseLeave={() => setIsHoveringImage(false)}
+          onMouseMove={handleImageMouseMove}
+          className={`relative aspect-[3/4] w-full bg-[#f3f0f5] dark:bg-[#150c18] rounded-xl border transition-colors overflow-hidden group shadow-inner ${
+            isZoomEnabled
+              ? 'border-[#9333ea]/60 dark:border-[#c026d3]/60 cursor-zoom-in'
+              : 'border-[#ebe5ef] dark:border-[#2f1e39]'
+          }`}
+        >
+          {/* Botão da Lupa (Ativa/Desativa zoom ao passar o mouse) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsZoomEnabled((prev) => !prev)
+            }}
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              setIsHoveringImage(false)
+            }}
+            onMouseLeave={() => setIsHoveringImage(true)}
+            title={
+              isZoomEnabled
+                ? 'Desativar lupa (clique para desligar o zoom)'
+                : 'Ativar lupa (passe o mouse no documento para dar zoom)'
+            }
+            aria-pressed={isZoomEnabled}
+            className={`absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm backdrop-blur-md transition-all cursor-pointer ${
+              isZoomEnabled
+                ? 'bg-[#6b1578] text-white ring-2 ring-[#d88cf5]/60 dark:bg-[#a21caf] dark:ring-[#f0abfc]/50'
+                : 'bg-white/90 text-[#4a1852] border border-[#e3dae8] hover:bg-white dark:bg-[#23152b]/90 dark:text-[#e9d5ff] dark:border-[#3e274b] dark:hover:bg-[#2d1b37]'
+            }`}
+          >
+            <ZoomIn className="w-3.5 h-3.5 stroke-[2.2]" />
+            <span>{isZoomEnabled ? 'Lupa ativa' : 'Lupa'}</span>
+          </button>
+
           {imageUrl ? (
             <img
               src={imageUrl}
               alt="Documento"
-              className="w-full h-full object-contain p-4"
+              style={{
+                transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+                transform:
+                  isZoomEnabled && isHoveringImage ? 'scale(2.35)' : 'scale(1)',
+              }}
+              className="w-full h-full object-contain p-4 transition-transform duration-150 ease-out select-none pointer-events-none"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-sm text-[#6e6378] dark:text-[#a093a8]">
               {imageFailed ? 'Imagem indisponível' : 'Carregando imagem...'}
             </div>
           )}
-          
+
           {doc.pages > 1 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md text-white text-[10px] font-bold">
-              <button 
-                onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+            <div
+              onMouseEnter={(e) => {
+                e.stopPropagation()
+                setIsHoveringImage(false)
+              }}
+              onMouseLeave={() => setIsHoveringImage(true)}
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md text-white text-[10px] font-bold"
+            >
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(0, prev - 1))}
                 disabled={currentPage === 0}
-                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors"
+                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors cursor-pointer"
               >
                 Anterior
               </button>
-              <span>Página {currentPage + 1} de {doc.pages}</span>
-              <button 
-                onClick={() => setCurrentPage(prev => Math.min(doc.pages - 1, prev + 1))}
+              <span>
+                Página {currentPage + 1} de {doc.pages}
+              </span>
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(doc.pages - 1, prev + 1))
+                }
                 disabled={currentPage === doc.pages - 1}
-                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors"
+                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors cursor-pointer"
               >
                 Próxima
               </button>
@@ -108,13 +240,17 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
           )}
         </div>
 
-        {/* Alert / Diagnosis Box (sem tom amarelo/marrom) */}
+        {/* Alert / Diagnosis Box */}
         <div className="p-4 rounded-xl bg-[#f8f5fa] dark:bg-[#201326] border border-[#ece4f1] dark:border-[#382240] text-xs sm:text-sm space-y-1">
           <p className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">
             {doc.issueDescription}
           </p>
           <p className="text-[#6e6378] dark:text-[#a093a8]">
-            Tipo sugerido pela IA: <strong className="font-bold text-[#9333ea] dark:text-[#d67bf3]">{doc.suggestedType}</strong> · confiança {Math.round(doc.suggestedConfidence * 100)}%
+            Tipo sugerido pela IA:{' '}
+            <strong className="font-bold text-[#9333ea] dark:text-[#d67bf3]">
+              {suggestedLabel}
+            </strong>{' '}
+            · confiança {Math.round(doc.suggestedConfidence * 100)}%
           </p>
         </div>
 
@@ -130,9 +266,18 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
                 key={idx}
                 className="flex items-center rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] overflow-hidden bg-white dark:bg-[#150c18]"
               >
-                <div className="px-3.5 py-2 bg-[#f8f5fa] dark:bg-[#201224] border-r border-[#ebe5ef] dark:border-[#2f1e39] text-xs font-semibold text-[#6e6378] dark:text-[#a093a8] min-w-[70px]">
-                  {field.key}
-                </div>
+                <input
+                  type="text"
+                  value={field.key}
+                  onChange={(e) => {
+                    const keyVal = e.target.value
+                    setExtractedFields((prev) =>
+                      prev.map((f, i) => (i === idx ? { ...f, key: keyVal } : f))
+                    )
+                  }}
+                  aria-label="Nome do campo"
+                  className="px-3.5 py-2 bg-[#f8f5fa] dark:bg-[#201224] border-r border-[#ebe5ef] dark:border-[#2f1e39] text-xs font-semibold text-[#6e6378] dark:text-[#a093a8] w-32 focus:outline-none"
+                />
                 <input
                   type="text"
                   value={field.value}
@@ -180,8 +325,8 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
               className="w-full px-3.5 py-2.5 rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#150c18] text-[#2d0a33] dark:text-white text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#9333ea] cursor-pointer"
             >
               {availableCategories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
+                <option key={cat.slug} value={cat.slug}>
+                  {cat.name}
                 </option>
               ))}
             </select>
@@ -201,24 +346,42 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
           </div>
         </div>
 
-        {/* Action Buttons (sem favicon ou logo) */}
+        {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-3 pt-3">
           <button
             type="button"
-            onClick={() => onConfirm(doc.id, selectedCategory, personName)}
+            onClick={() =>
+              onConfirm(
+                doc.id,
+                selectedCategory,
+                personName,
+                extractedFields,
+                doc.initialCampos
+              )
+            }
             className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
           >
             <Check className="w-4 h-4 stroke-[2.5]" />
             <span>Confirmar classificação</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => onAcceptSuggestion(doc)}
-            className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border border-[#d88cf5] dark:border-[#c026d3] text-[#7c1782] dark:text-[#f38df9] hover:bg-[#f6ebfa] dark:hover:bg-[#281530] flex items-center gap-2 transition-all cursor-pointer"
-          >
-            <span>Aceitar sugestão ({doc.suggestedType})</span>
-          </button>
+          {isValidSuggestion && selectedCategory === doc.suggestedType && (
+            <button
+              type="button"
+              onClick={() =>
+                onConfirm(
+                  doc.id,
+                  selectedCategory,
+                  personName,
+                  extractedFields,
+                  doc.initialCampos
+                )
+              }
+              className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border border-[#d88cf5] dark:border-[#c026d3] text-[#7c1782] dark:text-[#f38df9] hover:bg-[#f6ebfa] dark:hover:bg-[#281530] flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <span>Aceitar sugestão ({suggestedLabel})</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -231,56 +394,99 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   onApprove,
   availableCategories,
 }) => {
-  const [selectedDocId, setSelectedDocId] = useState<string>(documents[0]?.id || '')
-  const [selectedCheckboxes, setSelectedCheckboxes] = useState<Record<string, boolean>>({})
+  // Ordena prioritariamente pelo timestamp de processamento (mais recente primeiro)
+  // e utiliza o id como critério de desempate secundário
+  const sortedDocuments = useMemo(
+    () =>
+      [...documents].sort((a, b) => {
+        const timeA = a.processedTimestamp ?? 0
+        const timeB = b.processedTimestamp ?? 0
+        if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+          return timeB - timeA
+        }
+        return Number(b.id) - Number(a.id)
+      }),
+    [documents]
+  )
+
+  const [selectedDocId, setSelectedDocId] = useState<string>(
+    sortedDocuments[0]?.id || ''
+  )
+  const [selectedCheckboxes, setSelectedCheckboxes] = useState<
+    Record<string, boolean>
+  >({})
   const [bulkCategory, setBulkCategory] = useState<string>('')
+  const detailPanelRef = useRef<HTMLDivElement>(null)
+
+  const handleSelectDoc = useCallback((id: string) => {
+    setSelectedDocId(id)
+    requestAnimationFrame(() => {
+      detailPanelRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  }, [])
+
+  const categoryOptions = useMemo(() => {
+    const valid = availableCategories.filter((c) => VALID_CATEGORY_SLUGS.has(c.slug))
+    return valid.length > 0 ? valid : OFFICIAL_CATEGORY_OPTIONS
+  }, [availableCategories])
 
   // Selected document
   const currentDoc =
-    documents.find((d) => d.id === selectedDocId) || documents[0]
+    sortedDocuments.find((d) => d.id === selectedDocId) || sortedDocuments[0]
 
-  const handleAcceptSuggestion = useCallback((doc: ReviewPendingDocument) => {
-    onApprove(doc.id, doc.suggestedType, doc.personName)
-    const remaining = documents.filter((d) => d.id !== doc.id)
-    if (remaining.length > 0) {
-      setSelectedDocId(remaining[0].id)
-    }
-  }, [documents, onApprove])
-
-  // Keyboard navigation & shortcuts (↑ / ↓ to navigate, 'A' to accept suggestion)
+  // Keyboard navigation (↑ / ↓ to navigate)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+      if (
+        ['INPUT', 'SELECT', 'TEXTAREA'].includes(
+          (e.target as HTMLElement)?.tagName
+        )
+      ) {
         return
       }
 
-      const currentIndex = documents.findIndex((d) => d.id === currentDoc?.id)
+      const currentIndex = sortedDocuments.findIndex((d) => d.id === currentDoc?.id)
 
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        if (currentIndex < documents.length - 1) {
-          setSelectedDocId(documents[currentIndex + 1].id)
+        if (currentIndex < sortedDocuments.length - 1) {
+          handleSelectDoc(sortedDocuments[currentIndex + 1].id)
         }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         if (currentIndex > 0) {
-          setSelectedDocId(documents[currentIndex - 1].id)
-        }
-      } else if (e.key.toLowerCase() === 'a') {
-        e.preventDefault()
-        if (currentDoc) {
-          handleAcceptSuggestion(currentDoc)
+          handleSelectDoc(sortedDocuments[currentIndex - 1].id)
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [documents, currentDoc, handleAcceptSuggestion])
+  }, [sortedDocuments, currentDoc, handleSelectDoc])
+
+  const handleConfirmClassification = useCallback(
+    (
+      docId: string,
+      categorySlug: string,
+      name: string,
+      updatedFields: { key: string; value: string }[],
+      initialCampos?: Record<string, string>
+    ) => {
+      onApprove(docId, categorySlug, name, updatedFields, initialCampos)
+      const remaining = sortedDocuments.filter((d) => d.id !== docId)
+      if (remaining.length > 0) {
+        handleSelectDoc(remaining[0].id)
+      }
+    },
+    [sortedDocuments, onApprove, handleSelectDoc]
+  )
 
   const handleSelectAll = (checked: boolean) => {
     const updated: Record<string, boolean> = {}
-    documents.forEach((d) => {
+    sortedDocuments.forEach((d) => {
       updated[d.id] = checked
     })
     setSelectedCheckboxes(updated)
@@ -291,26 +497,22 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
     setSelectedCheckboxes((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
-  const handleConfirmClassification = (
-    docId: string,
-    category: string,
-    name: string
-  ) => {
-    onApprove(docId, category, name)
-    const remaining = documents.filter((d) => d.id !== docId)
-    if (remaining.length > 0) {
-      setSelectedDocId(remaining[0].id)
-    }
-  }
-
   // Handle bulk action approval
   const handleApplyBulk = () => {
     if (!bulkCategory) return
-    const idsToProcess = Object.keys(selectedCheckboxes).filter((id) => selectedCheckboxes[id])
+    const idsToProcess = Object.keys(selectedCheckboxes).filter(
+      (id) => selectedCheckboxes[id]
+    )
     idsToProcess.forEach((id) => {
-      const doc = documents.find((d) => d.id === id)
+      const doc = sortedDocuments.find((d) => d.id === id)
       if (doc) {
-        onApprove(doc.id, bulkCategory, doc.personName)
+        onApprove(
+          doc.id,
+          bulkCategory,
+          doc.personName,
+          doc.extractedFields,
+          doc.initialCampos
+        )
       }
     })
     setSelectedCheckboxes({})
@@ -318,7 +520,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   }
 
   const allSelected =
-    documents.length > 0 && documents.every((d) => selectedCheckboxes[d.id])
+    sortedDocuments.length > 0 && sortedDocuments.every((d) => selectedCheckboxes[d.id])
 
   const selectedCount = Object.values(selectedCheckboxes).filter(Boolean).length
 
@@ -382,9 +584,9 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
                     className="w-full px-3.5 py-2 rounded-xl border border-[#c026d3] text-sm text-[#2d0a33] dark:text-white bg-white dark:bg-[#150c18] focus:outline-none focus:ring-1 focus:ring-[#c026d3] cursor-pointer"
                   >
                     <option value="">Classificar como...</option>
-                    {availableCategories.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
+                    {categoryOptions.map((cat) => (
+                      <option key={cat.slug} value={cat.slug}>
+                        {cat.name}
                       </option>
                     ))}
                   </select>
@@ -424,16 +626,16 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
               </label>
             )}
 
-            {/* Document Queue Cards */}
+            {/* Document Queue Cards (Mais recentes no topo) */}
             <div className="space-y-2.5">
-              {documents.map((doc) => {
+              {sortedDocuments.map((doc) => {
                 const isSelected = doc.id === currentDoc?.id
                 const isChecked = !!selectedCheckboxes[doc.id]
 
                 return (
                   <div
                     key={doc.id}
-                    onClick={() => setSelectedDocId(doc.id)}
+                    onClick={() => handleSelectDoc(doc.id)}
                     className={`w-full p-4 rounded-xl transition-all cursor-pointer flex items-start gap-3 select-none relative overflow-hidden ${
                       isSelected
                         ? 'border-y border-r border-[#ebe5ef] dark:border-[#2f1e39] border-l-[4px] border-l-[#86198f] dark:border-l-[#c026d3] bg-white dark:bg-[#1a1120] shadow-xs'
@@ -484,13 +686,14 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
 
           {/* Right Column: Active Document Analysis & Action Panel */}
           {currentDoc && (
-            <ReviewDetailPanel
-              key={currentDoc.id}
-              doc={currentDoc}
-              availableCategories={availableCategories}
-              onConfirm={handleConfirmClassification}
-              onAcceptSuggestion={handleAcceptSuggestion}
-            />
+            <div ref={detailPanelRef} className="lg:col-span-7 scroll-mt-20">
+              <ReviewDetailPanel
+                key={currentDoc.id}
+                doc={currentDoc}
+                availableCategories={categoryOptions}
+                onConfirm={handleConfirmClassification}
+              />
+            </div>
           )}
         </div>
       )}

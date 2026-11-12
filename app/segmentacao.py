@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from app import config, llm, prompts
 from app.anonimizacao import anonimizar_texto
+from app.conformidade import validar_cnpj
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +28,18 @@ def _num(s: str) -> int:
 
 
 def paginacao(texto: str) -> tuple[int, int] | None:
-    """(k, N) da última ocorrência de 'Página k de N' (rodapé), ou None."""
-    achados = _PAGINACAO.findall(texto)
+    """(k, N) da última ocorrência de 'Página k de N' em cabeçalho ou rodapé, ou None.
+
+    Só conta ocorrência nas primeiras ou últimas config.SEG_PAG_LINHAS linhas não vazias da página; uma frase
+    no corpo ("conforme página 1 de 3 do contrato") é ignorada."""
+    linhas = [ln for ln in texto.splitlines() if ln.strip()]
+    n_lin = config.SEG_PAG_LINHAS
+    if len(linhas) > 2 * n_lin:
+        blocos = ["\n".join(linhas[:n_lin]), "\n".join(linhas[-n_lin:])]  # cabeçalho, rodapé
+    else:
+        blocos = ["\n".join(linhas)]
+    # a regex aceita quebra de linha dentro da expressão ("Página 1\nde 3"); vale a última ocorrência
+    achados = [a for b in blocos for a in _PAGINACAO.findall(b)]
     if not achados:
         return None
     k, n = achados[-1]
@@ -109,18 +120,23 @@ def perguntar_llm_mesmo_documento(fim_anterior: str, inicio_atual: str) -> bool 
 
 
 def segmentar(textos: list[str]) -> list[Documento]:
-    """Cascata: branco/carimbo herda -> 'Página k de N' -> CNPJ + TF-IDF -> ambíguo (Jev; sem resposta abre e marca).
+    """Cascata: branco/carimbo herda -> 'Página k de N' (k>1 só continua se coerente com a última página paginada do
+    documento: mesmo N e k maior; senão abre e marca ambíguo) -> CNPJ + TF-IDF -> ambíguo (Jev; sem resposta abre e marca).
 
-    Sem paginação: similaridade alta continua; CNPJ diferente abre; similaridade baixa abre, exceto com o
-    mesmo CNPJ, que vai para a pergunta ao Jev junto com a faixa ambígua."""
+    Sem paginação: dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento, mesmo com similaridade
+    alta (sem perguntar ao Jev); com similaridade alta e algum CNPJ inválido (provável erro de OCR), continua.
+    Abaixo da similaridade alta, CNPJ diferente abre; similaridade baixa abre, exceto com o mesmo CNPJ, que vai
+    para a pergunta ao Jev junto com a faixa ambígua."""
     if not textos:
         return []
     vetores = _vetores_tfidf(textos)
     cnpjs = [cnpj(t) for t in textos]
     inicios: list[tuple[int, bool]] = [(0, False)]  # (índice da página, ambíguo)
     ref = None  # última página não vazia do documento corrente
+    pag_doc = None  # (k, N) da última página paginada do documento corrente; None = sem paginação conhecida
     if not em_branco(textos[0]):
         ref = 0
+        pag_doc = paginacao(textos[0])
     for i in range(1, len(textos)):
         texto = textos[i]
         if em_branco(texto):
@@ -128,16 +144,27 @@ def segmentar(textos: list[str]) -> list[Documento]:
         if ref is None:
             # documento corrente só tem páginas em branco (início do lote): o conteúdo as absorve
             ref = i
+            pag_doc = paginacao(texto)
             continue
         pag = paginacao(texto)
         if pag is not None and pag[0] == 1:
             inicios.append((i, False))
+            pag_doc = pag
         elif pag is not None and pag[0] > 1:
-            pass  # continua
+            if pag_doc is None or (pag[1] == pag_doc[1] and pag[0] > pag_doc[0]):
+                pass  # continua: sem paginação conhecida no documento, ou k avança com o mesmo N (salto tolerado)
+            else:
+                # incoerente (N diferente, k não avança ou documento já completo): a primeira página do outro
+                # documento se perdeu; abre e marca ambíguo para a revisão
+                inicios.append((i, True))
+            pag_doc = pag
         else:
+            abertos = len(inicios)
             sim = _cosseno(vetores[ref], vetores[i])
             conhecidos = cnpjs[ref] is not None and cnpjs[i] is not None
-            if sim >= config.SEG_SIM_ALTO:
+            if conhecidos and cnpjs[ref] != cnpjs[i] and validar_cnpj(cnpjs[ref]) and validar_cnpj(cnpjs[i]):
+                inicios.append((i, False))  # duas empresas reais diferentes: abre mesmo com similaridade alta
+            elif sim >= config.SEG_SIM_ALTO:
                 pass
             elif conhecidos and cnpjs[ref] != cnpjs[i]:
                 inicios.append((i, False))  # outra empresa: abre, sem perguntar
@@ -149,6 +176,8 @@ def segmentar(textos: list[str]) -> list[Documento]:
                     inicios.append((i, True))
                 elif not mesmo:
                     inicios.append((i, False))
+            if len(inicios) > abertos:
+                pag_doc = None  # documento novo sem paginação legível: não herda a do anterior
         ref = i
     docs = []
     for j, (ini, amb) in enumerate(inicios):

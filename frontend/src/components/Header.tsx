@@ -1,5 +1,7 @@
 import React from 'react'
-import { Upload, Sun, Moon, LogOut } from 'lucide-react'
+import { Sun, Moon, LogOut } from 'lucide-react'
+import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
+import type { TrackedLote } from '../hooks/lotePollingLogic'
 // import { Search } from 'lucide-react'
 
 interface HeaderProps {
@@ -13,6 +15,17 @@ interface HeaderProps {
   onSelectTab: (tab: 'documentos' | 'revisao') => void
   globalSearch: string
   onGlobalSearchChange: (value: string) => void
+  lotes?: TrackedLote[]
+  isTrackerOpen?: boolean
+  onToggleTracker?: () => void
+  onMinimizeTracker?: () => void
+  onCancelLote?: (id: number) => void
+  onRetryLote?: (id: number) => void
+  onRecheckLote?: (id: number) => void
+  onDismissLote?: (id: number) => void
+  onDismissAcaoErroLote?: (id: number) => void
+  onClearFinishedLotes?: () => void
+  onNavigateCategory?: (slug: string) => void
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,42 +33,34 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   onLogout,
   onOpenUpload,
-  //onOpenReview,
+  onOpenReview,
   //reviewCount,
   activeTab,
   onSelectTab,
   // globalSearch,
   // onGlobalSearchChange,
+  lotes = [],
+  isTrackerOpen = false,
+  onToggleTracker = () => {},
+  onMinimizeTracker = () => {},
+  onCancelLote = () => {},
+  onRetryLote = () => {},
+  onRecheckLote = () => {},
+  onDismissLote = () => {},
+  onDismissAcaoErroLote = () => {},
+  onClearFinishedLotes = () => {},
+  onNavigateCategory,
 }) => {
   return (
     <header className="w-full border-b border-[#ece8ef] dark:border-[#27192f] bg-white/90 dark:bg-[#140c17]/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Logo & Navigation Tabs */}
         <div className="flex items-center gap-6 sm:gap-8">
-          {/* Logo Bernhoeft */}
+          {/* Marca EviDocs */}
           <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
-            <img
-              src="/logo.png"
-              alt="Bernhoeft"
-              className="h-6 sm:h-7 w-auto object-contain dark:brightness-0 dark:invert transition-all"
-              onError={(e) => {
-                // Fallback SVG caso a imagem não carregue
-                e.currentTarget.style.display = 'none'
-                const parent = e.currentTarget.parentElement
-                if (parent && !parent.querySelector('.logo-fallback')) {
-                  const fallback = document.createElement('div')
-                  fallback.className = 'logo-fallback flex items-center gap-2'
-                  fallback.innerHTML = `
-                    <div class="w-6 h-6 border-2 border-[#5c1363] dark:border-white relative flex items-center justify-center font-bold text-xs">
-                      <div class="absolute inset-0.5 border border-dashed border-[#5c1363] dark:border-white"></div>
-                      B
-                    </div>
-                    <span class="font-semibold text-lg tracking-tight text-[#2d0a33] dark:text-white">Bernhoeft</span>
-                  `
-                  parent.appendChild(fallback)
-                }
-              }}
-            />
+            <span className="font-extrabold text-xl tracking-tight text-[#2d0a33] dark:text-white">
+              EviDocs
+            </span>
           </div>
 
           {/* Navigation Tabs */}
@@ -108,15 +113,22 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           */}
 
-          {/* Upload Button */}
-          <button
-            type="button"
-            onClick={onOpenUpload}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] shadow-sm hover:shadow transition-all cursor-pointer"
-          >
-            <Upload className="w-4 h-4" />
-            <span>Enviar</span>
-          </button>
+          {/* Upload Button / Real-time Processing Tracker Bubble */}
+          <ProcessingTrackerPopover
+            lotes={lotes}
+            isOpen={isTrackerOpen}
+            onToggleOpen={onToggleTracker}
+            onMinimize={onMinimizeTracker}
+            onOpenUpload={onOpenUpload}
+            onCancel={onCancelLote}
+            onRetry={onRetryLote}
+            onRecheck={onRecheckLote}
+            onDismiss={onDismissLote}
+            onDismissAcaoErro={onDismissAcaoErroLote}
+            onClearFinished={onClearFinishedLotes}
+            onNavigateCategory={onNavigateCategory}
+            onNavigateReview={onOpenReview}
+          />
 
           {/* Theme Toggle (Dark / Light) */}
           <button
