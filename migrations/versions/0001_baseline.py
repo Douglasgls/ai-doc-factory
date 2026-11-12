@@ -1,4 +1,18 @@
--- Schema aplicado na primeira inicialização do Postgres (docker-entrypoint-initdb.d).
+"""baseline: schema inicial (empresa, lote, documento, pagina, perfil_jornada, analise_ponto, documento_campos)
+
+Revision ID: 0001_baseline
+Revises:
+"""
+from alembic import op
+
+revision = "0001_baseline"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+# Reproduz o antigo sql/schema.sql (que já incluía `empresa`). Os tipos documentais NÃO são
+# restringidos aqui: a lista vive em app/config.py.
+SCHEMA = r"""
 -- Os tipos documentais NÃO são restringidos aqui: a lista vive em app/config.py.
 
 -- Cadastro de empresas (por nome); os lotes podem ser vinculados a uma na hora do upload.
@@ -121,3 +135,16 @@ CREATE TABLE documento_campos (
     atualizado_em   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (documento_id, campo)
 );
+"""
+
+
+def upgrade() -> None:
+    op.get_bind().exec_driver_sql(SCHEMA)
+
+
+def downgrade() -> None:
+    op.get_bind().exec_driver_sql(
+        """
+        DROP TABLE IF EXISTS documento_campos, analise_ponto, perfil_jornada, pagina, documento, lote, empresa CASCADE
+        """
+    )

@@ -16,6 +16,7 @@ Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O q
 | `api` | FastAPI: upload, consulta, busca e revisão |
 | `worker_ocr_seg` | Consome `segmentar_lote`: rasteriza, faz OCR, segmenta em documentos |
 | `worker_classify` | Consome `classificar_documento`: classifica, roteia por confiança, fecha o lote |
+| `migrate` | One-shot: roda `alembic upgrade head` e sai; `api` e os workers só sobem depois que ele termina com sucesso |
 | `worker_extracao` | Consome `extrair_campos`: Gemini extrai empresa (CNPJ e razão social), datas e identificação em `documento_campos` (Goal 7); fora do fan-in do lote |
 | `worker_analise` | Consome `analisar_folha_ponto`: Gemini + cálculo em código + Jev, grava `analise_ponto` (Goal 6); fora do fan-in do lote |
 | `frontend` | Interface React servida por Nginx (`FRONTEND_PORT`, padrão 5173): login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa (ver [Frontend](#frontend)) |
@@ -127,7 +128,7 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `372 passed, 1 skipped, 1 warning in 9.37s`, no commit `645f3f4`, em 2026-11-11, com `CLASSIFICADOR=regras`. Essa execução foi **fora do Docker**, com Postgres e Redis locais e Python 3.13 (o container usa Python 3.12), com o comando `python -m pytest tests -q`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `372 passed, 1 skipped, 1 warning in 9.37s`, no commit `645f3f4`, em 2026-11-11, com `CLASSIFICADOR=regras`. Essa execução foi **fora do Docker**, com Postgres e Redis locais e Python 3.13 (o container usa Python 3.12), com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
@@ -135,7 +136,27 @@ Com `CLASSIFICADOR=regras` no `.env`, a classificação usa palavras-chave (`app
 
 ### 6. Mudança de schema e dados locais
 
-O `sql/schema.sql` só é aplicado na primeira inicialização do volume do Postgres, e não há migrações. Se o schema mudar, é preciso recriar o banco:
+O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo.
+
+Criar uma nova revisão (dentro do container, o arquivo gerado fica na imagem; copie-o para `migrations/versions/` do repositório):
+
+```bash
+docker compose run --rm migrate alembic revision -m "descricao curta"
+```
+
+Edite `upgrade()`/`downgrade()` com SQL e rebuild (`docker compose up -d --build`). Para aplicar manualmente: `docker compose run --rm migrate alembic upgrade head`; para voltar uma: `alembic downgrade -1`.
+
+> **ATENÇÃO: quem já tem banco local criado pelo antigo `sql/schema.sql` (volume `pgdata` existente).** Antes do próximo `docker compose up`, rode **uma vez**:
+>
+> ```bash
+> docker compose run --rm migrate alembic stamp head
+> ```
+>
+> Isso apenas marca o baseline como aplicado, sem alterar tabelas nem dados. A alternativa é recomeçar do zero com `docker compose down -v` (apaga todos os dados locais). **Sem isso**, o serviço `migrate` falha com `relation "empresa" already exists` e, como a `api` e os workers só sobem depois que ele termina com sucesso, nenhum deles inicia.
+
+Banco novo (volume vazio) não precisa de nada: o `migrate` cria o schema. O `sql/schema.sql` não existe mais; o schema vive em `migrations/versions/`.
+
+Para recomeçar do zero:
 
 ```bash
 docker compose down -v
@@ -278,7 +299,7 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 - Os dados sintéticos são otimistas. A validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.
 - Um worker por fila: não há escala horizontal testada.
 - Autenticação mínima: um único usuário administrador, sem tabela de usuários nem papéis; sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
-- Sem migrações: `sql/schema.sql` só vale em banco novo (ver `docker compose down -v`).
+- Migrações só em SQL cru (Alembic, sem models) e sem teste de upgrade a partir de bancos antigos além do baseline; quem tem banco criado pelo antigo `sql/schema.sql` precisa de `alembic stamp head` (ver seção 6).
 - Sem CI.
 - O Jev e o Gemini recebem texto (anonimizado, ver "Anonimização") e imagem de páginas dos documentos. Use `CLASSIFICADOR=regras` se o conteúdo não puder sair da máquina.
 - A confiança do classificador por regras é uma heurística sem calibração, usada só para roteamento.
