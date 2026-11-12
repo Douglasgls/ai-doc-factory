@@ -12,6 +12,8 @@ import {
   formatarMarca,
   formatarMinutos,
   nivelDeRisco,
+  rotuloSemValor,
+  textoBaseRisco,
   rotuloTipo,
   type AnalisePonto,
   type DiaApurado,
@@ -375,7 +377,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                         {nivel ? ROTULO_RISCO[nivel] : 'Indeterminado'}
                       </div>
                       <div className={`text-[10px] ${MUTED}`}>
-                        Quanto maior, pior. É o maior risco entre as 4 dimensões abaixo.
+                        Quanto maior, pior. {textoBaseRisco(analise.scores_dimensao)}
                       </div>
                     </div>
                   </div>
@@ -399,7 +401,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                         >
                           <div className={`text-[10px] ${MUTED}`}>{ROTULO_DIMENSAO[chave]}</div>
                           <div className={`text-sm font-bold ${n ? COR_TEXTO[n] : MUTED}`}>
-                            {pct != null ? `${pct}%` : 'Indeterminada'}
+                            {pct != null ? `${pct}%` : rotuloSemValor(dim)}
                           </div>
                         </div>
                       )

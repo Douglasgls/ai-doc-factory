@@ -93,12 +93,22 @@ def extrair_com_gemini(texto: str, imagens: list[bytes], perfil: dict) -> tuple[
     return dado, resp.get("modelVersion") or config.GEMINI_ANALISE_MODEL, llm._uso(resp)
 
 
-def julgar_com_jev(contagens: dict, analise: str) -> tuple[dict, str, dict]:
-    """Uma única requisição, uma pergunta Score por dimensão. Devolve (respostas, modelo, usage)."""
-    state = {"contagens": contagens, "analise_gemini": anonimizar_texto(analise)}  # texto não confiável em campo próprio
-    resp = llm.jev_decidir(state, prompts.PERGUNTAS_PONTO)
+def dimensoes_nao_avaliadas(contagens: dict) -> dict:
+    """Dimensões sem dados para avaliar, {dimensao: motivo}: não vão ao Jev. Falta de dado não é risco baixo."""
+    if contagens["descanso"]["semanas_completas_avaliadas"] == 0:
+        return {"descanso": "sem_semana_completa"}  # descanso semanal só se avalia em semana com os 7 dias
+    return {}
+
+
+def julgar_com_jev(contagens: dict, analise: str, nao_avaliadas=()) -> tuple[dict, str, dict]:
+    """Uma única requisição, uma pergunta Score por dimensão avaliável. Devolve (respostas, modelo, usage)."""
+    perguntas = {d: q for d, q in prompts.PERGUNTAS_PONTO.items() if d not in nao_avaliadas}
+    # texto não confiável em campo próprio; contagens só das dimensões perguntadas
+    state = {"contagens": {d: c for d, c in contagens.items() if d not in nao_avaliadas},
+             "analise_gemini": anonimizar_texto(analise)}
+    resp = llm.jev_decidir(state, perguntas)
     respostas = {}
-    for dim, pergunta in prompts.PERGUNTAS_PONTO.items():
+    for dim, pergunta in perguntas.items():
         try:
             r = resp["answers"][dim]
             respostas[dim] = {"score": float(r["score"]), "confianca": float(r["confidence"]),
@@ -117,17 +127,19 @@ def analisar(texto: str, imagens: list[bytes], perfil: dict) -> dict:
     britanico = ponto.detectar_ponto_britanico(dado["marcacoes"])
     comparacao = ponto.comparar_com_gemini(apuracao, dado["divergencias"])  # vale o código
     contagens = ponto.resumir_contagens(apuracao, britanico)
-    respostas, modelo_jev, uso_jev = julgar_com_jev(contagens, dado["analise"])
+    nao_avaliadas = dimensoes_nao_avaliadas(contagens)
+    respostas, modelo_jev, uso_jev = julgar_com_jev(contagens, dado["analise"], nao_avaliadas)
     try:
-        score = ponto.score_geral(respostas)
+        score = ponto.score_geral(respostas, nao_avaliadas=nao_avaliadas)
     except ValueError as e:
         raise llm.LLMErro(f"score do Jev inválido: {e}") from e
     return {
         "marcacoes": dado["marcacoes"], "intervalo_pre_assinalado": dado["intervalo_pre_assinalado"],
         "totais": {k: v for k, v in apuracao.items() if k != "divergencias"},
         "divergencias": comparacao["divergencias"], "diferencas_gemini": comparacao["diferencas"],
-        "ponto_britanico": britanico, "analise": dado["analise"], "contagens": contagens,
-        "scores_dimensao": {d: {**respostas[d], **score["dimensoes"][d]} for d in respostas},
+        "ponto_britanico": britanico, "analise": dado["analise"], 
+        "contagens": {**contagens, "nao_avaliadas": score["nao_avaliadas"]},  # score geral parcial se não vazio
+        "scores_dimensao": {d: {**respostas.get(d, {}), **v} for d, v in score["dimensoes"].items()},
         "score_geral": score["score_geral"], "requer_revisao": score["requer_revisao"],
         "modelo_gemini": modelo_gemini, "modelo_jev": modelo_jev,
         "custo": {"gemini": uso_gemini, "jev": uso_jev},
