@@ -15,6 +15,7 @@ from app import config
 
 RAIZ = Path(__file__).resolve().parent.parent
 TABELAS = {"empresa", "lote", "documento", "pagina", "perfil_jornada", "analise_ponto", "documento_campos"}
+TABELAS_ACESSO = {"tomador", "prestador", "contrato", "usuario"}  # migração 0002
 
 
 @pytest.fixture
@@ -49,12 +50,16 @@ def _tabelas(url):
 def test_upgrade_head_cria_tabelas_e_downgrade_base_remove(banco_descartavel):
     url = banco_descartavel
     _alembic(url, "upgrade", "head")
-    assert _tabelas(url) == TABELAS
+    assert _tabelas(url) == TABELAS | TABELAS_ACESSO
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT count(*) FROM perfil_jornada WHERE perfil = 'clt_padrao'").fetchone()[0] == 16
         assert conn.execute(
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('pagina_texto_fts_idx', 'empresa_nome_uniq')"
         ).fetchone()[0] == 2
     _alembic(url, "upgrade", "head")  # idempotente: já está no head
+    _alembic(url, "downgrade", "0001_baseline")  # remove só as tabelas do modelo de acesso
+    assert _tabelas(url) == TABELAS
+    _alembic(url, "upgrade", "head")
+    assert _tabelas(url) == TABELAS | TABELAS_ACESSO
     _alembic(url, "downgrade", "base")
     assert _tabelas(url) == set()
