@@ -81,7 +81,7 @@ O F1 macro foi 1,000 em 9 documentos, o que não diz nada sobre o classificador 
 - **Extração lenta:** a fila `extrair_campos` termina depois do lote, então as empresas aparecem aos poucos em `GET /empresas`.
 - **Completude por empresa:** só verifica se existe um documento de cada tipo, não por funcionário.
 - **Sem CI.** O schema é versionado com Alembic (`migrations/`, serviço `migrate`); bancos criados pelo antigo `sql/schema.sql` precisam de `alembic stamp head` uma vez (README, seção 6).
-- **Autenticação mínima:** `app/routers/auth/`, login em `POST /auth/login` com JWT e um único administrador (`AUTH_USUARIO`, `AUTH_SENHA`, `AUTH_SEGREDO`); sem papéis nem revogação de token (ver README, "Limitações").
+- **Autenticação mínima:** `app/routers/auth/`, login em `POST /auth/login` pela tabela `usuario` (scrypt, JWT; nível, papel e ativo relidos do banco a cada requisição); `AUTH_USUARIO`/`AUTH_SENHA` só criam o primeiro admin (`python -m app.bootstrap_admin`); rotas de dados exigem nível `plataforma` por enquanto (ver README, "Autenticação" e "Limitações").
 
 ## Decisões em aberto
 
