@@ -236,8 +236,17 @@ export function App() {
       )
       setDetailedDocs(allDocs)
 
-      // Map review queue from GET /revisao
-      const mappedReviewDocs: ReviewPendingDocument[] = reviewData.map((d) => {
+      // Map review queue from GET /revisao (mais recentes primeiro)
+      const reviewOrdenados = [...reviewData].sort((a, b) => {
+        const timeA = a.processado_em ? new Date(a.processado_em).getTime() : 0
+        const timeB = b.processado_em ? new Date(b.processado_em).getTime() : 0
+        if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+          return timeB - timeA
+        }
+        return b.id - a.id
+      })
+
+      const mappedReviewDocs: ReviewPendingDocument[] = reviewOrdenados.map((d) => {
         const campos = d.campos || {}
         const suggestedSlug = d.tipo_sugerido || 'desconhecido'
         const suggestedLabel =
@@ -252,6 +261,7 @@ export function App() {
           issueLabel: d.motivo || 'Revisão pendente',
           timeAgo: formatTimeAgo(d.processado_em),
           processedDate: formatDatePtBr(d.processado_em),
+          processedTimestamp: d.processado_em ? new Date(d.processado_em).getTime() : undefined,
           pages: d.n_paginas ?? d.pagina_fim - d.pagina_ini + 1,
           startPage: d.pagina_ini,
           issueDescription: d.motivo || 'Documento requer verificação manual.',

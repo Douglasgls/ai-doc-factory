@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { Check, X, Plus } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Check, X, Plus, ZoomIn } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
 
@@ -59,6 +59,17 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   const [personName, setPersonName] = useState(doc.personName)
   const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
   const [currentPage, setCurrentPage] = useState(0)
+  const [isZoomEnabled, setIsZoomEnabled] = useState(false)
+  const [isHoveringImage, setIsHoveringImage] = useState(false)
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 })
+
+  const handleImageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isZoomEnabled) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100))
+    const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
+    setZoomOrigin({ x, y })
+  }
 
   useEffect(() => {
     const valid = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
@@ -127,7 +138,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
     doc.suggestedType
 
   return (
-    <div className="lg:col-span-7 space-y-6">
+    <div className="space-y-6">
       <div className="rounded-2xl p-6 sm:p-7 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-xs space-y-6">
         {/* Document Header */}
         <div className="flex justify-between items-start">
@@ -142,12 +153,54 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
         </div>
 
         {/* Visualizer (Imagem real da página no backend) */}
-        <div className="relative aspect-[3/4] w-full bg-[#f3f0f5] dark:bg-[#150c18] rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] overflow-hidden group shadow-inner">
+        <div
+          onMouseEnter={() => setIsHoveringImage(true)}
+          onMouseLeave={() => setIsHoveringImage(false)}
+          onMouseMove={handleImageMouseMove}
+          className={`relative aspect-[3/4] w-full bg-[#f3f0f5] dark:bg-[#150c18] rounded-xl border transition-colors overflow-hidden group shadow-inner ${
+            isZoomEnabled
+              ? 'border-[#9333ea]/60 dark:border-[#c026d3]/60 cursor-zoom-in'
+              : 'border-[#ebe5ef] dark:border-[#2f1e39]'
+          }`}
+        >
+          {/* Botão da Lupa (Ativa/Desativa zoom ao passar o mouse) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsZoomEnabled((prev) => !prev)
+            }}
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              setIsHoveringImage(false)
+            }}
+            onMouseLeave={() => setIsHoveringImage(true)}
+            title={
+              isZoomEnabled
+                ? 'Desativar lupa (clique para desligar o zoom)'
+                : 'Ativar lupa (passe o mouse no documento para dar zoom)'
+            }
+            aria-pressed={isZoomEnabled}
+            className={`absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm backdrop-blur-md transition-all cursor-pointer ${
+              isZoomEnabled
+                ? 'bg-[#6b1578] text-white ring-2 ring-[#d88cf5]/60 dark:bg-[#a21caf] dark:ring-[#f0abfc]/50'
+                : 'bg-white/90 text-[#4a1852] border border-[#e3dae8] hover:bg-white dark:bg-[#23152b]/90 dark:text-[#e9d5ff] dark:border-[#3e274b] dark:hover:bg-[#2d1b37]'
+            }`}
+          >
+            <ZoomIn className="w-3.5 h-3.5 stroke-[2.2]" />
+            <span>{isZoomEnabled ? 'Lupa ativa' : 'Lupa'}</span>
+          </button>
+
           {imageUrl ? (
             <img
               src={imageUrl}
               alt="Documento"
-              className="w-full h-full object-contain p-4"
+              style={{
+                transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+                transform:
+                  isZoomEnabled && isHoveringImage ? 'scale(2.35)' : 'scale(1)',
+              }}
+              className="w-full h-full object-contain p-4 transition-transform duration-150 ease-out select-none pointer-events-none"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-sm text-[#6e6378] dark:text-[#a093a8]">
@@ -156,11 +209,18 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
           )}
 
           {doc.pages > 1 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md text-white text-[10px] font-bold">
+            <div
+              onMouseEnter={(e) => {
+                e.stopPropagation()
+                setIsHoveringImage(false)
+              }}
+              onMouseLeave={() => setIsHoveringImage(true)}
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md text-white text-[10px] font-bold"
+            >
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(0, prev - 1))}
                 disabled={currentPage === 0}
-                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors"
+                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors cursor-pointer"
               >
                 Anterior
               </button>
@@ -172,7 +232,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
                   setCurrentPage((prev) => Math.min(doc.pages - 1, prev + 1))
                 }
                 disabled={currentPage === doc.pages - 1}
-                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors"
+                className="hover:text-[#d67bf3] disabled:opacity-30 transition-colors cursor-pointer"
               >
                 Próxima
               </button>
@@ -334,13 +394,39 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   onApprove,
   availableCategories,
 }) => {
+  // Ordena prioritariamente pelo timestamp de processamento (mais recente primeiro)
+  // e utiliza o id como critério de desempate secundário
+  const sortedDocuments = useMemo(
+    () =>
+      [...documents].sort((a, b) => {
+        const timeA = a.processedTimestamp ?? 0
+        const timeB = b.processedTimestamp ?? 0
+        if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+          return timeB - timeA
+        }
+        return Number(b.id) - Number(a.id)
+      }),
+    [documents]
+  )
+
   const [selectedDocId, setSelectedDocId] = useState<string>(
-    documents[0]?.id || ''
+    sortedDocuments[0]?.id || ''
   )
   const [selectedCheckboxes, setSelectedCheckboxes] = useState<
     Record<string, boolean>
   >({})
   const [bulkCategory, setBulkCategory] = useState<string>('')
+  const detailPanelRef = useRef<HTMLDivElement>(null)
+
+  const handleSelectDoc = useCallback((id: string) => {
+    setSelectedDocId(id)
+    requestAnimationFrame(() => {
+      detailPanelRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  }, [])
 
   const categoryOptions = useMemo(() => {
     const valid = availableCategories.filter((c) => VALID_CATEGORY_SLUGS.has(c.slug))
@@ -349,7 +435,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
 
   // Selected document
   const currentDoc =
-    documents.find((d) => d.id === selectedDocId) || documents[0]
+    sortedDocuments.find((d) => d.id === selectedDocId) || sortedDocuments[0]
 
   // Keyboard navigation (↑ / ↓ to navigate)
   useEffect(() => {
@@ -362,24 +448,24 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
         return
       }
 
-      const currentIndex = documents.findIndex((d) => d.id === currentDoc?.id)
+      const currentIndex = sortedDocuments.findIndex((d) => d.id === currentDoc?.id)
 
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        if (currentIndex < documents.length - 1) {
-          setSelectedDocId(documents[currentIndex + 1].id)
+        if (currentIndex < sortedDocuments.length - 1) {
+          handleSelectDoc(sortedDocuments[currentIndex + 1].id)
         }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         if (currentIndex > 0) {
-          setSelectedDocId(documents[currentIndex - 1].id)
+          handleSelectDoc(sortedDocuments[currentIndex - 1].id)
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [documents, currentDoc])
+  }, [sortedDocuments, currentDoc, handleSelectDoc])
 
   const handleConfirmClassification = useCallback(
     (
@@ -390,17 +476,17 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
       initialCampos?: Record<string, string>
     ) => {
       onApprove(docId, categorySlug, name, updatedFields, initialCampos)
-      const remaining = documents.filter((d) => d.id !== docId)
+      const remaining = sortedDocuments.filter((d) => d.id !== docId)
       if (remaining.length > 0) {
-        setSelectedDocId(remaining[0].id)
+        handleSelectDoc(remaining[0].id)
       }
     },
-    [documents, onApprove]
+    [sortedDocuments, onApprove, handleSelectDoc]
   )
 
   const handleSelectAll = (checked: boolean) => {
     const updated: Record<string, boolean> = {}
-    documents.forEach((d) => {
+    sortedDocuments.forEach((d) => {
       updated[d.id] = checked
     })
     setSelectedCheckboxes(updated)
@@ -418,7 +504,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
       (id) => selectedCheckboxes[id]
     )
     idsToProcess.forEach((id) => {
-      const doc = documents.find((d) => d.id === id)
+      const doc = sortedDocuments.find((d) => d.id === id)
       if (doc) {
         onApprove(
           doc.id,
@@ -434,7 +520,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   }
 
   const allSelected =
-    documents.length > 0 && documents.every((d) => selectedCheckboxes[d.id])
+    sortedDocuments.length > 0 && sortedDocuments.every((d) => selectedCheckboxes[d.id])
 
   const selectedCount = Object.values(selectedCheckboxes).filter(Boolean).length
 
@@ -540,16 +626,16 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
               </label>
             )}
 
-            {/* Document Queue Cards */}
+            {/* Document Queue Cards (Mais recentes no topo) */}
             <div className="space-y-2.5">
-              {documents.map((doc) => {
+              {sortedDocuments.map((doc) => {
                 const isSelected = doc.id === currentDoc?.id
                 const isChecked = !!selectedCheckboxes[doc.id]
 
                 return (
                   <div
                     key={doc.id}
-                    onClick={() => setSelectedDocId(doc.id)}
+                    onClick={() => handleSelectDoc(doc.id)}
                     className={`w-full p-4 rounded-xl transition-all cursor-pointer flex items-start gap-3 select-none relative overflow-hidden ${
                       isSelected
                         ? 'border-y border-r border-[#ebe5ef] dark:border-[#2f1e39] border-l-[4px] border-l-[#86198f] dark:border-l-[#c026d3] bg-white dark:bg-[#1a1120] shadow-xs'
@@ -600,12 +686,14 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
 
           {/* Right Column: Active Document Analysis & Action Panel */}
           {currentDoc && (
-            <ReviewDetailPanel
-              key={currentDoc.id}
-              doc={currentDoc}
-              availableCategories={categoryOptions}
-              onConfirm={handleConfirmClassification}
-            />
+            <div ref={detailPanelRef} className="lg:col-span-7 scroll-mt-20">
+              <ReviewDetailPanel
+                key={currentDoc.id}
+                doc={currentDoc}
+                availableCategories={categoryOptions}
+                onConfirm={handleConfirmClassification}
+              />
+            </div>
           )}
         </div>
       )}

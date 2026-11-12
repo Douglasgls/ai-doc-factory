@@ -55,6 +55,7 @@ export interface ReviewPendingDocument {
   timeAgo: string
   isPriority?: boolean
   processedDate: string
+  processedTimestamp?: number
   pages: number
   startPage: number
   issueDescription: string
