@@ -60,6 +60,11 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
                   {status === 'processando' &&
                     `Processando o lote ${nome}${lote.mensagemAtual ? ` — ${lote.mensagemAtual}` : lote.estado ? ` (${lote.estado}${lote.docsPendentes ? `, ${lote.docsPendentes} documento(s) pendente(s)` : ''})` : ''}...`}
                 </p>
+                {status === 'erro' && lote.mensagemAtual && (
+                  <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5 break-words">
+                    {lote.mensagemAtual}
+                  </p>
+                )}
                 {(status === 'erro' || status === 'cancelado') && onRetry && (
                     <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5">
                       <button
