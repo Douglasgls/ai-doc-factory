@@ -2,6 +2,7 @@ import asyncio
 from decimal import Decimal
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 import psycopg
@@ -20,6 +21,8 @@ from app.eventos import (
 )
 from app.filas import enfileirar
 from app.routers import r
+
+log = logging.getLogger(__name__)
 
 
 def validar_empresa(empresa_id: int | None) -> None:
@@ -169,36 +172,44 @@ def _ha_pos_processamento_pendente(conn, lote_id: int, docs_pendentes: int = 0) 
 
 
 def cancelar_lote(lote_id: int) -> dict:
-    """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação),
-    marcando-o como 'erro' e sinalizando aos workers. Rejeita com 409 se o lote já estiver totalmente finalizado."""
+    """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação).
+    Só documentos 'segmentado' (ainda não classificados) viram 'erro'; o que já foi classificado ou revisado
+    fica como está. Lote em recebido/ocr/classificando vai para 'erro'; lote 'concluido' continua 'concluido'
+    e só perde o que faltava de extração/análise. 409 se não há nada a cancelar.
+    Ordem de bloqueio igual à do classificador (documentos antes do lote); a flag e a limpeza das tarefas no
+    Redis só acontecem depois do commit."""
     with psycopg.connect(config.DATABASE_URL) as conn:
+        previo = conn.execute("SELECT estado FROM lote WHERE id = %s", (lote_id,)).fetchone()
+        if previo is None:
+            raise HTTPException(404, "lote não encontrado")
+        if previo[0] != "concluido":
+            # 1º bloqueio: linhas de documento (como classificar_documento); um job em voo que já travou o
+            # seu documento termina antes; os demais passam a enxergar 'erro' e não fazem fan-in
+            conn.execute(
+                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado = 'segmentado'",
+                (lote_id,),
+            )
+        # 2º bloqueio: o lote; serializa dois cliques e relê o estado já com os fan-ins commitados
         lote = conn.execute(
-            "SELECT id, estado, docs_pendentes FROM lote WHERE id = %s FOR UPDATE",
-            (lote_id,),
+            "SELECT estado, docs_pendentes FROM lote WHERE id = %s FOR UPDATE", (lote_id,)
         ).fetchone()
         if lote is None:
             raise HTTPException(404, "lote não encontrado")
-        if lote[1] == "concluido":
-            if not _ha_pos_processamento_pendente(conn, lote_id, lote[2]):
-                raise HTTPException(409, "lote já concluído não pode ser cancelado")
-            tem_revisao = conn.execute(
-                "SELECT 1 FROM documento WHERE lote_id = %s AND estado = 'revisado' LIMIT 1",
-                (lote_id,),
-            ).fetchone()
-            if tem_revisao is not None:
-                raise HTTPException(409, "lote possui documentos revisados e não pode ser cancelado")
+        estado = lote[0]
+        if estado == "concluido" and not _ha_pos_processamento_pendente(conn, lote_id, lote[1]):
+            raise HTTPException(409, "lote já concluído não pode ser cancelado")
+        if estado in ("recebido", "ocr", "classificando"):
+            conn.execute("UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+    # commit feito: só agora o Redis. Falha aqui não pode virar 500, o banco já mudou.
+    try:
         marcar_cancelado(lote_id, r)
         limpar_tarefas_pos(lote_id, r)
-        if lote[1] in ("recebido", "ocr", "classificando", "concluido"):
-            conn.execute(
-                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado != 'revisado'",
-                (lote_id,),
-            )
-            conn.execute(
-                "UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s",
-                (lote_id,),
-            )
-    publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.", r=r)
+    except Exception:
+        log.exception("lote %s cancelado no banco, mas o Redis falhou (flag/tarefas pendentes)", lote_id)
+    if estado == "concluido":  # a classificação terminou; o lote segue concluído e o acompanhamento encerra
+        publicar_evento(lote_id, "concluido", "Extração/análise pendente cancelada pelo usuário.", r=r)
+    else:
+        publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.", r=r)
     return obter_lote(lote_id)
 
 
