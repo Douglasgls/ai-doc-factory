@@ -13,4 +13,11 @@ class TokenOut(BaseModel):
 
 
 class UsuarioOut(BaseModel):
-    usuario: str
+    id: int
+    email: str
+    nome: str
+    nivel: str
+    papel: str
+    tomador_id: int | None = None
+    prestador_id: int | None = None
+    usuario: str  # igual a `email`; mantido por compatibilidade com o formato anterior de /auth/me

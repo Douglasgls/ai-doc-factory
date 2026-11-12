@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends
 
 from app.routers.auth import actions
@@ -12,5 +14,5 @@ def login(dados: LoginIn):
 
 
 @router.get("/auth/me", response_model=UsuarioOut)
-def me(usuario: str = Depends(actions.exigir_usuario)):
-    return {"usuario": usuario}
+def me(usuario: actions.UsuarioContexto = Depends(actions.exigir_usuario)):
+    return {**asdict(usuario), "usuario": usuario.email}

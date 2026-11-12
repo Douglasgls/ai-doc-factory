@@ -24,12 +24,14 @@ def autenticacao(monkeypatch):
     """Valores falsos de autenticação e a dependência de login substituída, para os testes de rotas não
     precisarem de token. tests/test_autenticacao.py remove o override (fixture `auth_real`)."""
     from app.api import app
-    from app.routers.auth.actions import exigir_usuario
+    from app.routers.auth.actions import UsuarioContexto, exigir_usuario
     monkeypatch.setattr(config, "AUTH_USUARIO", "usuario-teste")
     monkeypatch.setattr(config, "AUTH_SENHA", "senha-falsa-teste")
     monkeypatch.setattr(config, "AUTH_SEGREDO", "segredo-falso-de-teste-com-mais-de-32-bytes")
     monkeypatch.setattr(config, "AUTH_EXPIRA_MIN", 480)
-    app.dependency_overrides[exigir_usuario] = lambda: "usuario-teste"
+    falso = UsuarioContexto(id=0, email="admin-falso@exemplo.invalid", nome="Admin Falso", nivel="plataforma",
+                            papel="admin", tomador_id=None, prestador_id=None)
+    app.dependency_overrides[exigir_usuario] = lambda: falso
     yield
     app.dependency_overrides.pop(exigir_usuario, None)
 
