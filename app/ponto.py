@@ -143,9 +143,11 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
     dias vale só o teto diário; o resultado registra isso em "tolerancia_por_marcacao".
 
     totais_declarados (opcional): {"total_horas_min": n|None, "horas_extras_min": n|None} como declarado na folha.
-    Compara com o recalculado SEM tolerância (extras_bruto_min) e gera total_declarado_divergente se a diferença
-    passar de CONFIG_PONTO["total_declarado_tolerancia_min"]. Diferença só em relação ao valor COM tolerância
-    não é divergência (a tolerância explica); os dois valores ficam em totais.declarados.
+    total_horas: compara com o trabalhado recalculado. horas_extras: o declarado não gera divergência quando bate
+    (dentro de CONFIG_PONTO["total_declarado_tolerancia_min"]) com o recalculado SEM tolerância (extras_bruto_min)
+    OU COM a tolerância do art. 58, § 1º (extras_min_com_tolerancia), pois a folha pode ter aplicado qualquer
+    dos dois critérios. Se não bate com nenhum, gera total_declarado_divergente com a menor diferença entre os dois
+    e o detalhe cita ambos os valores. Os dois valores e os flags de igualdade ficam em totais.declarados.
     """
     p = {k: v["valor"] for k, v in perfil.items()}
     base = {k: v["base_legal"] for k, v in perfil.items()}
@@ -298,7 +300,13 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
         if v is None or invalidos:  # sem declarado, ou dias inválidos tornam o recalculado um mínimo
             continue
         declarados["comparado"] = True
-        if abs(v - calculado) > tol_decl:
+        if campo == "horas_extras":
+            menor = min(abs(v - extras_bruto), abs(v - extras_tol))
+            if menor > tol_decl:
+                div("total_declarado_divergente", None, menor, BASE_LEGAL_REGISTRO,
+                    f"{campo}: declarado {v:g} min, recalculado {extras_bruto:g} min sem tolerância "
+                    f"e {extras_tol:g} min com tolerância", campo=campo)
+        elif abs(v - calculado) > tol_decl:
             div("total_declarado_divergente", None, abs(v - calculado), BASE_LEGAL_REGISTRO,
                 f"{campo}: declarado {v:g} min, recalculado {calculado:g} min", campo=campo)
     if declarados["horas_extras_min"] is not None and not invalidos:
