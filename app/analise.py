@@ -18,7 +18,7 @@ from psycopg.types.json import Jsonb
 
 from app import config, llm, ponto, prompts
 from app.anonimizacao import anonimizar_texto
-from app.eventos import lote_cancelado, publicar_evento
+from app.eventos import concluir_tarefa_pos, lote_cancelado, publicar_evento
 
 log = logging.getLogger(__name__)
 
@@ -169,6 +169,34 @@ def _gravar(conn, documento_id: int, estado: str, dados: dict, erro: str | None 
     conn.execute(_UPSERT, linha)
 
 
+def _resolver_etapa_pos_analise(lote_id: int, doc_id: int, docs_pendentes: int, ap_pendente: bool) -> str:
+    restantes_pos = concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
+    if docs_pendentes > 0:
+        return "classificando"
+    if any(t.startswith("extracao:") for t in restantes_pos):
+        return "extracao"
+    if ap_pendente or any(t.startswith("analise:") for t in restantes_pos):
+        return "analise_ponto"
+    return "concluido"
+
+
+def _pendencias_lote_analise(conn, lote_id: int) -> tuple[int, bool]:
+    lote_row = conn.execute("SELECT docs_pendentes FROM lote WHERE id = %s", (lote_id,)).fetchone()
+    docs_pendentes = lote_row[0] if lote_row else 0
+    ap_pendente = (
+        conn.execute(
+            "SELECT 1 FROM documento d "
+            "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
+            "WHERE d.lote_id = %s AND d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
+            "AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')) "
+            "LIMIT 1",
+            (lote_id,),
+        ).fetchone()
+        is not None
+    )
+    return docs_pendentes, ap_pendente
+
+
 def analisar_documento(payload: dict) -> None:
     doc_id = payload["documento_id"]
     with psycopg.connect(config.DATABASE_URL) as conn:
@@ -177,23 +205,27 @@ def analisar_documento(payload: dict) -> None:
         if doc is None or doc[1] != "folha_ponto" or doc[0] not in ("classificado", "revisado"):
             return  # tipo mudou, documento removido ou ainda não decidido: nada a analisar
         if lote_cancelado(doc[2]):
+            concluir_tarefa_pos(doc[2], f"analise:{doc_id}")
             return
         textos = [t or "" for (t,) in conn.execute(
             "SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
         perfil = ponto.carregar_perfil(conn)
+    lote_id = doc[2]
     publicar_evento(
-        doc[2],
+        lote_id,
         "analise_ponto",
         f"Auditando folha de ponto #{doc_id} (Gemini + CLT + Jev)...",
         documento_id=doc_id,
     )
-    resultado = analisar("\n".join(textos), _imagens(doc[2], doc[3], doc[4]), perfil)
+    resultado = analisar("\n".join(textos), _imagens(lote_id, doc[3], doc[4]), perfil)
     resultado["perfil"] = perfil
     with psycopg.connect(config.DATABASE_URL) as conn:
         _gravar(conn, doc_id, "concluida", resultado)  # uma linha por documento: reprocessar substitui
+        docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+    etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
     publicar_evento(
-        doc[2],
-        "concluido",
+        lote_id,
+        etapa,
         f"Auditoria da folha de ponto #{doc_id} concluída!",
         documento_id=doc_id,
     )
@@ -201,13 +233,21 @@ def analisar_documento(payload: dict) -> None:
 
 def marcar_erro_analise(payload: dict) -> None:
     """ao_esgotar: o job foi para a dlq. Grava a linha como erro (sem sobrescrever documento ou lote)."""
+    doc_id = payload["documento_id"]
+    lote_id = None
+    docs_pend = 0
+    ap_pend = False
     with psycopg.connect(config.DATABASE_URL) as conn:
-        existe = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (payload["documento_id"],)).fetchone()
+        existe = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (doc_id,)).fetchone()
         if existe:
-            _gravar(conn, payload["documento_id"], "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
-            publicar_evento(
-                existe[0],
-                "concluido",
-                f"Auditoria da folha de ponto #{payload['documento_id']} finalizada com alerta.",
-                documento_id=payload["documento_id"],
-            )
+            lote_id = existe[0]
+            _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
+            docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+    if lote_id is not None:
+        etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
+        publicar_evento(
+            lote_id,
+            etapa,
+            f"Auditoria da folha de ponto #{doc_id} finalizada com alerta.",
+            documento_id=doc_id,
+        )

@@ -10,7 +10,13 @@ from psycopg.types.json import Jsonb
 
 from app import config
 from app.analise import enfileirar_analise
-from app.eventos import lote_cancelado, publicar_evento
+from app.eventos import (
+    concluir_tarefa_pos,
+    limpar_tarefas_pos,
+    lote_cancelado,
+    publicar_evento,
+    registrar_tarefas_pos,
+)
 from app.roteamento import decidir
 
 TEXTO_MAX = 6000  # caracteres das primeiras páginas enviados ao classificador
@@ -47,23 +53,41 @@ def _fan_in(conn, lote_id: int) -> int:
     return restantes
 
 
+def _abortar_se_cancelado(conn, lote_id: int) -> None:
+    conn.execute(
+        "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado = 'segmentado'",
+        (lote_id,),
+    )
+    conn.execute(
+        "UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s AND estado != 'concluido'",
+        (lote_id,),
+    )
+
+
 def marcar_erro(payload: dict) -> None:
     """ao_esgotar: job foi para a dlq. Marca o documento como 'erro' (só a partir de 'segmentado') e faz o
     fan-in, para o lote poder concluir. Reentrância segura: se já saiu de 'segmentado', não decrementa."""
+    doc_id = payload["documento_id"]
+    lote_id = None
+    restantes = 0
     with psycopg.connect(config.DATABASE_URL) as conn:
         row = conn.execute(
             "UPDATE documento SET estado = 'erro' WHERE id = %s AND estado = 'segmentado' RETURNING lote_id",
-            (payload["documento_id"],),
+            (doc_id,),
         ).fetchone()
         if row is not None:
-            restantes = _fan_in(conn, row[0])
-            publicar_evento(
-                row[0],
-                "erro" if restantes > 0 else "concluido",
-                f"Falha ao classificar documento #{payload['documento_id']}.",
-                documento_id=payload["documento_id"],
-                docs_pendentes=restantes,
-            )
+            lote_id = row[0]
+            restantes = _fan_in(conn, lote_id)
+    if lote_id is not None:
+        restantes_pos = concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
+        etapa = "classificando" if restantes > 0 else ("extracao" if restantes_pos else "concluido")
+        publicar_evento(
+            lote_id,
+            etapa,
+            f"Falha ao classificar documento #{doc_id}.",
+            documento_id=doc_id,
+            docs_pendentes=restantes,
+        )
 
 
 def classificar_documento(payload: dict) -> None:
@@ -75,6 +99,8 @@ def classificar_documento(payload: dict) -> None:
         if doc is None or doc[0] != "segmentado":
             return  # já decidido ou revisado: job repetido não faz nada
         if lote_cancelado(doc[2]):
+            _abortar_se_cancelado(conn, doc[2])
+            limpar_tarefas_pos(doc[2])
             return
         textos = [t for (t,) in conn.execute(
             "SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
@@ -88,6 +114,10 @@ def classificar_documento(payload: dict) -> None:
     decisao = decidir(resultado.confianca, resultado.tipo, desacordo=resultado.desacordo,
                       segmentacao_ambigua=doc[1])
     with psycopg.connect(config.DATABASE_URL) as conn:  # transação única: gravação + fan-in
+        if lote_cancelado(doc[2]):
+            _abortar_se_cancelado(conn, doc[2])
+            limpar_tarefas_pos(doc[2])
+            return
         # só a transição segmentado -> (classificado | em_revisao) conta: não sobrescreve nem decrementa de novo
         row = conn.execute(
             "UPDATE documento SET estado = %s, tipo = %s, confianca = %s, modelo = %s, versao_prompt = %s, "
@@ -99,10 +129,16 @@ def classificar_documento(payload: dict) -> None:
         if row is None:
             return
         restantes = _fan_in(conn, row[0])
+    lote_id = row[0]
+    vai_analisar_ponto = decisao.estado == "classificado" and decisao.tipo == "folha_ponto"
+    tarefas = [f"extracao:{doc_id}"]
+    if vai_analisar_ponto:
+        tarefas.append(f"analise:{doc_id}")
+    registrar_tarefas_pos(lote_id, tarefas)
     rotulo_tipo = config.TIPOS_INFO.get(decisao.tipo or "", {}).get("nome", decisao.tipo or "Desconhecido")
     if restantes > 0:
         publicar_evento(
-            row[0],
+            lote_id,
             "classificando",
             f"Documento #{doc_id}: {rotulo_tipo} ({restantes} pendente(s))",
             documento_id=doc_id,
@@ -112,7 +148,7 @@ def classificar_documento(payload: dict) -> None:
         )
     else:
         publicar_evento(
-            row[0],
+            lote_id,
             "extracao",
             f"Classificação concluída ({rotulo_tipo}) · extraindo campos com IA...",
             documento_id=doc_id,
@@ -120,7 +156,7 @@ def classificar_documento(payload: dict) -> None:
             estado_documento=decisao.estado,
             docs_pendentes=0,
         )
-    if decisao.estado == "classificado" and decisao.tipo == "folha_ponto":
+    if vai_analisar_ponto:
         enfileirar_analise(doc_id)  # fora do fan-in e da transação; nunca levanta
     # classificado e em_revisao: CNPJ e demais campos não dependem do tipo confirmado
     from app.extracao import enfileirar_extracao  # import tardio: extracao importa este módulo

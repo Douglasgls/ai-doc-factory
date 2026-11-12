@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -22,7 +23,7 @@ def obter_lote(lote_id: int):
 
 @router.get("/lotes/{lote_id}/eventos")
 async def eventos_lote(lote_id: int, request: Request, once: bool = False):
-    actions.obter_lote(lote_id)  # garante 404 imediato se o lote não existir
+    await asyncio.to_thread(actions.obter_lote, lote_id)  # garante 404 imediato sem bloquear o event loop
     return StreamingResponse(
         actions.stream_eventos_lote(lote_id, request, once=once),
         media_type="text/event-stream",

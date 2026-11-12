@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
+  AlertTriangle,
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -214,7 +215,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
             ? 'bg-[#f8eefc] border-[#dfb8ee] text-[#2d0a33] dark:bg-[#26112e] dark:border-[#522361] dark:text-white'
             : allDoneSuccess
               ? 'bg-[#e8f8f0] border-[#a7e3c7] text-[#0d3b29] dark:bg-[#0e3224] dark:border-[#1b5e43] dark:text-white'
-              : 'bg-amber-50 border-amber-300 text-amber-900 dark:bg-[#2b1f11] dark:border-[#5c401d] dark:text-white'
+              : 'bg-red-50 border-red-200 text-red-900 dark:bg-[#2b1219] dark:border-[#521e2b] dark:text-white'
         }`}
       >
         {/* Quadradinho com contador ou spinner */}
@@ -224,30 +225,43 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
               ? 'bg-[#e9cef4] text-[#7a1c87] dark:bg-[#3c1a49] dark:text-[#e598ff]'
               : allDoneSuccess
                 ? 'bg-[#c5eedb] text-[#065f46] dark:bg-[#19563c] dark:text-[#6ee7b7]'
-                : 'bg-amber-200 text-amber-900 dark:bg-[#4a3316] dark:text-amber-300'
+                : 'bg-red-200 text-red-900 dark:bg-[#4c1d2b] dark:text-red-300'
           }`}
         >
           {activeCount > 0 ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : allDoneSuccess ? (
+            completedCount
           ) : (
-            completedCount || totalCount
+            <AlertTriangle className="w-3.5 h-3.5" />
           )}
         </span>
 
-        {/* Texto de resumo: "3 de 3 concluídos" ou "1 de 3 em análise" */}
+        {/* Texto de resumo */}
         <span className="text-xs sm:text-sm whitespace-nowrap">
-          <strong className="font-bold">{`${completedCount} de ${totalCount}`}</strong>{' '}
-          <span
-            className={
-              activeCount > 0
-                ? 'text-[#7e6388] dark:text-[#c59fd3]'
-                : allDoneSuccess
-                  ? 'text-[#2c7a5b] dark:text-[#8ec5ad]'
-                  : 'text-amber-700 dark:text-amber-200/80'
-            }
-          >
-            {activeCount > 0 ? 'em análise' : 'concluídos'}
-          </span>
+          {activeCount > 0 ? (
+            <>
+              <strong className="font-bold">{`${completedCount} de ${totalCount}`}</strong>{' '}
+              <span className="text-[#7e6388] dark:text-[#c59fd3]">em análise</span>
+            </>
+          ) : allDoneSuccess ? (
+            <>
+              <strong className="font-bold">{`${completedCount} de ${totalCount}`}</strong>{' '}
+              <span className="text-[#2c7a5b] dark:text-[#8ec5ad]">concluídos</span>
+            </>
+          ) : completedCount === 0 ? (
+            <>
+              <strong className="font-bold">{`${issueCount} de ${totalCount}`}</strong>{' '}
+              <span className="text-red-700 dark:text-red-300">
+                {issueCount === 1 ? 'com falha' : 'com falhas'}
+              </span>
+            </>
+          ) : (
+            <>
+              <strong className="font-bold">{`${completedCount} de ${totalCount}`}</strong>{' '}
+              <span className="text-red-700 dark:text-red-300">{`· ${issueCount} erro(s)`}</span>
+            </>
+          )}
         </span>
 
         {isOpen ? (
@@ -257,7 +271,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                 ? 'text-[#7e6388] dark:text-[#c59fd3]'
                 : allDoneSuccess
                   ? 'text-[#2c7a5b] dark:text-[#8ec5ad]'
-                  : 'text-amber-700 dark:text-amber-200'
+                  : 'text-red-700 dark:text-red-300'
             }`}
           />
         ) : (
@@ -267,13 +281,13 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                 ? 'text-[#7e6388] dark:text-[#c59fd3]'
                 : allDoneSuccess
                   ? 'text-[#2c7a5b] dark:text-[#8ec5ad]'
-                  : 'text-amber-700 dark:text-amber-200'
+                  : 'text-red-700 dark:text-red-300'
             }`}
           />
         )}
       </button>
 
-      {/* Popover Flutuante (fiel ao Figma) */}
+      {/* Popover Flutuante */}
       {isOpen && (
         <div
           data-testid="header-tracker-popover"
@@ -289,7 +303,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                       ? 'bg-[#df86f9] animate-pulse'
                       : allDoneSuccess
                         ? 'bg-[#34d399]'
-                        : 'bg-amber-400'
+                        : 'bg-red-500'
                   }`}
                 />
                 <span
@@ -298,14 +312,14 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                       ? 'text-[#9333ea] dark:text-[#df86f9]'
                       : allDoneSuccess
                         ? 'text-[#059669] dark:text-[#34d399]'
-                        : 'text-amber-600 dark:text-amber-400'
+                        : 'text-red-600 dark:text-red-400'
                   }`}
                 >
                   {activeCount > 0
                     ? 'EM ANDAMENTO'
                     : allDoneSuccess
                       ? 'TUDO PRONTO'
-                      : 'ATENÇÃO'}
+                      : 'AÇÃO NECESSÁRIA'}
                 </span>
               </div>
 
@@ -320,18 +334,24 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
             </div>
 
             <h3 className="text-xl font-bold text-[#2d0a33] dark:text-white mt-1.5">
-              {activeCount > 0 ? 'Análises em andamento' : 'Análises concluídas'}
+              {activeCount > 0
+                ? 'Análises em andamento'
+                : allDoneSuccess
+                  ? 'Análises concluídas'
+                  : completedCount === 0
+                    ? 'Falha no processamento'
+                    : 'Análises finalizadas com alerta'}
             </h3>
             <p className="text-sm text-[#7e7287] dark:text-[#8e8296] mt-0.5">
               {activeCount > 0
                 ? `${activeCount} ${activeCount === 1 ? 'arquivo sendo processado agora' : 'arquivos sendo processados agora'}`
                 : allDoneSuccess
                   ? `${completedCount} ${completedCount === 1 ? 'arquivo processado com sucesso' : 'arquivos processados com sucesso'}`
-                  : `${completedCount} concluído(s) · ${issueCount} interrompido(s)`}
+                  : `${completedCount} concluído(s) · ${issueCount} com falha`}
             </p>
           </div>
 
-          {/* Card de Destaque (Seus documentos estão prontos / Processando) */}
+          {/* Card de Destaque (Em andamento / Tudo pronto / Falha) */}
           <div className="px-6 pt-5">
             {activeCount > 0 ? (
               <div className="p-4 rounded-xl border bg-[#f9f0fc] border-[#e5c5f0] dark:bg-[#1f1126] dark:border-[#3c2049] flex items-center justify-between gap-3">
@@ -349,7 +369,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : allDoneSuccess ? (
               <div className="p-4 rounded-xl border bg-[#eafaf2] border-[#b7ebd3] dark:bg-[#0d261d] dark:border-[#184634] flex items-center gap-3.5">
                 <div className="w-10 h-10 rounded-xl bg-[#d0f4e3] dark:bg-[#13382a] text-[#059669] dark:text-[#34d399] flex items-center justify-center shrink-0">
                   <Sparkles className="w-5 h-5" />
@@ -360,6 +380,22 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                   </p>
                   <p className="text-xs text-[#047857] dark:text-[#68b898] mt-0.5">
                     Nenhuma ação é necessária agora.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl border bg-red-50 border-red-200 dark:bg-[#261117] dark:border-[#4c1d2b] flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-[#3b1622] text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-red-900 dark:text-white">
+                    {issueCount === 1
+                      ? '1 arquivo não pôde ser concluído'
+                      : `${issueCount} arquivos não puderam ser concluídos`}
+                  </p>
+                  <p className="text-xs text-red-700 dark:text-red-300 mt-0.5">
+                    Verifique os lotes com falha abaixo para reprocessar.
                   </p>
                 </div>
               </div>
@@ -386,13 +422,16 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
           <div className="px-6 divide-y divide-[#eee8f3] dark:divide-[#231829] max-h-[360px] overflow-y-auto">
             {lotes.map((lote) => {
               const status = trackedStatus(lote)
-              const defaultExpanded = status === 'processando'
+              const defaultExpanded = status !== 'concluido'
               const isExpanded = expandedIds[lote.id] ?? defaultExpanded
               const { concluidas, ativa } = resolverProgressoEtapas(lote)
               const numDocs =
                 lote.totalDocumentos ?? (lote.documentos ? lote.documentos.length : 0)
               const badgeLabel = obterBadgeEtapa(lote)
               const { labelCategoria, slugCategoria, emRevisao } = resolverDestinoLote(lote)
+              const podeTentarNovamente =
+                (status === 'erro' || status === 'cancelado') &&
+                lote.estado !== 'concluido'
 
               return (
                 <div key={lote.id} className="py-3.5">
@@ -479,7 +518,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                     </div>
                   </div>
 
-                  {/* Card Expandido de Detalhes (idêntico à Imagem 2 do Figma + melhorias 1 e 4) */}
+                  {/* Card Expandido de Detalhes */}
                   {isExpanded && (
                     <div className="mt-3 ml-12 rounded-xl bg-[#f8f5fa] dark:bg-[#1b1220] border border-[#e6dfec] dark:border-[#2c1f35] p-3.5">
                       {/* Topo: Documentos identificados (+ Categoria se concluído) + Protocolo #id */}
@@ -491,7 +530,9 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                               ? `${numDocs} ${numDocs === 1 ? 'documento identificado' : 'documentos identificados'}`
                               : status === 'concluido'
                                 ? '1 documento identificado'
-                                : 'Identificando documentos...'}
+                                : status === 'erro' || status === 'cancelado'
+                                  ? 'Processamento interrompido'
+                                  : 'Identificando documentos...'}
                           </span>
 
                           {labelCategoria && (
@@ -553,6 +594,13 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                         })}
                       </div>
 
+                      {/* Aviso de erro de rede / falha de comunicação */}
+                      {lote.networkError && (
+                        <p className="pt-2 text-xs font-medium text-red-600 dark:text-red-400">
+                          Não foi possível consultar o servidor ({lote.networkError}).
+                        </p>
+                      )}
+
                       {/* Rodapé do Card Expandido */}
                       <div className="pt-2.5 flex items-center justify-between gap-3">
                         <p className="text-xs text-[#7e7287] dark:text-[#8e8296] leading-relaxed">
@@ -567,7 +615,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                                 : lote.mensagemAtual || 'Não foi possível concluir a análise.'}
                         </p>
 
-                        {/* Ação 1: Link direto para a pasta ou revisão quando concluído */}
+                        {/* Link direto para a pasta ou revisão quando concluído */}
                         {status === 'concluido' && emRevisao && onNavigateReview && (
                           <button
                             type="button"
@@ -612,8 +660,8 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                           </button>
                         )}
 
-                        {/* Ação 4: Tentar novamente se falhou ou foi cancelado */}
-                        {(status === 'erro' || status === 'cancelado') && (
+                        {/* Tentar novamente somente para lotes em erro/cancelado (nunca concluídos) */}
+                        {podeTentarNovamente && (
                           <button
                             type="button"
                             onClick={(e) => {

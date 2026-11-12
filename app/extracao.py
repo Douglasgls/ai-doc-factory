@@ -13,7 +13,7 @@ import redis
 from app import config, llm, prompts
 from app.classificar import _imagem_primeira_pagina, montar_texto
 from app.conformidade import parse_data
-from app.eventos import lote_cancelado, publicar_evento
+from app.eventos import concluir_tarefa_pos, lote_cancelado, publicar_evento
 from app.filas import enfileirar
 
 log = logging.getLogger(__name__)
@@ -57,6 +57,35 @@ def limpar(dados) -> dict[str, str]:
     return saida
 
 
+def _apurar_pendencias_lote(conn, lote_id: int) -> tuple[int, bool]:
+    """Devolve (docs_pendentes_classificacao, ha_analise_ponto_pendente_no_lote)."""
+    lote_row = conn.execute("SELECT docs_pendentes FROM lote WHERE id = %s", (lote_id,)).fetchone()
+    docs_pendentes = lote_row[0] if lote_row else 0
+    ap_pendente = (
+        conn.execute(
+            "SELECT 1 FROM documento d "
+            "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
+            "WHERE d.lote_id = %s AND d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
+            "AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')) "
+            "LIMIT 1",
+            (lote_id,),
+        ).fetchone()
+        is not None
+    )
+    return docs_pendentes, ap_pendente
+
+
+def _resolver_etapa_pos_extracao(lote_id: int, doc_id: int, docs_pendentes: int, ap_pendente: bool) -> str:
+    restantes_pos = concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
+    if docs_pendentes > 0:
+        return "classificando"
+    if any(t.startswith("extracao:") for t in restantes_pos):
+        return "extracao"
+    if ap_pendente or any(t.startswith("analise:") for t in restantes_pos):
+        return "analise_ponto"
+    return "concluido"
+
+
 def extrair_campos(payload: dict) -> None:
     doc_id = payload["documento_id"]
     with psycopg.connect(config.DATABASE_URL) as conn:
@@ -64,53 +93,63 @@ def extrair_campos(payload: dict) -> None:
         if doc is None or doc[0] not in ("classificado", "revisado", "em_revisao"):
             return
         if lote_cancelado(doc[1]):
+            concluir_tarefa_pos(doc[1], f"extracao:{doc_id}")
             return
         textos = [t for (t,) in conn.execute("SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
+    lote_id = doc[1]
     publicar_evento(
-        doc[1],
+        lote_id,
         "extracao",
         f"Extraindo dados cadastrais (Gemini) do documento #{doc_id}...",
         documento_id=doc_id,
     )
     prompt = prompts.prompt_extracao(doc[3], montar_texto(textos, TEXTO_MAX))
     try:
-        dados = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(doc[1], doc[2])))
+        dados = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, doc[2])))
     except llm.LLMErro as e:
         log.warning("extração do documento %s indisponível: %s", doc_id, e)
+        with psycopg.connect(config.DATABASE_URL) as conn:
+            docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
+        etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
         publicar_evento(
-            doc[1],
-            "analise_ponto" if (doc[3] == "folha_ponto" and doc[0] == "classificado") else "concluido",
+            lote_id,
+            etapa,
             f"Processamento concluído no documento #{doc_id}.",
             documento_id=doc_id,
         )
         return
     if not isinstance(dados, dict):
         log.warning("extração do documento %s: resposta fora do schema", doc_id)
+        with psycopg.connect(config.DATABASE_URL) as conn:
+            docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
+        etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
         publicar_evento(
-            doc[1],
-            "analise_ponto" if (doc[3] == "folha_ponto" and doc[0] == "classificado") else "concluido",
+            lote_id,
+            etapa,
             f"Processamento concluído no documento #{doc_id}.",
             documento_id=doc_id,
         )
         return
     origem = f"gemini:{prompts.VERSAO_PROMPT_EXTRACAO}"
     campos_limpos = limpar(dados)
-    espera_analise_ponto = False
     with psycopg.connect(config.DATABASE_URL) as conn:  # substitui o que o Gemini gravou antes; correção humana fica
         conn.execute("DELETE FROM documento_campos WHERE documento_id = %s AND origem LIKE 'gemini:%%'", (doc_id,))
         for campo, valor in campos_limpos.items():
             conn.execute("INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, %s, %s, %s) "
                          "ON CONFLICT (documento_id, campo) DO NOTHING", (doc_id, campo, valor, origem))
-        if doc[3] == "folha_ponto" and doc[0] == "classificado":
-            ap = conn.execute("SELECT estado FROM analise_ponto WHERE documento_id = %s", (doc_id,)).fetchone()
-            espera_analise_ponto = ap is None or ap[0] not in ("concluida", "erro")
+        docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
+    etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
     publicar_evento(
-        doc[1],
-        "analise_ponto" if espera_analise_ponto else "concluido",
+        lote_id,
+        etapa,
         (
             f"Extração concluída ({len(campos_limpos)} campo(s)) · validando folha de ponto..."
-            if espera_analise_ponto
-            else f"Análise e validação concluídas ({len(campos_limpos)} campo(s) extraído(s))."
+            if etapa == "analise_ponto"
+            else (
+                f"Extração do documento #{doc_id} concluída ({len(campos_limpos)} campo(s))..."
+                if etapa != "concluido"
+                else f"Análise e validação concluídas ({len(campos_limpos)} campo(s) extraído(s))."
+            )
         ),
         documento_id=doc_id,
     )

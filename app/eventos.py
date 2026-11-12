@@ -29,6 +29,10 @@ def _chave_cancelado(lote_id: int) -> str:
     return f"cancelado:lote:{lote_id}"
 
 
+def _chave_tarefas_pos(lote_id: int) -> str:
+    return f"tarefas_pos:lote:{lote_id}"
+
+
 def _cliente(r: redis.Redis | None = None) -> redis.Redis:
     return r or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
 
@@ -107,3 +111,51 @@ def lote_cancelado(lote_id: int, r: redis.Redis | None = None) -> bool:
     except Exception:
         return False
 
+
+def registrar_tarefas_pos(lote_id: int, tarefas: list[str], r: redis.Redis | None = None) -> None:
+    """Registra tarefas pós-classificação (ex: 'extracao:10', 'analise:10') pendentes para o lote."""
+    if not tarefas:
+        return
+    try:
+        cli = _cliente(r)
+        chave = _chave_tarefas_pos(lote_id)
+        if hasattr(cli, "sadd"):
+            cli.sadd(chave, *tarefas)
+            if hasattr(cli, "expire"):
+                cli.expire(chave, TTL_EVENTOS)
+    except Exception:
+        log.debug("não foi possível registrar tarefas pós-classificação do lote %s", lote_id)
+
+
+def concluir_tarefa_pos(lote_id: int, tarefa: str, r: redis.Redis | None = None) -> set[str]:
+    """Remove uma tarefa pós-classificação concluída e devolve o conjunto das que ainda restam."""
+    try:
+        cli = _cliente(r)
+        chave = _chave_tarefas_pos(lote_id)
+        if hasattr(cli, "srem"):
+            cli.srem(chave, tarefa)
+        if hasattr(cli, "smembers"):
+            return set(cli.smembers(chave) or set())
+    except Exception:
+        log.debug("não foi possível concluir tarefa %s do lote %s", tarefa, lote_id)
+    return set()
+
+
+def tarefas_pos_pendentes(lote_id: int, r: redis.Redis | None = None) -> set[str]:
+    """Devolve as tarefas pós-classificação ainda pendentes para o lote."""
+    try:
+        cli = _cliente(r)
+        if hasattr(cli, "smembers"):
+            return set(cli.smembers(_chave_tarefas_pos(lote_id)) or set())
+    except Exception:
+        pass
+    return set()
+
+
+def limpar_tarefas_pos(lote_id: int, r: redis.Redis | None = None) -> None:
+    try:
+        cli = _cliente(r)
+        if hasattr(cli, "delete"):
+            cli.delete(_chave_tarefas_pos(lote_id))
+    except Exception:
+        log.debug("não foi possível limpar tarefas pós-classificação do lote %s", lote_id)

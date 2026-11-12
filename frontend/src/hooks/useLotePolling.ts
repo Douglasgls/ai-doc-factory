@@ -4,6 +4,7 @@ import {
   hasTimedOut,
   isEstadoFinal,
   isEtapaEmAndamento,
+  MAX_CONCURRENT_SSE,
   nextPollDelay,
   POLL_INITIAL_MS,
   shouldRefreshList,
@@ -18,6 +19,7 @@ interface PollRun {
   attempt: number
   errors: number
   last: LoteSnapshot | null
+  lastEtapa: string | null
   abortController: AbortController
 }
 
@@ -47,12 +49,14 @@ function carregarLotesSessao(): TrackedLote[] {
 
 /**
  * Acompanha os lotes enviados nesta sessão do navegador em tempo real via SSE (Server-Sent Events + Redis Pub/Sub),
- * com persistência em sessionStorage (sobrevive ao F5) e fallback automático para polling.
+ * respeitando o limite de conexões simultâneas do navegador (MAX_CONCURRENT_SSE) com fallback automático para polling.
  */
 export function useLotePolling(onProgress: () => void | Promise<void>) {
   const [lotes, setLotes] = useState<TrackedLote[]>(() => carregarLotesSessao())
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
   const runs = useRef(new Map<number, PollRun>())
+  const activeSseIds = useRef(new Set<number>())
+  const uploadingCount = useRef(0)
   const filesMap = useRef(new Map<number, File>())
   const active = useRef(false)
   const resumedOnMount = useRef(false)
@@ -70,6 +74,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     const timer = timers.current.get(id)
     if (timer) clearTimeout(timer)
     timers.current.delete(id)
+    activeSseIds.current.delete(id)
     const run = runs.current.get(id)
     if (run) {
       run.abortController.abort()
@@ -80,6 +85,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   const stopAll = useCallback(() => {
     timers.current.forEach((t) => clearTimeout(t))
     timers.current.clear()
+    activeSseIds.current.clear()
     runs.current.forEach((r) => r.abortController.abort())
     runs.current.clear()
   }, [])
@@ -87,12 +93,13 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   const applyStatusUpdate = useCallback(
     async (id: number, run: PollRun, status: LoteStatusResponse, sseAtivo: boolean) => {
       const ev = status.ultimo_evento
-      const cancelado = ev?.etapa === 'cancelado'
+      const nextEtapa = ev?.etapa ?? status.estado
+      const cancelado = status.estado === 'erro' && ev?.etapa === 'cancelado'
       patch(id, {
         estado: status.estado,
         docsPendentes: status.docs_pendentes,
         networkError: null,
-        etapaAtual: ev?.etapa ?? status.estado,
+        etapaAtual: nextEtapa,
         mensagemAtual: ev?.mensagem ?? null,
         paginaAtual: ev?.pagina_atual ?? null,
         totalPaginas: ev?.total_paginas ?? null,
@@ -103,12 +110,13 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         sseAtivo,
       })
       const snapshot: LoteSnapshot = { estado: status.estado, docsPendentes: status.docs_pendentes }
-      const refresh =
-        shouldRefreshList(run.last, snapshot) ||
-        ev?.etapa === 'concluido' ||
-        ev?.etapa === 'extracao_concluida' ||
-        ev?.etapa === 'analise_ponto_concluida'
+      const terminouPosProcessamento =
+        run.lastEtapa !== null &&
+        run.lastEtapa !== 'concluido' &&
+        nextEtapa === 'concluido'
+      const refresh = shouldRefreshList(run.last, snapshot) || terminouPosProcessamento
       run.last = snapshot
+      run.lastEtapa = nextEtapa
       if (refresh) {
         await onProgressRef.current()
       }
@@ -117,14 +125,15 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   )
 
   const startPolling = useCallback(
-    (id: number) => {
+    (id: number, initialSnapshot: LoteSnapshot | null = null) => {
       stopOne(id)
       const abortController = new AbortController()
       const run: PollRun = {
         startedAt: Date.now(),
         attempt: 0,
         errors: 0,
-        last: null,
+        last: initialSnapshot,
+        lastEtapa: initialSnapshot?.estado ?? null,
         abortController,
       }
       runs.current.set(id, run)
@@ -163,7 +172,13 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         timers.current.set(id, setTimeout(() => void fallbackTick(), nextPollDelay(run.attempt)))
       }
 
-      // Inicia stream SSE em tempo real; se desconectar antes de concluir, cai para o fallback de polling
+      // Se já houver muitas conexões SSE abertas ou uploads em lote em andamento, usa polling leve para não travar o navegador
+      if (activeSseIds.current.size >= MAX_CONCURRENT_SSE || uploadingCount.current > 0) {
+        timers.current.set(id, setTimeout(() => void fallbackTick(), POLL_INITIAL_MS))
+        return
+      }
+
+      activeSseIds.current.add(id)
       void (async () => {
         let ultimaEtapaRecebida: string | null = null
         try {
@@ -171,14 +186,25 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
             id,
             (payload) => {
               if (!stale()) {
+                run.errors = 0
                 ultimaEtapaRecebida = payload.ultimo_evento?.etapa ?? null
                 void applyStatusUpdate(id, run, payload, true)
               }
             },
             abortController.signal
           )
-        } catch {
-          // fallback para polling se o SSE cair ou não estiver disponível
+        } catch (err) {
+          if (!stale()) {
+            run.errors += 1
+            if (shouldWarnNetwork(run.errors)) {
+              patch(id, {
+                networkError:
+                  err instanceof Error && err.message ? err.message : 'Falha de conexão com o servidor.',
+              })
+            }
+          }
+        } finally {
+          activeSseIds.current.delete(id)
         }
         if (stale()) return
         const ultimoEstado = run.last?.estado
@@ -193,7 +219,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     [applyStatusUpdate, patch, stopOne]
   )
 
-  /** Registra um lote recém-enviado (ou reenviado) e começa a acompanhá-lo via SSE. */
+  /** Registra um lote recém-enviado (ou reenviado) e começa a acompanhá-lo. */
   const track = useCallback(
     (id: number, nome: string) => {
       const agora = new Date().toLocaleTimeString('pt-BR', {
@@ -227,8 +253,8 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   )
 
   /**
-   * Recebe os arquivos selecionados no modal, adiciona todos imediatamente na lista de "Análises em andamento"
-   * e faz o upload + conexão SSE em tempo real sem prender o usuário no modal de upload.
+   * Recebe os arquivos selecionados no modal, adiciona todos na lista de acompanhamento,
+   * envia os arquivos sem esgotar o pool de 6 conexões do navegador e inicia o monitoramento.
    */
   const uploadFiles = useCallback(
     (files: File[]) => {
@@ -259,7 +285,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
               documentos: [],
               historicoEventos: [],
               cancelado: false,
-              sseAtivo: true,
+              sseAtivo: false,
               horarioEnvio: `Hoje, ${agora}`,
             },
           }
@@ -269,44 +295,57 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
       setLotes((prev) => [...placeholders.map((p) => p.item), ...prev])
 
       void (async () => {
-        for (const { tempId, file } of placeholders) {
-          if (!active.current) return
-          try {
-            const response = await apiService.uploadLote(file)
-            const realId = response.lote_id
-            filesMap.current.delete(tempId)
-            filesMap.current.set(realId, file)
-            setLotes((prev) => {
-              // Se o lote real já existia na lista (ex: reenvio do mesmo arquivo), remove o duplicado antigo
-              const semDuplicado = prev.filter((l) => l.id !== realId || l.id === tempId)
-              return semDuplicado.map((l) =>
-                l.id === tempId
-                  ? {
-                      ...l,
-                      id: realId,
-                      estado: response.estado || 'recebido',
-                      etapaAtual: response.estado === 'concluido' ? 'concluido' : 'recebido',
-                      mensagemAtual:
-                        response.estado === 'concluido'
-                          ? 'A análise terminou sem pendências. O documento já está disponível na lista.'
-                          : 'Arquivo recebido · iniciando leitura...',
-                    }
-                  : l
-              )
-            })
-            void onProgressRef.current()
-            startPolling(realId)
-          } catch (err) {
-            patch(tempId, {
-              estado: 'erro',
-              etapaAtual: 'erro',
-              sseAtivo: false,
-              mensagemAtual:
-                err instanceof Error && err.message
-                  ? err.message
-                  : 'Falha ao enviar o arquivo.',
-            })
+        uploadingCount.current += placeholders.length
+        const idsParaAcompanhar: { id: number; estadoInicial: string }[] = []
+        try {
+          for (const { tempId, file } of placeholders) {
+            if (!active.current) return
+            try {
+              const response = await apiService.uploadLote(file)
+              const realId = response.lote_id
+              const estadoInicial = response.estado || 'recebido'
+              filesMap.current.delete(tempId)
+              filesMap.current.set(realId, file)
+              setLotes((prev) => {
+                const semDuplicado = prev.filter((l) => l.id !== realId || l.id === tempId)
+                return semDuplicado.map((l) =>
+                  l.id === tempId
+                    ? {
+                        ...l,
+                        id: realId,
+                        estado: estadoInicial,
+                        etapaAtual: estadoInicial === 'concluido' ? 'concluido' : 'recebido',
+                        mensagemAtual:
+                          estadoInicial === 'concluido'
+                            ? 'A análise terminou sem pendências. O documento já está disponível na lista.'
+                            : 'Arquivo recebido · iniciando leitura...',
+                      }
+                    : l
+                )
+              })
+              idsParaAcompanhar.push({ id: realId, estadoInicial })
+            } catch (err) {
+              patch(tempId, {
+                estado: 'erro',
+                etapaAtual: 'erro',
+                sseAtivo: false,
+                mensagemAtual:
+                  err instanceof Error && err.message
+                    ? err.message
+                    : 'Falha ao enviar o arquivo.',
+              })
+            } finally {
+              uploadingCount.current = Math.max(0, uploadingCount.current - 1)
+            }
           }
+        } finally {
+          uploadingCount.current = 0
+        }
+
+        if (!active.current || idsParaAcompanhar.length === 0) return
+        await onProgressRef.current()
+        for (const { id: realId, estadoInicial } of idsParaAcompanhar) {
+          startPolling(realId, { estado: estadoInicial, docsPendentes: null })
         }
       })()
     },
@@ -316,15 +355,19 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   /** Retoma o acompanhamento de um lote que passou do teto de tempo. */
   const recheck = useCallback(
     (id: number) => {
-      patch(id, { timedOut: false, networkError: null, cancelado: false })
+      patch(id, { timedOut: false, networkError: null })
       startPolling(id)
     },
     [patch, startPolling]
   )
 
-  /** Reenvia ou reprocessa um lote que falhou ou foi cancelado pelo usuário. */
+  /** Reenvia ou reprocessa um lote que está efetivamente em erro ou cancelado. */
   const retry = useCallback(
     async (id: number) => {
+      const loteAtual = lotes.find((l) => l.id === id)
+      if (loteAtual && loteAtual.estado === 'concluido') {
+        return
+      }
       stopOne(id)
       const fileInMemory = filesMap.current.get(id)
 
@@ -342,6 +385,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         try {
           const response = await apiService.uploadLote(fileInMemory)
           const realId = response.lote_id
+          const estadoInicial = response.estado || 'recebido'
           filesMap.current.delete(id)
           filesMap.current.set(realId, fileInMemory)
           setLotes((prev) => {
@@ -351,16 +395,16 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
                 ? {
                     ...l,
                     id: realId,
-                    estado: response.estado || 'recebido',
-                    etapaAtual: response.estado === 'concluido' ? 'concluido' : 'recebido',
+                    estado: estadoInicial,
+                    etapaAtual: estadoInicial === 'concluido' ? 'concluido' : 'recebido',
                     cancelado: false,
                     mensagemAtual: 'Arquivo recebido · iniciando leitura...',
                   }
                 : l
             )
           })
-          void onProgressRef.current()
-          startPolling(realId)
+          await onProgressRef.current()
+          startPolling(realId, { estado: estadoInicial, docsPendentes: null })
         } catch (err) {
           patch(id, {
             estado: 'erro',
@@ -375,7 +419,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
 
       if (id <= 0) return
 
-      // Lote já registrado no servidor (id > 0): aciona POST /lotes/{id}/reprocessar
+      // Lote registrado no servidor em estado 'erro': aciona POST /lotes/{id}/reprocessar
       patch(id, {
         estado: 'recebido',
         etapaAtual: 'recebido',
@@ -387,45 +431,67 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
         mensagemAtual: 'Reprocessando arquivo na fila...',
       })
       try {
-        await apiService.retryLote(id)
-        void onProgressRef.current()
-        startPolling(id)
+        const updated = await apiService.retryLote(id)
+        await onProgressRef.current()
+        startPolling(id, { estado: updated.estado, docsPendentes: updated.docs_pendentes })
       } catch (err) {
         patch(id, {
-          estado: 'erro',
-          etapaAtual: 'erro',
+          estado: loteAtual?.estado ?? 'erro',
+          etapaAtual: loteAtual?.etapaAtual ?? 'erro',
           sseAtivo: false,
-          mensagemAtual:
+          networkError:
             err instanceof Error && err.message
               ? err.message
               : 'Não foi possível reprocessar este arquivo.',
         })
       }
     },
-    [patch, startPolling, stopOne]
+    [lotes, patch, startPolling, stopOne]
   )
 
-  /** Cancela o processamento de um lote em andamento no backend e encerra o stream SSE. */
+  /**
+   * Cancela o processamento de um lote em andamento no backend.
+   * Só marca como cancelado após confirmação da API; se falhar, exibe o erro e mantém o acompanhamento real.
+   */
   const cancel = useCallback(
     async (id: number) => {
-      stopOne(id)
-      patch(id, {
-        cancelado: true,
-        estado: 'erro',
-        docsPendentes: 0,
-        etapaAtual: 'cancelado',
-        mensagemAtual: 'Processamento cancelado pelo usuário.',
-        sseAtivo: false,
-      })
-      if (id <= 0) return
+      if (id <= 0) {
+        stopOne(id)
+        patch(id, {
+          cancelado: true,
+          estado: 'erro',
+          docsPendentes: 0,
+          etapaAtual: 'cancelado',
+          mensagemAtual: 'Processamento cancelado pelo usuário.',
+          sseAtivo: false,
+        })
+        return
+      }
       try {
-        await apiService.cancelLote(id)
+        const updated = await apiService.cancelLote(id)
+        stopOne(id)
+        patch(id, {
+          cancelado: true,
+          estado: updated.estado,
+          docsPendentes: updated.docs_pendentes,
+          etapaAtual: 'cancelado',
+          mensagemAtual: 'Processamento cancelado pelo usuário.',
+          networkError: null,
+          sseAtivo: false,
+        })
         await onProgressRef.current()
-      } catch {
-        // mesmo que o lote já tivesse terminado, mantém como cancelado na sessão
+      } catch (err) {
+        const msg =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Não foi possível cancelar o processamento deste lote.'
+        patch(id, {
+          networkError: msg,
+        })
+        startPolling(id)
       }
     },
-    [patch, stopOne]
+    [patch, startPolling, stopOne]
   )
 
   const dismiss = useCallback(
@@ -470,13 +536,13 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     }
   }, [stopAll])
 
-  // Ao montar (ex: após F5), retoma o stream SSE para lotes que estavam em andamento na sessão
+  // Ao montar (ex: após F5), retoma o acompanhamento para lotes que estavam em andamento na sessão
   useEffect(() => {
     if (resumedOnMount.current) return
     resumedOnMount.current = true
     lotes.forEach((lote) => {
       if (lote.id > 0 && trackedStatus(lote) === 'processando') {
-        startPolling(lote.id)
+        startPolling(lote.id, { estado: lote.estado, docsPendentes: lote.docsPendentes })
       }
     })
   }, [lotes, startPolling])

@@ -9,7 +9,7 @@ import redis
 from pdf2image import convert_from_path, pdfinfo_from_path
 
 from app import config
-from app.eventos import lote_cancelado, publicar_evento
+from app.eventos import limpar_tarefas_pos, lote_cancelado, publicar_evento, registrar_tarefas_pos
 from app.filas import enfileirar
 from app.segmentacao import segmentar
 
@@ -39,6 +39,18 @@ def _estado(lote_id: int, estado: str) -> None:
         conn.execute("UPDATE lote SET estado = %s WHERE id = %s", (estado, lote_id))
 
 
+def _marcar_lote_cancelado_db(lote_id: int) -> None:
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        conn.execute(
+            "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado = 'segmentado'",
+            (lote_id,),
+        )
+        conn.execute(
+            "UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s AND estado != 'concluido'",
+            (lote_id,),
+        )
+
+
 def _reenfileirar_pendentes(lote_id: int) -> None:
     """Lote já em 'classificando': cobre a queda entre o commit da segmentação e o enfileiramento."""
     with psycopg.connect(config.DATABASE_URL) as conn:
@@ -59,6 +71,9 @@ def segmentar_e_gravar(lote_id: int) -> list[int]:
 
     A segmentação (que pode chamar o LLM, ou seja, rede) roda ANTES da transação: o FOR UPDATE não pode
     ficar preso durante chamada de rede. O estado é conferido de novo sob o lock."""
+    if lote_cancelado(lote_id):
+        _marcar_lote_cancelado_db(lote_id)
+        return []
     with psycopg.connect(config.DATABASE_URL) as conn:
         estado = conn.execute("SELECT estado FROM lote WHERE id = %s", (lote_id,)).fetchone()[0]
         if estado in ("classificando", "concluido"):
@@ -69,6 +84,9 @@ def segmentar_e_gravar(lote_id: int) -> list[int]:
     with psycopg.connect(config.DATABASE_URL) as conn:  # o with faz commit único ao sair
         estado = conn.execute("SELECT estado FROM lote WHERE id = %s FOR UPDATE", (lote_id,)).fetchone()[0]
         if estado in ("classificando", "concluido"):
+            return []
+        if lote_cancelado(lote_id):
+            conn.execute("UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s", (lote_id,))
             return []
         conn.execute("DELETE FROM documento WHERE lote_id = %s", (lote_id,))  # refazer não duplica
         ids = []
@@ -91,7 +109,8 @@ def segmentar_e_gravar(lote_id: int) -> list[int]:
 def processar_lote(payload: dict) -> None:
     lote_id = payload["lote_id"]
     if lote_cancelado(lote_id):
-        _estado(lote_id, "erro")
+        _marcar_lote_cancelado_db(lote_id)
+        limpar_tarefas_pos(lote_id)
         publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.")
         return
     with psycopg.connect(config.DATABASE_URL) as conn:
@@ -111,16 +130,10 @@ def processar_lote(payload: dict) -> None:
         with ThreadPoolExecutor(PARALELISMO) as pool:
             resultados = list(pool.map(lambda n: processar_pagina(pdf, pasta, n), range(1, total + 1)))
         if lote_cancelado(lote_id):
-            _estado(lote_id, "erro")
+            _marcar_lote_cancelado_db(lote_id)
+            limpar_tarefas_pos(lote_id)
             publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.")
             return
-        publicar_evento(
-            lote_id,
-            "segmentacao",
-            f"OCR de {total} página(s) concluído · segmentando documentos...",
-            pagina_atual=total,
-            total_paginas=total,
-        )
         with psycopg.connect(config.DATABASE_URL) as conn:
             for numero, texto in resultados:
                 conn.execute(
@@ -128,12 +141,27 @@ def processar_lote(payload: dict) -> None:
                     "ON CONFLICT (lote_id, numero) DO UPDATE SET texto = EXCLUDED.texto",
                     (lote_id, numero, texto),
                 )
+        publicar_evento(
+            lote_id,
+            "segmentacao",
+            f"OCR de {total} página(s) concluído · segmentando documentos...",
+            pagina_atual=total,
+            total_paginas=total,
+        )
         ids = segmentar_e_gravar(lote_id)
     except Exception:
         _estado(lote_id, "erro")  # o retry da fila volta o lote para 'ocr'
         publicar_evento(lote_id, "erro", "Falha no processamento de OCR/segmentação.")
         raise
+    if lote_cancelado(lote_id):
+        _marcar_lote_cancelado_db(lote_id)
+        limpar_tarefas_pos(lote_id)
+        publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.")
+        return
+    if not ids:
+        return
     log.info("lote %s: OCR de %s páginas e segmentação em %s documentos", lote_id, total, len(ids))
+    registrar_tarefas_pos(lote_id, [f"extracao:{id_}" for id_ in ids])
     publicar_evento(
         lote_id,
         "classificando",

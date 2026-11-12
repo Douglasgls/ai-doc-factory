@@ -7,6 +7,8 @@ import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
 import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
+import { LotesStatusPanel } from './components/LotesStatusPanel'
+import { trackedStatus } from './hooks/lotePollingLogic'
 import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
@@ -531,6 +533,15 @@ export function App() {
 
       {/* Main Content Area */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 relative z-10">
+        <LotesStatusPanel
+          lotes={lotesEnviados.filter((l) => {
+            const s = trackedStatus(l)
+            return s === 'erro' || s === 'cancelado' || s === 'timeout' || Boolean(l.networkError)
+          })}
+          onRecheck={recheckLote}
+          onDismiss={dismissLote}
+          onRetry={(id) => void retryLote(id)}
+        />
         {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">

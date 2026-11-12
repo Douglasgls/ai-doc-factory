@@ -9,6 +9,8 @@ export const POLL_GROWTH = 1.25
 export const POLL_TIMEOUT_MS = 15 * 60 * 1000
 /** Quantas falhas de rede seguidas até avisar o usuário. */
 export const NETWORK_ERRORS_BEFORE_WARNING = 3
+/** Máximo de conexões SSE simultâneas por aba para não esgotar o limite de 6 conexões HTTP/1.1 do navegador. */
+export const MAX_CONCURRENT_SSE = 2
 
 export const isEstadoFinal = (estado: string | null | undefined): boolean =>
   estado === 'concluido' || estado === 'erro'
@@ -32,10 +34,9 @@ export interface LoteSnapshot {
 
 /**
  * Recarregar a lista só quando algo mudou desde a consulta anterior do mesmo lote
- * (`previous` null = primeira consulta) e sempre ao chegar em estado final.
+ * (`previous` null = primeira consulta). Não recarrega repetidamente se o estado já era final.
  */
 export const shouldRefreshList = (previous: LoteSnapshot | null, next: LoteSnapshot): boolean =>
-  isEstadoFinal(next.estado) ||
   previous === null ||
   previous.estado !== next.estado ||
   previous.docsPendentes !== next.docsPendentes
@@ -74,10 +75,11 @@ export const isEtapaEmAndamento = (etapa: string | null | undefined): boolean =>
   Boolean(etapa && ETAPAS_EM_ANDAMENTO.has(etapa))
 
 export const trackedStatus = (lote: TrackedLote): LoteTrackedStatus => {
+  if (lote.estado === 'concluido') {
+    return isEtapaEmAndamento(lote.etapaAtual) ? 'processando' : 'concluido'
+  }
   if (lote.cancelado || lote.etapaAtual === 'cancelado') return 'cancelado'
   if (lote.estado === 'erro') return 'erro'
   if (lote.timedOut) return 'timeout'
-  if (isEtapaEmAndamento(lote.etapaAtual)) return 'processando'
-  if (lote.estado === 'concluido') return 'concluido'
   return 'processando'
 }
