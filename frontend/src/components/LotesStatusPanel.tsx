@@ -6,6 +6,7 @@ interface LotesStatusPanelProps {
   lotes: TrackedLote[]
   onRecheck: (id: number) => void
   onDismiss: (id: number) => void
+  onDismissAcaoErro?: (id: number) => void
   onRetry?: (id: number) => void
 }
 
@@ -16,6 +17,7 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
   lotes,
   onRecheck,
   onDismiss,
+  onDismissAcaoErro,
   onRetry,
 }) => {
   if (lotes.length === 0) return null
@@ -79,6 +81,23 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
                     >
                       Verificar novamente
                     </button>
+                  </p>
+                )}
+                {lote.acaoErro && (
+                  <p role="alert" className="text-xs sm:text-sm text-red-600 dark:text-red-400 mt-0.5 break-words">
+                    {lote.acaoErro}
+                    {onDismissAcaoErro && (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          onClick={() => onDismissAcaoErro(lote.id)}
+                          className="font-semibold underline cursor-pointer"
+                        >
+                          Dispensar
+                        </button>
+                      </>
+                    )}
                   </p>
                 )}
                 {lote.networkError && status !== 'erro' && status !== 'concluido' && (

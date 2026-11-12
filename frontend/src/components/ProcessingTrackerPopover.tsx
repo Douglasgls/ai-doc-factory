@@ -25,6 +25,7 @@ interface ProcessingTrackerPopoverProps {
   onRetry: (id: number) => void
   onRecheck: (id: number) => void
   onDismiss: (id: number) => void
+  onDismissAcaoErro?: (id: number) => void
   onClearFinished: () => void
   onNavigateCategory?: (slug: string) => void
   onNavigateReview?: () => void
@@ -138,6 +139,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
   onRetry,
   onRecheck,
   onDismiss,
+  onDismissAcaoErro,
   onClearFinished,
   onNavigateCategory,
   onNavigateReview,
@@ -597,6 +599,30 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                         <p className="pt-2 text-xs font-medium text-red-600 dark:text-red-400">
                           Não foi possível consultar o servidor ({lote.networkError}).
                         </p>
+                      )}
+
+                      {/* Erro de ação (cancelar / tentar novamente): fica até ser dispensado ou a ação funcionar */}
+                      {lote.acaoErro && (
+                        <div
+                          role="alert"
+                          data-testid={`acao-erro-${lote.id}`}
+                          className="pt-2 flex items-start justify-between gap-2 text-xs font-medium text-red-600 dark:text-red-400"
+                        >
+                          <span className="min-w-0 break-words">{lote.acaoErro}</span>
+                          {onDismissAcaoErro && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onDismissAcaoErro(lote.id)
+                              }}
+                              aria-label="Dispensar mensagem de erro"
+                              className="shrink-0 p-0.5 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-950/40 cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {/* Rodapé do Card Expandido */}

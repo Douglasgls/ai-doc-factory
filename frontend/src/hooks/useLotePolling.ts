@@ -512,6 +512,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
           cancelado: false,
           timedOut: false,
           networkError: null,
+          acaoErro: null,
           sseAtivo: true,
           mensagemAtual: 'Reenviando arquivo para análise...',
         })
@@ -567,6 +568,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
       })
       try {
         const updated = await apiService.retryLote(id)
+        patch(id, { acaoErro: null })
         await onProgressRef.current()
         startPolling(id, {
           estado: updated.estado,
@@ -578,10 +580,9 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
           estado: loteAtual?.estado ?? 'erro',
           etapaAtual: loteAtual?.etapaAtual ?? 'erro',
           sseAtivo: false,
-          networkError:
-            err instanceof Error && err.message
-              ? err.message
-              : 'Não foi possível reprocessar este arquivo.',
+          acaoErro: `Não foi possível reprocessar: ${
+            err instanceof Error && err.message ? err.message : 'erro desconhecido.'
+          }`,
         })
       }
     },
@@ -616,21 +617,24 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
           etapaAtual: 'cancelado',
           mensagemAtual: 'Processamento cancelado pelo usuário.',
           networkError: null,
+          acaoErro: null,
           sseAtivo: false,
         })
         await onProgressRef.current()
       } catch (err) {
-        const msg =
-          err instanceof Error && err.message
-            ? err.message
-            : 'Não foi possível cancelar o processamento deste lote.'
-        patch(id, {
-          networkError: msg,
-        })
+        const msg = err instanceof Error && err.message ? err.message : 'erro desconhecido.'
+        // Campo próprio: applyStatusUpdate zera networkError a cada atualização, mas não acaoErro.
+        patch(id, { acaoErro: `Não foi possível cancelar: ${msg}` })
         startPolling(id)
       }
     },
     [patch, startPolling, stopOne]
+  )
+
+  /** Dispensa a mensagem de erro de uma ação (cancelar/tentar novamente). */
+  const dismissAcaoErro = useCallback(
+    (id: number) => patch(id, { acaoErro: null }),
+    [patch]
   )
 
   const dismiss = useCallback(
@@ -712,5 +716,5 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     })
   }, [lotes, patch, startPolling])
 
-  return { lotes, track, uploadFiles, recheck, retry, cancel, dismiss, clearFinished }
+  return { lotes, track, uploadFiles, recheck, retry, cancel, dismiss, dismissAcaoErro, clearFinished }
 }
