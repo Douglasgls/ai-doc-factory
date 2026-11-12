@@ -35,13 +35,17 @@ CREATE TABLE prestador (
 
 -- Contrato entre um tomador e um prestador: a unidade de isolamento dos dados. RESTRICT de propósito:
 -- apagar uma organização com contrato é uma decisão explícita, nunca uma cascata silenciosa.
+-- A vigência (NULL = sem data definida) é informativa nesta etapa: quem decide se o contrato está em uso é `ativo`.
 CREATE TABLE contrato (
     id              BIGSERIAL PRIMARY KEY,
     tomador_id      BIGINT NOT NULL REFERENCES tomador(id) ON DELETE RESTRICT,
     prestador_id    BIGINT NOT NULL REFERENCES prestador(id) ON DELETE RESTRICT,
     ativo           BOOLEAN NOT NULL DEFAULT true,
+    vigencia_inicio DATE,
+    vigencia_fim    DATE,
     criado_em       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tomador_id, prestador_id)
+    UNIQUE (tomador_id, prestador_id),
+    CONSTRAINT contrato_vigencia_check CHECK (vigencia_fim >= vigencia_inicio)
 );
 CREATE INDEX contrato_prestador_idx ON contrato (prestador_id);
 
