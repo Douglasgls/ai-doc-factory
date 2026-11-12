@@ -78,6 +78,25 @@ def test_contrato_duplicado_recusado_e_prestador_com_dois_tomadores(conn):
     _recusa(conn, errors.UniqueViolation, ins, (t1, p))
 
 
+@pytest.mark.parametrize("inicio,fim", [
+    (None, None), ("2026-01-01", None), (None, "2026-12-31"), ("2026-01-01", "2026-12-31"),
+    ("2026-06-01", "2026-06-01"),
+])
+def test_vigencia_do_contrato_aceita(conn, inicio, fim):
+    t, p = _tomador(conn), _prestador(conn)
+    conn.execute(
+        "INSERT INTO contrato (tomador_id, prestador_id, vigencia_inicio, vigencia_fim) VALUES (%s, %s, %s, %s)",
+        (t, p, inicio, fim),
+    )
+
+
+def test_vigencia_com_fim_antes_do_inicio_recusada(conn):
+    t, p = _tomador(conn), _prestador(conn)
+    _recusa(conn, errors.CheckViolation,
+            "INSERT INTO contrato (tomador_id, prestador_id, vigencia_inicio, vigencia_fim) "
+            "VALUES (%s, %s, '2026-06-02', '2026-06-01')", (t, p))
+
+
 def test_email_unico_sem_diferenciar_caixa(conn):
     _usuario(conn, "Ana@Exemplo.com", "plataforma")
     _recusa(conn, errors.UniqueViolation,

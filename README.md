@@ -75,7 +75,7 @@ Edite o `.env`:
 - `API_PORT` define a porta da API no host (padrão 8000).
 - Para rodar sem rede e sem chaves, defina `CLASSIFICADOR=regras`. Com `CLASSIFICADOR=jev` (padrão do `.env.example`), preencha `OPENROUTER_API_KEY`, `JEV_MODEL` e `GEMINI_API_KEY`.
 
-- `AUTH_USUARIO`, `AUTH_SENHA` e `AUTH_SEGREDO` configuram o login do administrador (ver "Autenticação"). **Sem elas o sistema recusa o login (503) e toda rota protegida nega acesso.** Gere o segredo com `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- `AUTH_USUARIO` e `AUTH_SENHA` servem só para criar o primeiro administrador (ver "Autenticação"); `AUTH_SEGREDO` assina o token. **Sem `AUTH_SEGREDO` o sistema recusa o login (503) e toda rota protegida nega acesso.** Gere o segredo com `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 
 O `.env` está no `.gitignore`. Nunca o versione.
 
@@ -170,7 +170,11 @@ A pasta `frontend/` é a interface (Vite + React + TypeScript + Tailwind v4), e 
 
 ## Autenticação
 
-Há um único administrador, definido no ambiente (`AUTH_USUARIO`, `AUTH_SENHA`, `AUTH_SEGREDO`; `AUTH_EXPIRA_MIN` é a validade do token em minutos, padrão 480). Não há senha nem segredo padrão: sem as três variáveis, `POST /auth/login` responde 503 e as demais rotas protegidas também negam acesso. Ficam abertos só `GET /health`, `POST /auth/login`, `/docs` e `/openapi.json`.
+O login usa a tabela `usuario` (níveis `plataforma`, `tomador` e `prestador`; papéis `admin` e `membro`). `usuario` no corpo do login é o `email` gravado (sem diferenciar caixa nem espaços nas pontas). Só entra quem está `ativo`, tem senha definida e, se for de tomador ou prestador, pertence a organização `ativa`; toda falha devolve o mesmo 401. As senhas ficam em hash scrypt (sal por senha, custo gravado no próprio hash; o login regrava hashes com custo antigo). `AUTH_SEGREDO` assina o token e `AUTH_EXPIRA_MIN` é a validade em minutos (padrão 480). Não há segredo padrão: sem `AUTH_SEGREDO`, `POST /auth/login` responde 503 e as demais rotas protegidas também negam acesso.
+
+**Primeiro administrador:** `AUTH_USUARIO` e `AUTH_SENHA` agora servem **só** para criar o primeiro administrador. O serviço `migrate` do compose roda `python -m app.bootstrap_admin` depois do `alembic upgrade head`: se as duas variáveis estão definidas e não existe usuário com esse identificador, cria um usuário `plataforma`/`admin`; se já existe, não altera nada. **Trocar `AUTH_SENHA` depois não muda a senha de um usuário já criado.** Fora do Docker, rode o comando com as variáveis e `DATABASE_URL` no ambiente.
+
+A cada requisição o usuário é relido no banco: desativá-lo (ou à sua organização) ou mudar seu papel vale na hora, e o nível e o papel que valem são os do banco, não os do token. Enquanto não existe o filtro de dados por organização, todas as rotas de dados exigem nível `plataforma` (tomador e prestador recebem 403); `GET /auth/me` aceita qualquer usuário autenticado e devolve `id`, `email`, `nome`, `nivel`, `papel`, `tomador_id` e `prestador_id`. Tokens do formato anterior (emitidos antes desta mudança) são recusados: é preciso entrar de novo. Ficam abertos só `GET /health`, `POST /auth/login`, `/docs` e `/openapi.json`.
 
 Para obter o token (substitua pelos seus valores):
 
@@ -183,7 +187,7 @@ curl -X POST -H "Content-Type: application/json" \
 curl -H "Authorization: Bearer $TOKEN" localhost:8000/auth/me
 ```
 
-O token é um JWT HS256 (claims `sub`, `iat`, `exp`). No `/docs`, use o botão Authorize. Token em query string não é aceito, nem para a imagem da página: o cliente deve enviar o cabeçalho `Authorization`.
+O token é um JWT HS256 (claims `sub` = id do usuário, `nivel`, `papel`, `tomador_id`, `prestador_id`, `iat`, `exp`). No `/docs`, use o botão Authorize. Token em query string não é aceito, nem para a imagem da página: o cliente deve enviar o cabeçalho `Authorization`.
 
 ## Endpoints
 
@@ -243,9 +247,9 @@ Definidas no `.env` (modelo em `.env.example`), repassadas aos containers pelo `
 | `JEV_MODEL` | vazio | Modelo do Jev. Testado com `typesafe/jev-1.13` |
 | `GEMINI_API_KEY` | vazio | Chave do Google AI Studio. Só no `.env` |
 | `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo da segunda opinião |
-| `AUTH_USUARIO` | vazio | Usuário do administrador. Sem valor, o login responde 503 |
-| `AUTH_SENHA` | vazio | Senha do administrador. Só no `.env` |
-| `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env` |
+| `AUTH_USUARIO` | vazio | Identificador (e-mail) do primeiro administrador, criado por `python -m app.bootstrap_admin` se não existir |
+| `AUTH_SENHA` | vazio | Senha inicial desse administrador. Só no `.env`. Trocá-la depois não muda a senha de um usuário já criado |
+| `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env`. Sem ele, o login responde 503 |
 | `AUTH_EXPIRA_MIN` | `480` | Validade do token, em minutos |
 
 Também podem ser ajustadas por ambiente (valores em `app/config.py`, não listadas no `.env.example` nem repassadas pelo `docker-compose.yml` atual, então exigem editá-lo): `SEG_SIM_BAIXO`, `SEG_SIM_ALTO`, `SEG_LLM_CONTINUA`, `SEG_LLM_ABRE`, `LLM_TIMEOUT`, `LLM_TENTATIVAS`, `LLM_ESPERA`. As respostas dos LLMs são cacheadas em disco (volume `cache_llm`).
@@ -298,7 +302,7 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 
 - Os dados sintéticos são otimistas. A validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.
 - Um worker por fila: não há escala horizontal testada.
-- Autenticação mínima: um único usuário administrador, sem tabela de usuários nem papéis; sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
+- Autenticação: o login usa a tabela `usuario`, mas ainda não há endpoints de gestão de usuários, convite nem troca de senha, e as rotas de dados só aceitam usuários de nível `plataforma` (tomador e prestador recebem 403 até existir o filtro por organização); sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
 - Migrações só em SQL cru (Alembic, sem models) e sem teste de upgrade a partir de bancos antigos além do baseline; quem tem banco criado pelo antigo `sql/schema.sql` precisa de `alembic stamp head` (ver seção 6).
 - Sem CI.
 - O Jev e o Gemini recebem texto (anonimizado, ver "Anonimização") e imagem de páginas dos documentos. Use `CLASSIFICADOR=regras` se o conteúdo não puder sair da máquina.

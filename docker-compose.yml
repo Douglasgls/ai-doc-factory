@@ -60,7 +60,7 @@ services:
 
   migrate:
     <<: *app
-    command: alembic upgrade head
+    command: sh -c "alembic upgrade head && python -m app.bootstrap_admin"
     restart: "no"
     depends_on:
       postgres: {condition: service_healthy}
