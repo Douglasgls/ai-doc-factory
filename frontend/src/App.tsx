@@ -7,7 +7,8 @@ import CategoryPage from './pages/CategoryPage'
 import ManualReviewPage, { OFFICIAL_CATEGORY_OPTIONS } from './pages/ManualReviewPage'
 import LoginPage from './pages/LoginPage'
 import { LotesStatusPanel } from './components/LotesStatusPanel'
-import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
+// import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
+import type { FailedDocument } from './components/FailedDocumentsBanner'
 import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
@@ -234,8 +235,17 @@ export function App() {
       )
       setDetailedDocs(allDocs)
 
-      // Map review queue from GET /revisao
-      const mappedReviewDocs: ReviewPendingDocument[] = reviewData.map((d) => {
+      // Map review queue from GET /revisao (mais recentes primeiro)
+      const reviewOrdenados = [...reviewData].sort((a, b) => {
+        const timeA = a.processado_em ? new Date(a.processado_em).getTime() : 0
+        const timeB = b.processado_em ? new Date(b.processado_em).getTime() : 0
+        if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+          return timeB - timeA
+        }
+        return b.id - a.id
+      })
+
+      const mappedReviewDocs: ReviewPendingDocument[] = reviewOrdenados.map((d) => {
         const campos = d.campos || {}
         const suggestedSlug = d.tipo_sugerido || 'desconhecido'
         const suggestedLabel =
@@ -501,7 +511,9 @@ export function App() {
       {/* Main Content Area */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 relative z-10">
         <LotesStatusPanel lotes={lotesEnviados} onRecheck={recheckLote} onDismiss={dismissLote} />
-        {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />}
+        {/* Banner de documentos com falha ocultado a pedido do usuário */}
+        {/* {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />} */}
+        {Boolean(failedDocs.length && false)}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
             <div className="w-12 h-12 border-4 border-[#9333ea] border-t-transparent rounded-full animate-spin"></div>
