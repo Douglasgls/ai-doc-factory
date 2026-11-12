@@ -358,31 +358,59 @@ export const apiService = {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    const processarBlocoSse = (rawEvent: string) => {
+      const dataLines: string[] = [];
+      for (const line of rawEvent.split('\n')) {
+        const trimmed = line.trimEnd();
+        if (!trimmed || trimmed.startsWith(':')) {
+          continue; // ignora linhas em branco e frames de keepalive/comentário
+        }
+        if (trimmed.startsWith('data:')) {
+          dataLines.push(trimmed.slice(5).trimStart());
+        }
+      }
+      if (dataLines.length === 0) return;
+      try {
+        const parsed = JSON.parse(dataLines.join('\n')) as LoteStatusResponse;
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          typeof parsed.id === 'number' &&
+          typeof parsed.estado === 'string'
+        ) {
+          onEvent(parsed);
+        }
+      } catch {
+        // ignora payload parcial ou JSON inválido sem interromper o stream
+      }
+    };
+
     try {
       while (!signal.aborted) {
         const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        if (done) {
+          buffer += decoder.decode().replace(/\r\n/g, '\n');
+          if (buffer.trim()) {
+            processarBlocoSse(buffer);
+          }
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
 
         let boundary = buffer.indexOf('\n\n');
         while (boundary !== -1) {
           const rawEvent = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 2);
-
-          for (const line of rawEvent.split('\n')) {
-            if (line.startsWith('data: ')) {
-              try {
-                const parsed = JSON.parse(line.slice(6)) as LoteStatusResponse;
-                onEvent(parsed);
-              } catch {
-                // ignora frame malformado
-              }
-            }
-          }
+          processarBlocoSse(rawEvent);
           boundary = buffer.indexOf('\n\n');
         }
       }
     } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore
+      }
       try {
         reader.releaseLock();
       } catch {

@@ -47,14 +47,24 @@ SCHEMA_GEMINI = {
 }
 
 
-def enfileirar_analise(documento_id: int, cliente: redis.Redis | None = None) -> None:
-    """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão."""
+def enfileirar_analise(documento_id: int, cliente: redis.Redis | None = None) -> bool:
+    """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão.
+    Se falhar, remove a pendência de análise do lote no Redis para não travar o acompanhamento."""
     try:
         from app.filas import enfileirar
-        cliente = cliente or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-        enfileirar(cliente, config.FILA_ANALISAR, {"documento_id": documento_id})
+        cli = cliente or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+        enfileirar(cli, config.FILA_ANALISAR, {"documento_id": documento_id})
+        return True
     except Exception:
         log.exception("não foi possível enfileirar a análise de ponto do documento %s", documento_id)
+        try:
+            with psycopg.connect(config.DATABASE_URL) as conn:
+                row = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (documento_id,)).fetchone()
+            if row is not None:
+                concluir_tarefa_pos(row[0], f"analise:{documento_id}", cliente)
+        except Exception:
+            pass
+        return False
 
 
 def _validar_extracao(dado) -> dict:
@@ -218,8 +228,14 @@ def analisar_documento(payload: dict) -> None:
         documento_id=doc_id,
     )
     resultado = analisar("\n".join(textos), _imagens(lote_id, doc[3], doc[4]), perfil)
+    if lote_cancelado(lote_id):
+        concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
+        return
     resultado["perfil"] = perfil
     with psycopg.connect(config.DATABASE_URL) as conn:
+        if lote_cancelado(lote_id):
+            concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
+            return
         _gravar(conn, doc_id, "concluida", resultado)  # uma linha por documento: reprocessar substitui
         docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
     etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
@@ -241,9 +257,10 @@ def marcar_erro_analise(payload: dict) -> None:
         existe = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (doc_id,)).fetchone()
         if existe:
             lote_id = existe[0]
-            _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
-            docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
-    if lote_id is not None:
+            if not lote_cancelado(lote_id):
+                _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
+                docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+    if lote_id is not None and not lote_cancelado(lote_id):
         etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
         publicar_evento(
             lote_id,
@@ -251,3 +268,5 @@ def marcar_erro_analise(payload: dict) -> None:
             f"Auditoria da folha de ponto #{doc_id} finalizada com alerta.",
             documento_id=doc_id,
         )
+    elif lote_id is not None:
+        concluir_tarefa_pos(lote_id, f"analise:{doc_id}")

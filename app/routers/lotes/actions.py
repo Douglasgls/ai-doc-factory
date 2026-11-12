@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
@@ -89,6 +90,27 @@ def criar_lote(dados: bytes, pdf: bytes, nome_arquivo: str | None, empresa_id: i
     return resposta
 
 
+def _normalizar_probabilidades(probs) -> dict[str, float] | None:
+    if not isinstance(probs, dict):
+        return None
+    return {str(k): float(v) for k, v in probs.items() if isinstance(v, (int, float, Decimal))}
+
+
+def _json_default(valor):
+    if isinstance(valor, Decimal):
+        return float(valor)
+    return jsonable_encoder(valor)
+
+
+def _serializar_pacote(pacote: dict, sort_keys: bool = False) -> str:
+    return json.dumps(
+        jsonable_encoder(pacote),
+        sort_keys=sort_keys,
+        ensure_ascii=False,
+        default=_json_default,
+    )
+
+
 def obter_lote(lote_id: int) -> dict:
     with psycopg.connect(config.DATABASE_URL) as conn:
         lote = conn.execute(
@@ -108,7 +130,8 @@ def obter_lote(lote_id: int) -> dict:
         "documentos": [
             {"id": d[0], "ordem": d[1], "pagina_ini": d[2], "pagina_fim": d[3], "estado": d[4],
              "tipo": d[5], "confianca": float(d[6]) if d[6] is not None else None,
-             "segmentacao_ambigua": d[7], "probabilidades": d[8], "tipo_original": d[9]}
+             "segmentacao_ambigua": d[7], "probabilidades": _normalizar_probabilidades(d[8]),
+             "tipo_original": d[9]}
             for d in docs
         ],
     }
@@ -122,19 +145,32 @@ def caminho_imagem_pagina(lote_id: int, numero: int) -> Path:
 
 
 def cancelar_lote(lote_id: int) -> dict:
-    """Cancela o processamento de um lote em andamento, marcando-o como 'erro' e sinalizando aos workers.
-    Rejeita com 409 se o lote já estiver concluído (para não bloquear extração/análise em lote concluído)."""
+    """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação),
+    marcando-o como 'erro' e sinalizando aos workers. Rejeita com 409 se o lote já estiver totalmente finalizado."""
     with psycopg.connect(config.DATABASE_URL) as conn:
         lote = conn.execute("SELECT id, estado FROM lote WHERE id = %s FOR UPDATE", (lote_id,)).fetchone()
         if lote is None:
             raise HTTPException(404, "lote não encontrado")
         if lote[1] == "concluido":
-            raise HTTPException(409, "lote já concluído não pode ser cancelado")
+            ultimo, _ = obter_progresso_lote(lote_id, r)
+            etapa_atual = (ultimo or {}).get("etapa", "")
+            pos_em_andamento = bool(tarefas_pos_pendentes(lote_id, r)) or etapa_atual in (
+                "extracao",
+                "analise_ponto",
+            )
+            if not pos_em_andamento:
+                raise HTTPException(409, "lote já concluído não pode ser cancelado")
+            tem_revisao = conn.execute(
+                "SELECT 1 FROM documento WHERE lote_id = %s AND estado = 'revisado' LIMIT 1",
+                (lote_id,),
+            ).fetchone()
+            if tem_revisao is not None:
+                raise HTTPException(409, "lote possui documentos revisados e não pode ser cancelado")
         marcar_cancelado(lote_id, r)
         limpar_tarefas_pos(lote_id, r)
-        if lote[1] in ("recebido", "ocr", "classificando"):
+        if lote[1] in ("recebido", "ocr", "classificando", "concluido"):
             conn.execute(
-                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado = 'segmentado'",
+                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado != 'revisado'",
                 (lote_id,),
             )
             conn.execute(
@@ -213,8 +249,8 @@ async def stream_eventos_lote(lote_id: int, request: Request, once: bool = False
 
     try:
         pacote = await asyncio.to_thread(montar_pacote_evento, lote_id)
-        ultimo_json = json.dumps(pacote, sort_keys=True, ensure_ascii=False)
-        yield f"data: {json.dumps(pacote, ensure_ascii=False)}\n\n"
+        ultimo_json = _serializar_pacote(pacote, sort_keys=True)
+        yield f"data: {_serializar_pacote(pacote)}\n\n"
 
         if once or _lote_totalmente_finalizado(lote_id, pacote) or pubsub is None:
             return
@@ -230,18 +266,18 @@ async def stream_eventos_lote(lote_id: int, request: Request, once: bool = False
                     pass
                 ticks_sem_consulta = 0
                 pacote = await asyncio.to_thread(montar_pacote_evento, lote_id)
-                atual_json = json.dumps(pacote, sort_keys=True, ensure_ascii=False)
+                atual_json = _serializar_pacote(pacote, sort_keys=True)
                 ultimo_json = atual_json
-                yield f"data: {json.dumps(pacote, ensure_ascii=False)}\n\n"
+                yield f"data: {_serializar_pacote(pacote)}\n\n"
             else:
                 ticks_sem_consulta += 1
                 if ticks_sem_consulta >= 15:
                     ticks_sem_consulta = 0
                     pacote = await asyncio.to_thread(montar_pacote_evento, lote_id)
-                    atual_json = json.dumps(pacote, sort_keys=True, ensure_ascii=False)
+                    atual_json = _serializar_pacote(pacote, sort_keys=True)
                     if atual_json != ultimo_json:
                         ultimo_json = atual_json
-                        yield f"data: {json.dumps(pacote, ensure_ascii=False)}\n\n"
+                        yield f"data: {_serializar_pacote(pacote)}\n\n"
                     else:
                         yield ": keepalive\n\n"
                 else:

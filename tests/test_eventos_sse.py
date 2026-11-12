@@ -208,6 +208,7 @@ def test_lote_multiplos_documentos_so_fecha_stream_apos_ultimo_terminar(monkeypa
 
 def test_eventos_sse_serializa_confianca_decimal_do_postgres():
     from decimal import Decimal
+    from psycopg.types.json import Jsonb
 
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         lote_id = conn.execute(
@@ -216,9 +217,9 @@ def test_eventos_sse_serializa_confianca_decimal_do_postgres():
             (uuid.uuid4().hex + uuid.uuid4().hex,),
         ).fetchone()[0]
         doc_id = conn.execute(
-            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo, confianca) "
-            "VALUES (%s, 1, 1, 1, 'classificado', 'aso', %s) RETURNING id",
-            (lote_id, Decimal("0.975")),
+            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo, confianca, probabilidades) "
+            "VALUES (%s, 1, 1, 1, 'classificado', 'aso', %s, %s) RETURNING id",
+            (lote_id, Decimal("0.975"), Jsonb({"aso": 0.975, "holerite": 0.025})),
         ).fetchone()[0]
     try:
         sse = client.get(f"/lotes/{lote_id}/eventos?once=true")
@@ -229,7 +230,115 @@ def test_eventos_sse_serializa_confianca_decimal_do_postgres():
         assert pacote["documentos"][0]["id"] == doc_id
         assert pacote["documentos"][0]["confianca"] == 0.975
         assert isinstance(pacote["documentos"][0]["confianca"], float)
+        assert pacote["documentos"][0]["probabilidades"] == {"aso": 0.975, "holerite": 0.025}
+
+        # Testa _serializar_pacote diretamente com Decimal aninhado em probabilidades e confianca
+        raw_serializado = lotes_actions._serializar_pacote(
+            {
+                "id": lote_id,
+                "estado": "classificando",
+                "documentos": [
+                    {
+                        "id": doc_id,
+                        "confianca": Decimal("0.880"),
+                        "probabilidades": {"aso": Decimal("0.880"), "holerite": Decimal("0.120")},
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+        decodificado = json.loads(raw_serializado)
+        assert decodificado["documentos"][0]["confianca"] == 0.88
+        assert decodificado["documentos"][0]["probabilidades"] == {"aso": 0.88, "holerite": 0.12}
     finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM lote WHERE id = %s", (lote_id,))
+
+
+def test_ciclo_cancelar_e_reprocessar_multiplas_transicoes(monkeypatch):
+    enfileirados = []
+    monkeypatch.setattr(lotes_actions, "enfileirar", lambda r, fila, payload, *a, **k: enfileirados.append((fila, payload)))
+
+    resp = client.post(
+        "/lotes",
+        files={"arquivo": ("ciclo.pdf", _pdf_minimo(), "application/pdf")},
+    )
+    assert resp.status_code == 200
+    lote_id = resp.json()["lote_id"]
+    enfileirados.clear()
+
+    for _ in range(2):
+        canc = client.post(f"/lotes/{lote_id}/cancelar")
+        assert canc.status_code == 200
+        assert canc.json()["estado"] == "erro"
+        assert lote_cancelado(lote_id)
+
+        # Reprocessar lote cancelado limpa flag de cancelamento e reenfileira
+        reproc = client.post(f"/lotes/{lote_id}/reprocessar")
+        assert reproc.status_code == 200
+        assert reproc.json()["estado"] == "recebido"
+        assert not lote_cancelado(lote_id)
+        assert enfileirados[-1] == (config.FILA_SEGMENTAR, {"lote_id": lote_id})
+
+        # Tentar reprocessar novamente enquanto já está em 'recebido' deve retornar 409
+        reproc_duplo = client.post(f"/lotes/{lote_id}/reprocessar")
+        assert reproc_duplo.status_code == 409
+
+
+def test_cancelar_durante_extracao_ou_analise_funciona_e_interrompe_worker(monkeypatch):
+    monkeypatch.setattr(lotes_actions, "enfileirar", lambda *a, **k: None)
+    resp = client.post(
+        "/lotes",
+        files={"arquivo": ("em_extracao.pdf", _pdf_minimo(), "application/pdf")},
+    )
+    lote_id = resp.json()["lote_id"]
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("UPDATE lote SET estado = 'concluido', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+        doc_id = conn.execute(
+            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
+            "VALUES (%s, 1, 1, 1, 'classificado', 'holerite') RETURNING id",
+            (lote_id,),
+        ).fetchone()[0]
+    registrar_tarefas_pos(lote_id, [f"extracao:{doc_id}"])
+
+    # Apesar de lote.estado == 'concluido', ainda há extração pendente -> cancelar deve retornar 200
+    canc = client.post(f"/lotes/{lote_id}/cancelar")
+    assert canc.status_code == 200
+    assert canc.json()["estado"] == "erro"
+    assert lote_cancelado(lote_id)
+
+    # Worker de extração que rodar depois não grava campos nem sobrescreve o evento 'cancelado'
+    extracao.extrair_campos({"documento_id": doc_id})
+    ultimo, _ = obter_progresso_lote(lote_id)
+    assert ultimo["etapa"] == "cancelado"
+
+
+def test_falha_ao_enfileirar_extracao_remove_pendencia_e_nao_trava_lote(monkeypatch):
+    def _falhar(*a, **k):
+        raise RuntimeError("Redis indisponível")
+
+    monkeypatch.setattr(extracao, "enfileirar", _falhar)
+    fn_real = getattr(extracao.enfileirar_extracao, "__wrapped__", extracao.enfileirar_extracao)
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        lote_id = conn.execute(
+            "INSERT INTO lote (sha256, nome_arquivo, estado, docs_pendentes) "
+            "VALUES (%s, 'falha_fila.pdf', 'concluido', 0) RETURNING id",
+            (uuid.uuid4().hex + uuid.uuid4().hex,),
+        ).fetchone()[0]
+        doc_id = conn.execute(
+            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
+            "VALUES (%s, 1, 1, 1, 'classificado', 'aso') RETURNING id",
+            (lote_id,),
+        ).fetchone()[0]
+    try:
+        registrar_tarefas_pos(lote_id, [f"extracao:{doc_id}"])
+        ok = fn_real(doc_id)
+        assert ok is False
+        from app.eventos import tarefas_pos_pendentes
+
+        assert tarefas_pos_pendentes(lote_id) == set()
+    finally:
+        limpar_tarefas_pos(lote_id)
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM lote WHERE id = %s", (lote_id,))
 

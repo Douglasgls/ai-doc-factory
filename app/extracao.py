@@ -23,13 +23,27 @@ VALOR_MAX = 200
 DATAS = ("data_admissao", "data_exame", "data_termino")
 
 
-def enfileirar_extracao(documento_id: int, r: redis.Redis | None = None) -> None:
-    """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão."""
+def _remover_pendencia_por_doc(documento_id: int, prefixo: str, r: redis.Redis | None = None) -> None:
     try:
-        r = r or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-        enfileirar(r, config.FILA_EXTRAIR, {"documento_id": documento_id})
+        with psycopg.connect(config.DATABASE_URL) as conn:
+            row = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (documento_id,)).fetchone()
+        if row is not None:
+            concluir_tarefa_pos(row[0], f"{prefixo}:{documento_id}", r)
+    except Exception:
+        pass
+
+
+def enfileirar_extracao(documento_id: int, r: redis.Redis | None = None) -> bool:
+    """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão.
+    Se falhar, remove a pendência de extração do lote no Redis para não travar o acompanhamento."""
+    try:
+        cli = r or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+        enfileirar(cli, config.FILA_EXTRAIR, {"documento_id": documento_id})
+        return True
     except Exception:
         log.warning("não foi possível enfileirar a extração do documento %s", documento_id)
+        _remover_pendencia_por_doc(documento_id, "extracao", r)
+        return False
 
 
 def limpar(dados) -> dict[str, str]:
@@ -108,6 +122,9 @@ def extrair_campos(payload: dict) -> None:
         dados = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, doc[2])))
     except llm.LLMErro as e:
         log.warning("extração do documento %s indisponível: %s", doc_id, e)
+        if lote_cancelado(lote_id):
+            concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
+            return
         with psycopg.connect(config.DATABASE_URL) as conn:
             docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
         etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
@@ -117,6 +134,9 @@ def extrair_campos(payload: dict) -> None:
             f"Processamento concluído no documento #{doc_id}.",
             documento_id=doc_id,
         )
+        return
+    if lote_cancelado(lote_id):
+        concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
         return
     if not isinstance(dados, dict):
         log.warning("extração do documento %s: resposta fora do schema", doc_id)
@@ -133,6 +153,9 @@ def extrair_campos(payload: dict) -> None:
     origem = f"gemini:{prompts.VERSAO_PROMPT_EXTRACAO}"
     campos_limpos = limpar(dados)
     with psycopg.connect(config.DATABASE_URL) as conn:  # substitui o que o Gemini gravou antes; correção humana fica
+        if lote_cancelado(lote_id):
+            concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
+            return
         conn.execute("DELETE FROM documento_campos WHERE documento_id = %s AND origem LIKE 'gemini:%%'", (doc_id,))
         for campo, valor in campos_limpos.items():
             conn.execute("INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, %s, %s, %s) "
@@ -153,3 +176,26 @@ def extrair_campos(payload: dict) -> None:
         ),
         documento_id=doc_id,
     )
+
+
+def marcar_erro_extracao(payload: dict) -> None:
+    """ao_esgotar: job de extração foi para a dlq. Remove a pendência pós-classificação para não travar o lote."""
+    doc_id = payload["documento_id"]
+    lote_id = None
+    docs_pend = 0
+    ap_pend = False
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        row = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (doc_id,)).fetchone()
+        if row is not None:
+            lote_id = row[0]
+            docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
+    if lote_id is not None and not lote_cancelado(lote_id):
+        etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
+        publicar_evento(
+            lote_id,
+            etapa,
+            f"Processamento concluído no documento #{doc_id}.",
+            documento_id=doc_id,
+        )
+    elif lote_id is not None:
+        concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")

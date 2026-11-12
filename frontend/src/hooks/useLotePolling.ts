@@ -55,7 +55,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   const [lotes, setLotes] = useState<TrackedLote[]>(() => carregarLotesSessao())
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
   const runs = useRef(new Map<number, PollRun>())
-  const activeSseIds = useRef(new Set<number>())
+  const activeSseRuns = useRef(new Map<number, PollRun>())
   const uploadingCount = useRef(0)
   const filesMap = useRef(new Map<number, File>())
   const active = useRef(false)
@@ -74,7 +74,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
     const timer = timers.current.get(id)
     if (timer) clearTimeout(timer)
     timers.current.delete(id)
-    activeSseIds.current.delete(id)
+    activeSseRuns.current.delete(id)
     const run = runs.current.get(id)
     if (run) {
       run.abortController.abort()
@@ -85,7 +85,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   const stopAll = useCallback(() => {
     timers.current.forEach((t) => clearTimeout(t))
     timers.current.clear()
-    activeSseIds.current.clear()
+    activeSseRuns.current.clear()
     runs.current.forEach((r) => r.abortController.abort())
     runs.current.clear()
   }, [])
@@ -173,12 +173,12 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
       }
 
       // Se já houver muitas conexões SSE abertas ou uploads em lote em andamento, usa polling leve para não travar o navegador
-      if (activeSseIds.current.size >= MAX_CONCURRENT_SSE || uploadingCount.current > 0) {
+      if (activeSseRuns.current.size >= MAX_CONCURRENT_SSE || uploadingCount.current > 0) {
         timers.current.set(id, setTimeout(() => void fallbackTick(), POLL_INITIAL_MS))
         return
       }
 
-      activeSseIds.current.add(id)
+      activeSseRuns.current.set(id, run)
       void (async () => {
         let ultimaEtapaRecebida: string | null = null
         try {
@@ -204,7 +204,9 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
             }
           }
         } finally {
-          activeSseIds.current.delete(id)
+          if (activeSseRuns.current.get(id) === run) {
+            activeSseRuns.current.delete(id)
+          }
         }
         if (stale()) return
         const ultimoEstado = run.last?.estado

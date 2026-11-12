@@ -16,6 +16,7 @@ from app.eventos import (
     lote_cancelado,
     publicar_evento,
     registrar_tarefas_pos,
+    tarefas_pos_pendentes,
 )
 from app.roteamento import decidir
 
@@ -161,3 +162,13 @@ def classificar_documento(payload: dict) -> None:
     # classificado e em_revisao: CNPJ e demais campos não dependem do tipo confirmado
     from app.extracao import enfileirar_extracao  # import tardio: extracao importa este módulo
     enfileirar_extracao(doc_id)
+    if restantes == 0 and not tarefas_pos_pendentes(lote_id):
+        publicar_evento(
+            lote_id,
+            "concluido",
+            f"Classificação concluída ({rotulo_tipo}).",
+            documento_id=doc_id,
+            tipo=decisao.tipo,
+            estado_documento=decisao.estado,
+            docs_pendentes=0,
+        )
