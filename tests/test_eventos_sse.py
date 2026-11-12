@@ -1,9 +1,13 @@
 """Testes para o endpoint SSE (Server-Sent Events), cancelamento, reprocessamento e fan-in de eventos."""
 import io
 import json
+import shutil
 import uuid
+from pathlib import Path
 
 import psycopg
+import pytest
+import redis
 from fastapi.testclient import TestClient
 
 from app import config, extracao, ocr
@@ -19,6 +23,30 @@ from app.eventos import (
 from app.routers.lotes import actions as lotes_actions
 
 client = TestClient(app)
+
+
+def _chaves_lote(cli) -> set[str]:
+    return {k for p in ("progresso", "historico", "tarefas_pos", "cancelado") for k in cli.scan_iter(f"{p}:lote:*")}
+
+
+@pytest.fixture(autouse=True)
+def limpar_lotes_criados():
+    """Apaga, ao fim de cada teste, os lotes criados nele (inclusive via POST /lotes), as chaves novas do Redis
+    (progresso, histórico, tarefas pós, cancelado, mesmo de lotes que o teste já apagou) e as pastas em
+    DATA_DIR, mesmo se o teste falhar."""
+    cli = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+    chaves_antes = _chaves_lote(cli)
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        antes = conn.execute("SELECT COALESCE(MAX(id), 0) FROM lote").fetchone()[0]
+    yield
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        ids = [i for (i,) in conn.execute("SELECT id FROM lote WHERE id > %s", (antes,))]
+        conn.execute("DELETE FROM lote WHERE id > %s", (antes,))
+    novas = _chaves_lote(cli) - chaves_antes
+    if novas:
+        cli.delete(*novas)
+    for i in ids:
+        shutil.rmtree(Path(config.DATA_DIR) / f"lote_{i}", ignore_errors=True)
 
 
 def _pdf_minimo() -> bytes:
