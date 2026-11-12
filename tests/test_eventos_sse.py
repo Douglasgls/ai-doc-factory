@@ -333,13 +333,15 @@ def test_cancelar_durante_extracao_ou_analise_funciona_e_interrompe_worker(monke
         # Apesar de lote.estado == 'concluido', ainda há extração pendente -> cancelar deve retornar 200
         canc = client.post(f"/lotes/{lote_id}/cancelar")
         assert canc.status_code == 200
-        assert canc.json()["estado"] == "erro"
+        # classificação já terminou: lote e documento ficam como estão
+        assert canc.json()["estado"] == "concluido"
+        assert [d["estado"] for d in canc.json()["documentos"]] == ["classificado"]
         assert lote_cancelado(lote_id)
 
-        # Worker de extração que rodar depois não grava campos nem sobrescreve o evento 'cancelado'
+        # Worker de extração que rodar depois não grava campos nem reabre o acompanhamento
         extracao.extrair_campos({"documento_id": doc_id})
         ultimo, _ = obter_progresso_lote(lote_id)
-        assert ultimo["etapa"] == "cancelado"
+        assert ultimo["etapa"] == "concluido"
     finally:
         limpar_cancelado(lote_id)
         limpar_tarefas_pos(lote_id)
@@ -366,7 +368,8 @@ def test_cancelar_durante_analise_ponto_detectada_pelo_banco_mesmo_sem_redis_pos
 
         canc = client.post(f"/lotes/{lote_id}/cancelar")
         assert canc.status_code == 200
-        assert canc.json()["estado"] == "erro"
+        assert canc.json()["estado"] == "concluido"
+        assert canc.json()["documentos"][0]["estado"] == "classificado"
         assert lote_cancelado(lote_id)
     finally:
         limpar_cancelado(lote_id)
