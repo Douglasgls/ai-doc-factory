@@ -146,11 +146,15 @@ docker compose run --rm migrate alembic revision -m "descricao curta"
 
 Edite `upgrade()`/`downgrade()` com SQL e rebuild (`docker compose up -d --build`). Para aplicar manualmente: `docker compose run --rm migrate alembic upgrade head`; para voltar uma: `alembic downgrade -1`.
 
-**Banco que já existe** (criado pelo antigo `sql/schema.sql`): não rode o baseline de novo, apenas marque-o como aplicado:
+> **ATENÇÃO: quem já tem banco local criado pelo antigo `sql/schema.sql` (volume `pgdata` existente).** Antes do próximo `docker compose up`, rode **uma vez**:
+>
+> ```bash
+> docker compose run --rm migrate alembic stamp head
+> ```
+>
+> Isso apenas marca o baseline como aplicado, sem alterar tabelas nem dados. A alternativa é recomeçar do zero com `docker compose down -v` (apaga todos os dados locais). **Sem isso**, o serviço `migrate` falha com `relation "empresa" already exists` e, como a `api` e os workers só sobem depois que ele termina com sucesso, nenhum deles inicia.
 
-```bash
-docker compose run --rm migrate alembic stamp head
-```
+Banco novo (volume vazio) não precisa de nada: o `migrate` cria o schema. O `sql/schema.sql` não existe mais; o schema vive em `migrations/versions/`.
 
 Para recomeçar do zero:
 
@@ -295,7 +299,7 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 - Os dados sintéticos são otimistas. A validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.
 - Um worker por fila: não há escala horizontal testada.
 - Autenticação mínima: um único usuário administrador, sem tabela de usuários nem papéis; sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
-- Sem migrações: `sql/schema.sql` só vale em banco novo (ver `docker compose down -v`).
+- Migrações só em SQL cru (Alembic, sem models) e sem teste de upgrade a partir de bancos antigos além do baseline; quem tem banco criado pelo antigo `sql/schema.sql` precisa de `alembic stamp head` (ver seção 6).
 - Sem CI.
 - O Jev e o Gemini recebem texto (anonimizado, ver "Anonimização") e imagem de páginas dos documentos. Use `CLASSIFICADOR=regras` se o conteúdo não puder sair da máquina.
 - A confiança do classificador por regras é uma heurística sem calibração, usada só para roteamento.
