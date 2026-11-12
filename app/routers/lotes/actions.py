@@ -5,6 +5,7 @@ from pathlib import Path
 
 import psycopg
 from fastapi import HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 
 from app import config
 from app.eventos import (
@@ -106,8 +107,8 @@ def obter_lote(lote_id: int) -> dict:
         "historico_eventos": historico,
         "documentos": [
             {"id": d[0], "ordem": d[1], "pagina_ini": d[2], "pagina_fim": d[3], "estado": d[4],
-             "tipo": d[5], "confianca": d[6], "segmentacao_ambigua": d[7],
-             "probabilidades": d[8], "tipo_original": d[9]}
+             "tipo": d[5], "confianca": float(d[6]) if d[6] is not None else None,
+             "segmentacao_ambigua": d[7], "probabilidades": d[8], "tipo_original": d[9]}
             for d in docs
         ],
     }
@@ -180,7 +181,7 @@ def reprocessar_lote(lote_id: int) -> dict:
 
 
 def montar_pacote_evento(lote_id: int) -> dict:
-    return obter_lote(lote_id)
+    return jsonable_encoder(obter_lote(lote_id))
 
 
 def _lote_totalmente_finalizado(lote_id: int, pacote: dict) -> bool:

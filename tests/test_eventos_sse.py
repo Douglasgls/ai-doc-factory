@@ -206,6 +206,34 @@ def test_lote_multiplos_documentos_so_fecha_stream_apos_ultimo_terminar(monkeypa
             conn.execute("DELETE FROM lote WHERE id = %s", (lote_id,))
 
 
+def test_eventos_sse_serializa_confianca_decimal_do_postgres():
+    from decimal import Decimal
+
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        lote_id = conn.execute(
+            "INSERT INTO lote (sha256, nome_arquivo, estado, docs_pendentes) "
+            "VALUES (%s, 'decimal.pdf', 'classificando', 1) RETURNING id",
+            (uuid.uuid4().hex + uuid.uuid4().hex,),
+        ).fetchone()[0]
+        doc_id = conn.execute(
+            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo, confianca) "
+            "VALUES (%s, 1, 1, 1, 'classificado', 'aso', %s) RETURNING id",
+            (lote_id, Decimal("0.975")),
+        ).fetchone()[0]
+    try:
+        sse = client.get(f"/lotes/{lote_id}/eventos?once=true")
+        assert sse.status_code == 200
+        linhas = [l for l in sse.text.splitlines() if l.startswith("data: ")]
+        assert len(linhas) == 1
+        pacote = json.loads(linhas[0][6:])
+        assert pacote["documentos"][0]["id"] == doc_id
+        assert pacote["documentos"][0]["confianca"] == 0.975
+        assert isinstance(pacote["documentos"][0]["confianca"], float)
+    finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM lote WHERE id = %s", (lote_id,))
+
+
 def test_eventos_e_cancelar_lote_inexistente_retornam_404():
     assert client.get("/lotes/999999/eventos?once=true").status_code == 404
     assert client.post("/lotes/999999/cancelar").status_code == 404

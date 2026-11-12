@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 import redis
+from fastapi.encoders import jsonable_encoder
 
 from app import config
 
@@ -46,13 +47,15 @@ def publicar_evento(
 ) -> dict:
     """Publica um evento de progresso no canal do lote e salva o último estado no Redis.
     Nunca levanta exceção para não interromper o processamento dos workers."""
-    evento = {
-        "lote_id": lote_id,
-        "etapa": etapa,
-        "mensagem": mensagem,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        **extras,
-    }
+    evento = jsonable_encoder(
+        {
+            "lote_id": lote_id,
+            "etapa": etapa,
+            "mensagem": mensagem,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **extras,
+        }
+    )
     try:
         cli = _cliente(r)
         payload = json.dumps(evento, ensure_ascii=False)
