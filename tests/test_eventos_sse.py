@@ -292,25 +292,31 @@ def test_cancelar_durante_extracao_ou_analise_funciona_e_interrompe_worker(monke
         files={"arquivo": ("em_extracao.pdf", _pdf_minimo(), "application/pdf")},
     )
     lote_id = resp.json()["lote_id"]
-    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
-        conn.execute("UPDATE lote SET estado = 'concluido', docs_pendentes = 0 WHERE id = %s", (lote_id,))
-        doc_id = conn.execute(
-            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
-            "VALUES (%s, 1, 1, 1, 'classificado', 'holerite') RETURNING id",
-            (lote_id,),
-        ).fetchone()[0]
-    registrar_tarefas_pos(lote_id, [f"extracao:{doc_id}"])
+    try:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("UPDATE lote SET estado = 'concluido', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+            doc_id = conn.execute(
+                "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
+                "VALUES (%s, 1, 1, 1, 'classificado', 'holerite') RETURNING id",
+                (lote_id,),
+            ).fetchone()[0]
+        registrar_tarefas_pos(lote_id, [f"extracao:{doc_id}"])
 
-    # Apesar de lote.estado == 'concluido', ainda há extração pendente -> cancelar deve retornar 200
-    canc = client.post(f"/lotes/{lote_id}/cancelar")
-    assert canc.status_code == 200
-    assert canc.json()["estado"] == "erro"
-    assert lote_cancelado(lote_id)
+        # Apesar de lote.estado == 'concluido', ainda há extração pendente -> cancelar deve retornar 200
+        canc = client.post(f"/lotes/{lote_id}/cancelar")
+        assert canc.status_code == 200
+        assert canc.json()["estado"] == "erro"
+        assert lote_cancelado(lote_id)
 
-    # Worker de extração que rodar depois não grava campos nem sobrescreve o evento 'cancelado'
-    extracao.extrair_campos({"documento_id": doc_id})
-    ultimo, _ = obter_progresso_lote(lote_id)
-    assert ultimo["etapa"] == "cancelado"
+        # Worker de extração que rodar depois não grava campos nem sobrescreve o evento 'cancelado'
+        extracao.extrair_campos({"documento_id": doc_id})
+        ultimo, _ = obter_progresso_lote(lote_id)
+        assert ultimo["etapa"] == "cancelado"
+    finally:
+        limpar_cancelado(lote_id)
+        limpar_tarefas_pos(lote_id)
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM lote WHERE id = %s", (lote_id,))
 
 
 def test_cancelar_durante_analise_ponto_detectada_pelo_banco_mesmo_sem_redis_pos(monkeypatch):
@@ -321,18 +327,24 @@ def test_cancelar_durante_analise_ponto_detectada_pelo_banco_mesmo_sem_redis_pos
     )
     lote_id = resp.json()["lote_id"]
     limpar_tarefas_pos(lote_id)
-    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
-        conn.execute("UPDATE lote SET estado = 'concluido', docs_pendentes = 0 WHERE id = %s", (lote_id,))
-        conn.execute(
-            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
-            "VALUES (%s, 1, 1, 1, 'classificado', 'folha_ponto')",
-            (lote_id,),
-        )
+    try:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("UPDATE lote SET estado = 'concluido', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+            conn.execute(
+                "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
+                "VALUES (%s, 1, 1, 1, 'classificado', 'folha_ponto')",
+                (lote_id,),
+            )
 
-    canc = client.post(f"/lotes/{lote_id}/cancelar")
-    assert canc.status_code == 200
-    assert canc.json()["estado"] == "erro"
-    assert lote_cancelado(lote_id)
+        canc = client.post(f"/lotes/{lote_id}/cancelar")
+        assert canc.status_code == 200
+        assert canc.json()["estado"] == "erro"
+        assert lote_cancelado(lote_id)
+    finally:
+        limpar_cancelado(lote_id)
+        limpar_tarefas_pos(lote_id)
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM lote WHERE id = %s", (lote_id,))
 
 
 def test_falha_ao_enfileirar_extracao_remove_pendencia_e_nao_trava_lote(monkeypatch):
