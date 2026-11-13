@@ -7,12 +7,16 @@ import { DocumentPreviewModal, DocumentThumbnail } from '../components/DocumentP
 
 interface CategoryPageProps {
   category: DocumentCategory
+  categories?: DocumentCategory[]
+  onSelectCategory?: (category: DocumentCategory) => void
   documents: DetailedDocument[]
   onBack: () => void
 }
 
 const CategoryPage: React.FC<CategoryPageProps> = ({
   category,
+  categories = [],
+  onSelectCategory,
   documents,
   onBack,
 }) => {
@@ -131,11 +135,44 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-end gap-3">
+          {categories.length > 0 && onSelectCategory && (
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="categoria-switcher"
+                className="text-[10px] font-bold tracking-wider uppercase text-[#8f8298] dark:text-[#95849f]"
+              >
+                Prévia de categoria
+              </label>
+              <div className="relative">
+                <select
+                  id="categoria-switcher"
+                  value={category.id}
+                  onChange={(e) => {
+                    const target = categories.find((c) => c.id === e.target.value)
+                    if (target) onSelectCategory(target)
+                  }}
+                  className="appearance-none h-10 pl-3.5 pr-9 rounded-xl text-xs sm:text-sm font-semibold bg-white dark:bg-[#1a1120] text-[#2d0a33] dark:text-[#f8f5fc] border-2 border-[#a855f7]/70 dark:border-[#c026d3]/80 hover:border-[#a855f7] dark:hover:border-[#c026d3] focus:outline-none focus:ring-2 focus:ring-[#c026d3]/40 transition-all cursor-pointer shadow-xs"
+                >
+                  {categories.map((c) => (
+                    <option
+                      key={c.id}
+                      value={c.id}
+                      className="bg-white dark:bg-[#1a1120] text-[#2d0a33] dark:text-[#f8f5fc]"
+                    >
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-[#a855f7] dark:text-[#d8b4fe] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border border-[#e1d9e6] dark:border-[#35223e] bg-white dark:bg-[#1a1120] hover:bg-[#f8f5fa] dark:hover:bg-[#25162a] text-[#2d0a33] dark:text-[#eae0ee] shadow-2xs transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 h-10 px-4 rounded-xl text-sm font-medium border border-[#e1d9e6] dark:border-[#35223e] bg-white dark:bg-[#1a1120] hover:bg-[#f8f5fa] dark:hover:bg-[#25162a] text-[#2d0a33] dark:text-[#eae0ee] shadow-2xs transition-colors cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
             <span>Voltar</span>

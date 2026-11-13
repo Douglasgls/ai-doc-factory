@@ -590,6 +590,8 @@ export function App() {
             {currentView === 'categoria' && selectedCategory && (
               <CategoryPage
                 category={selectedCategory}
+                categories={categories}
+                onSelectCategory={handleOpenCategory}
                 documents={categoryDocuments}
                 onBack={handleBackToHome}
               />
