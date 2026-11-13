@@ -6,6 +6,7 @@ interface LotesStatusPanelProps {
   lotes: TrackedLote[]
   onRecheck: (id: number) => void
   onDismiss: (id: number) => void
+  onDismissAcaoErro?: (id: number) => void
   onRetry?: (id: number) => void
 }
 
@@ -16,6 +17,7 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
   lotes,
   onRecheck,
   onDismiss,
+  onDismissAcaoErro,
   onRetry,
 }) => {
   if (lotes.length === 0) return null
@@ -58,6 +60,11 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
                   {status === 'processando' &&
                     `Processando o lote ${nome}${lote.mensagemAtual ? ` — ${lote.mensagemAtual}` : lote.estado ? ` (${lote.estado}${lote.docsPendentes ? `, ${lote.docsPendentes} documento(s) pendente(s)` : ''})` : ''}...`}
                 </p>
+                {status === 'erro' && lote.mensagemAtual && (
+                  <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5 break-words">
+                    {lote.mensagemAtual}
+                  </p>
+                )}
                 {(status === 'erro' || status === 'cancelado') && onRetry && (
                     <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5">
                       <button
@@ -79,6 +86,23 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
                     >
                       Verificar novamente
                     </button>
+                  </p>
+                )}
+                {lote.acaoErro && (
+                  <p role="alert" className="text-xs sm:text-sm text-red-600 dark:text-red-400 mt-0.5 break-words">
+                    {lote.acaoErro}
+                    {onDismissAcaoErro && (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          onClick={() => onDismissAcaoErro(lote.id)}
+                          className="font-semibold underline cursor-pointer"
+                        >
+                          Dispensar
+                        </button>
+                      </>
+                    )}
                   </p>
                 )}
                 {lote.networkError && status !== 'erro' && status !== 'concluido' && (

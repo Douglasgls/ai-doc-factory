@@ -464,6 +464,7 @@ export function App() {
     retry: retryLote,
     recheck: recheckLote,
     dismiss: dismissLote,
+    dismissAcaoErro: dismissAcaoErroLote,
     clearFinished: clearFinishedLotes,
   } = useLotePolling(refreshSilently)
 
@@ -537,6 +538,7 @@ export function App() {
         onRetryLote={(id) => void retryLote(id)}
         onRecheckLote={recheckLote}
         onDismissLote={dismissLote}
+        onDismissAcaoErroLote={dismissAcaoErroLote}
         onClearFinishedLotes={clearFinishedLotes}
         onNavigateCategory={handleNavigateCategoryBySlug}
       />
@@ -546,10 +548,11 @@ export function App() {
         <LotesStatusPanel
           lotes={lotesEnviados.filter((l) => {
             const s = trackedStatus(l)
-            return s === 'erro' || s === 'cancelado' || s === 'timeout' || Boolean(l.networkError)
+            return s === 'erro' || s === 'cancelado' || s === 'timeout' || Boolean(l.networkError) || Boolean(l.acaoErro)
           })}
           onRecheck={recheckLote}
           onDismiss={dismissLote}
+          onDismissAcaoErro={dismissAcaoErroLote}
           onRetry={(id) => void retryLote(id)}
         />
         {!isLoading && !error && <FailedDocumentsBanner documents={failedDocs} />}

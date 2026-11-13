@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 from app import config
 from app.analise import enfileirar_analise
+from app.eventos import limpar_cancelado
 from app.extracao import enfileirar_extracao
 from app.routers import r
 from app.routers.documentos.actions import campos_por_documento, extras_documento
@@ -33,7 +34,7 @@ def revisar_documento(documento_id: int, revisao: Revisao) -> dict:
             "UPDATE documento SET estado = 'revisado', tipo_original = COALESCE(tipo_original, tipo), "
             "tipo = %s, revisor = %s, revisado_em = now() "
             "WHERE id = %s AND estado IN ('em_revisao', 'revisado') "
-            "RETURNING id, estado, tipo, tipo_original, revisor, revisado_em",
+            "RETURNING id, estado, tipo, tipo_original, revisor, revisado_em, lote_id",
             (revisao.tipo, revisao.revisor, documento_id),
         ).fetchone()
         if row is None:
@@ -41,6 +42,7 @@ def revisar_documento(documento_id: int, revisao: Revisao) -> dict:
             if estado is None:
                 raise HTTPException(404, "documento não encontrado")
             raise HTTPException(409, f"documento em estado '{estado[0]}' não aceita revisão")
+    limpar_cancelado(row[6], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
     if revisao.tipo == "folha_ponto":
         enfileirar_analise(documento_id, r)  # nunca levanta: não derruba a revisão
     enfileirar_extracao(documento_id, r)  # depois do commit; nunca levanta

@@ -18,6 +18,11 @@ TIPOS = tuple(TIPOS_INFO)
 # não é uma classe válida para a correção humana.
 TIPO_DESCONHECIDO = "desconhecido"
 
+# Vocabulário do modelo de acesso. Precisa bater com os CHECKs de `usuario.nivel` e `usuario.papel`
+# na migração 0002_modelo_acesso (tests/test_modelo_acesso.py confere contra o banco).
+NIVEIS_ACESSO = ("plataforma", "tomador", "prestador")
+PAPEIS = ("admin", "membro")
+
 CONF_AUTO = float(os.getenv("CONF_AUTO", "0.85"))
 CONF_MIN = float(os.getenv("CONF_MIN", "0.50"))
 
@@ -39,6 +44,10 @@ SEG_SIM_ALTO = float(os.getenv("SEG_SIM_ALTO", "0.60"))
 # Página com até este número de caracteres alfanuméricos (e sem "Página k de N") conta como branca: cobre o
 # verso com só um carimbo ("PROTOCOLADO" = 11). Valor tirado do lote de ajuste L0001: NÃO calibrado.
 SEG_BRANCO_MAX_ALNUM = int(os.getenv("SEG_BRANCO_MAX_ALNUM", "12"))
+
+# "Página k de N" só vale nas primeiras e últimas SEG_PAG_LINHAS linhas não vazias da página (cabeçalho/rodapé);
+# frase no corpo é ignorada. Valor inicial NÃO calibrado.
+SEG_PAG_LINHAS = int(os.getenv("SEG_PAG_LINHAS", "3"))
 
 # Fronteira ambígua (Goal 1, passo 3): resposta do Jev (probabilidade de "mesmo documento") decidida em código.
 # Valores iniciais NÃO calibrados.

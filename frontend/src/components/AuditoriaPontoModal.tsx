@@ -24,7 +24,9 @@ import {
   formatarMarca,
   formatarMinutos,
   nivelDeRisco,
+  rotuloSemValor,
   rotuloTipo,
+  textoBaseRisco,
   type AnalisePonto,
   type DiaApurado,
   type Divergencia,
@@ -472,7 +474,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
     if (!analise?.scores_dimensao) return []
     return ORDEM_DIMENSOES.filter((chave) => {
       const dim = analise.scores_dimensao?.[chave]
-      return !dim || dim.indeterminada || dim.normalizado == null
+      return !dim?.nao_avaliada && (!dim || dim.indeterminada || dim.normalizado == null)
     })
   }, [analise])
 
@@ -498,11 +500,12 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
     if (risco == null) {
       return 'Alguma dimensão ficou indeterminada e impede o cálculo automático completo.'
     }
+    const base = textoBaseRisco(analise?.scores_dimensao)
     if (analise?.requer_revisao) {
-      return 'O percentual representa o risco mínimo identificado; recomenda-se conferência.'
+      return `O percentual é um piso; recomenda-se conferência. ${base}`
     }
-    return 'Baseado no maior risco encontrado entre as 4 dimensões avaliadas.'
-  }, [analise?.requer_revisao, risco, semRegistrosSuficientes])
+    return base
+  }, [analise?.requer_revisao, analise?.scores_dimensao, risco, semRegistrosSuficientes])
 
   return (
     <div
@@ -573,7 +576,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
 
             {concluida && (
               <>
-                {/* Resumo Principal (sem excesso de bordas/caixas) */}
+                {/* Resumo Principal */}
                 <section className="space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-5">
                     <AnelRisco
@@ -670,10 +673,11 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                         {ORDEM_DIMENSOES.map((chave) => {
                           const dim = analise.scores_dimensao?.[chave]
+                          const naoAvaliada = Boolean(dim?.nao_avaliada)
                           const indeterminada =
-                            !dim || dim.indeterminada || dim.normalizado == null
+                            !naoAvaliada && (!dim || dim.indeterminada || dim.normalizado == null)
                           const pct =
-                            !indeterminada && dim?.normalizado != null
+                            !naoAvaliada && !indeterminada && dim?.normalizado != null
                               ? Math.round(dim.normalizado * 100)
                               : null
                           const n = pct != null ? nivelDeRisco(pct) : null
@@ -695,31 +699,37 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                                 <span className={`text-[11px] font-medium ${MUTED}`}>
                                   {ROTULO_DIMENSAO[chave]}
                                 </span>
-                                {!indeterminada && n === 'baixo' && (
+                                {!naoAvaliada && !indeterminada && n === 'baixo' && (
                                   <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                                 )}
                               </div>
 
                               <div
                                 className={`my-1 font-bold ${
-                                  indeterminada
-                                    ? 'text-xs text-amber-700 dark:text-amber-300'
-                                    : `text-lg ${
-                                        n ? COR_TEXTO[n] : 'text-[#1e1324] dark:text-white'
-                                      }`
+                                  naoAvaliada
+                                    ? 'text-xs text-[#6e6378] dark:text-[#a093a8]'
+                                    : indeterminada
+                                      ? 'text-xs text-amber-700 dark:text-amber-300'
+                                      : `text-lg ${
+                                          n ? COR_TEXTO[n] : 'text-[#1e1324] dark:text-white'
+                                        }`
                                 }`}
                               >
-                                {indeterminada ? 'Indeterminado' : `${pct}%`}
+                                {naoAvaliada || indeterminada ? rotuloSemValor(dim) : `${pct}%`}
                               </div>
 
                               <div className="text-[10px] text-[#8a7e94]">
-                                {indeterminada
-                                  ? 'Exige conferência'
-                                  : n === 'baixo'
-                                    ? 'Dentro do limite'
-                                    : n === 'medio'
-                                      ? 'Atenção'
-                                      : 'Acima do limite'}
+                                {naoAvaliada
+                                  ? dim?.motivo === 'sem_semana_completa'
+                                    ? 'Sem semana completa'
+                                    : 'Dados insuficientes'
+                                  : indeterminada
+                                    ? 'Exige conferência'
+                                    : n === 'baixo'
+                                      ? 'Dentro do limite'
+                                      : n === 'medio'
+                                        ? 'Atenção'
+                                        : 'Acima do limite'}
                               </div>
                             </div>
                           )

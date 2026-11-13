@@ -1,9 +1,13 @@
 """Testes para o endpoint SSE (Server-Sent Events), cancelamento, reprocessamento e fan-in de eventos."""
 import io
 import json
+import shutil
 import uuid
+from pathlib import Path
 
 import psycopg
+import pytest
+import redis
 from fastapi.testclient import TestClient
 
 from app import config, extracao, ocr
@@ -19,6 +23,30 @@ from app.eventos import (
 from app.routers.lotes import actions as lotes_actions
 
 client = TestClient(app)
+
+
+def _chaves_lote(cli) -> set[str]:
+    return {k for p in ("progresso", "historico", "tarefas_pos", "cancelado") for k in cli.scan_iter(f"{p}:lote:*")}
+
+
+@pytest.fixture(autouse=True)
+def limpar_lotes_criados():
+    """Apaga, ao fim de cada teste, os lotes criados nele (inclusive via POST /lotes), as chaves novas do Redis
+    (progresso, histórico, tarefas pós, cancelado, mesmo de lotes que o teste já apagou) e as pastas em
+    DATA_DIR, mesmo se o teste falhar."""
+    cli = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+    chaves_antes = _chaves_lote(cli)
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        antes = conn.execute("SELECT COALESCE(MAX(id), 0) FROM lote").fetchone()[0]
+    yield
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        ids = [i for (i,) in conn.execute("SELECT id FROM lote WHERE id > %s", (antes,))]
+        conn.execute("DELETE FROM lote WHERE id > %s", (antes,))
+    novas = _chaves_lote(cli) - chaves_antes
+    if novas:
+        cli.delete(*novas)
+    for i in ids:
+        shutil.rmtree(Path(config.DATA_DIR) / f"lote_{i}", ignore_errors=True)
 
 
 def _pdf_minimo() -> bytes:
@@ -305,13 +333,15 @@ def test_cancelar_durante_extracao_ou_analise_funciona_e_interrompe_worker(monke
         # Apesar de lote.estado == 'concluido', ainda há extração pendente -> cancelar deve retornar 200
         canc = client.post(f"/lotes/{lote_id}/cancelar")
         assert canc.status_code == 200
-        assert canc.json()["estado"] == "erro"
+        # classificação já terminou: lote e documento ficam como estão
+        assert canc.json()["estado"] == "concluido"
+        assert [d["estado"] for d in canc.json()["documentos"]] == ["classificado"]
         assert lote_cancelado(lote_id)
 
-        # Worker de extração que rodar depois não grava campos nem sobrescreve o evento 'cancelado'
+        # Worker de extração que rodar depois não grava campos nem reabre o acompanhamento
         extracao.extrair_campos({"documento_id": doc_id})
         ultimo, _ = obter_progresso_lote(lote_id)
-        assert ultimo["etapa"] == "cancelado"
+        assert ultimo["etapa"] == "concluido"
     finally:
         limpar_cancelado(lote_id)
         limpar_tarefas_pos(lote_id)
@@ -338,7 +368,8 @@ def test_cancelar_durante_analise_ponto_detectada_pelo_banco_mesmo_sem_redis_pos
 
         canc = client.post(f"/lotes/{lote_id}/cancelar")
         assert canc.status_code == 200
-        assert canc.json()["estado"] == "erro"
+        assert canc.json()["estado"] == "concluido"
+        assert canc.json()["documentos"][0]["estado"] == "classificado"
         assert lote_cancelado(lote_id)
     finally:
         limpar_cancelado(lote_id)

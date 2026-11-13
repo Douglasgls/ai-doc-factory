@@ -25,6 +25,7 @@ interface ProcessingTrackerPopoverProps {
   onRetry: (id: number) => void
   onRecheck: (id: number) => void
   onDismiss: (id: number) => void
+  onDismissAcaoErro?: (id: number) => void
   onClearFinished: () => void
   onNavigateCategory?: (slug: string) => void
   onNavigateReview?: () => void
@@ -138,12 +139,16 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
   onRetry,
   onRecheck,
   onDismiss,
+  onDismissAcaoErro,
   onClearFinished,
   onNavigateCategory,
   onNavigateReview,
 }) => {
   const [expandedIds, setExpandedIds] = useState<Record<number, boolean>>({})
   const containerRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const devolverFoco = useRef(false)
 
   const totalCount = lotes.length
   const activeLotes = lotes.filter((l) => trackedStatus(l) === 'processando')
@@ -168,6 +173,29 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isOpen, onMinimize])
+
+  // Esc fecha o painel e devolve o foco ao botão que o abriu
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        devolverFoco.current = true
+        onMinimize()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onMinimize])
+
+  // Ao abrir, foca o painel; ao fechar por Esc ou pelo botão Fechar, devolve o foco ao botão da pílula
+  useEffect(() => {
+    if (isOpen) {
+      dialogRef.current?.focus()
+    } else if (devolverFoco.current) {
+      devolverFoco.current = false
+      triggerRef.current?.focus()
+    }
+  }, [isOpen])
 
   const toggleDetails = (id: number, defaultExpanded: boolean) => {
     setExpandedIds((prev) => ({
@@ -206,9 +234,11 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
 
       {/* Pílula Acompanhadora no Header (estilo Figma) */}
       <button
+        ref={triggerRef}
         type="button"
         onClick={onToggleOpen}
         aria-expanded={isOpen}
+        aria-haspopup="dialog"
         data-testid="header-tracker-trigger"
         className={`flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl text-sm border transition-all cursor-pointer select-none ${
           activeCount > 0
@@ -290,8 +320,12 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
       {/* Popover Flutuante */}
       {isOpen && (
         <div
+          ref={dialogRef}
+          role="dialog"
+          aria-label="Andamento das análises"
+          tabIndex={-1}
           data-testid="header-tracker-popover"
-          className="fixed sm:absolute right-3 sm:right-0 top-[70px] sm:top-[calc(100%+12px)] w-[calc(100vw-1.5rem)] sm:w-[430px] rounded-2xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] z-50 overflow-hidden transition-all"
+          className="fixed sm:absolute right-3 sm:right-0 top-[70px] sm:top-[calc(100%+12px)] w-[calc(100vw-1.5rem)] sm:w-[430px] rounded-2xl focus:outline-none border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] z-50 overflow-hidden transition-all"
         >
           {/* Cabeçalho do Popover */}
           <div className="px-6 pt-5 pb-4 border-b border-[#eee8f3] dark:border-[#231829]">
@@ -325,7 +359,10 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
 
               <button
                 type="button"
-                onClick={onMinimize}
+                onClick={() => {
+                  devolverFoco.current = true
+                  onMinimize()
+                }}
                 aria-label="Fechar painel de análises"
                 className="p-1 rounded-lg text-[#8e8296] hover:text-[#2d0a33] dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
               >
@@ -597,6 +634,30 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                         <p className="pt-2 text-xs font-medium text-red-600 dark:text-red-400">
                           Não foi possível consultar o servidor ({lote.networkError}).
                         </p>
+                      )}
+
+                      {/* Erro de ação (cancelar / tentar novamente): fica até ser dispensado ou a ação funcionar */}
+                      {lote.acaoErro && (
+                        <div
+                          role="alert"
+                          data-testid={`acao-erro-${lote.id}`}
+                          className="pt-2 flex items-start justify-between gap-2 text-xs font-medium text-red-600 dark:text-red-400"
+                        >
+                          <span className="min-w-0 break-words">{lote.acaoErro}</span>
+                          {onDismissAcaoErro && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onDismissAcaoErro(lote.id)
+                              }}
+                              aria-label="Dispensar mensagem de erro"
+                              className="shrink-0 p-0.5 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-950/40 cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {/* Rodapé do Card Expandido */}

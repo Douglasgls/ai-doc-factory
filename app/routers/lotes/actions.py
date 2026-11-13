@@ -2,6 +2,8 @@ import asyncio
 from decimal import Decimal
 import hashlib
 import json
+import logging
+import time
 from pathlib import Path
 
 import psycopg
@@ -20,6 +22,9 @@ from app.eventos import (
 )
 from app.filas import enfileirar
 from app.routers import r
+
+log = logging.getLogger(__name__)
+STREAM_TETO_SEGUNDOS = 900  # tempo real máximo (time.monotonic) de uma conexão SSE
 
 
 def validar_empresa(empresa_id: int | None) -> None:
@@ -169,36 +174,44 @@ def _ha_pos_processamento_pendente(conn, lote_id: int, docs_pendentes: int = 0) 
 
 
 def cancelar_lote(lote_id: int) -> dict:
-    """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação),
-    marcando-o como 'erro' e sinalizando aos workers. Rejeita com 409 se o lote já estiver totalmente finalizado."""
+    """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação).
+    Só documentos 'segmentado' (ainda não classificados) viram 'erro'; o que já foi classificado ou revisado
+    fica como está. Lote em recebido/ocr/classificando vai para 'erro'; lote 'concluido' continua 'concluido'
+    e só perde o que faltava de extração/análise. 409 se não há nada a cancelar.
+    Ordem de bloqueio igual à do classificador (documentos antes do lote); a flag e a limpeza das tarefas no
+    Redis só acontecem depois do commit."""
     with psycopg.connect(config.DATABASE_URL) as conn:
+        previo = conn.execute("SELECT estado FROM lote WHERE id = %s", (lote_id,)).fetchone()
+        if previo is None:
+            raise HTTPException(404, "lote não encontrado")
+        if previo[0] != "concluido":
+            # 1º bloqueio: linhas de documento (como classificar_documento); um job em voo que já travou o
+            # seu documento termina antes; os demais passam a enxergar 'erro' e não fazem fan-in
+            conn.execute(
+                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado = 'segmentado'",
+                (lote_id,),
+            )
+        # 2º bloqueio: o lote; serializa dois cliques e relê o estado já com os fan-ins commitados
         lote = conn.execute(
-            "SELECT id, estado, docs_pendentes FROM lote WHERE id = %s FOR UPDATE",
-            (lote_id,),
+            "SELECT estado, docs_pendentes FROM lote WHERE id = %s FOR UPDATE", (lote_id,)
         ).fetchone()
         if lote is None:
             raise HTTPException(404, "lote não encontrado")
-        if lote[1] == "concluido":
-            if not _ha_pos_processamento_pendente(conn, lote_id, lote[2]):
-                raise HTTPException(409, "lote já concluído não pode ser cancelado")
-            tem_revisao = conn.execute(
-                "SELECT 1 FROM documento WHERE lote_id = %s AND estado = 'revisado' LIMIT 1",
-                (lote_id,),
-            ).fetchone()
-            if tem_revisao is not None:
-                raise HTTPException(409, "lote possui documentos revisados e não pode ser cancelado")
+        estado = lote[0]
+        if estado == "concluido" and not _ha_pos_processamento_pendente(conn, lote_id, lote[1]):
+            raise HTTPException(409, "lote já concluído não pode ser cancelado")
+        if estado in ("recebido", "ocr", "classificando"):
+            conn.execute("UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+    # commit feito: só agora o Redis. Falha aqui não pode virar 500, o banco já mudou.
+    try:
         marcar_cancelado(lote_id, r)
         limpar_tarefas_pos(lote_id, r)
-        if lote[1] in ("recebido", "ocr", "classificando", "concluido"):
-            conn.execute(
-                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado != 'revisado'",
-                (lote_id,),
-            )
-            conn.execute(
-                "UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s",
-                (lote_id,),
-            )
-    publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.", r=r)
+    except Exception:
+        log.exception("lote %s cancelado no banco, mas o Redis falhou (flag/tarefas pendentes)", lote_id)
+    if estado == "concluido":  # a classificação terminou; o lote segue concluído e o acompanhamento encerra
+        publicar_evento(lote_id, "concluido", "Extração/análise pendente cancelada pelo usuário.", r=r)
+    else:
+        publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.", r=r)
     return obter_lote(lote_id)
 
 
@@ -241,24 +254,58 @@ def montar_pacote_evento(lote_id: int) -> dict:
     return jsonable_encoder(obter_lote(lote_id))
 
 
-def _lote_totalmente_finalizado(lote_id: int, pacote: dict) -> bool:
-    """Retorna True se o lote chegou a um estado terminal (erro ou concluído sem tarefas pós-classificação pendentes)."""
-    if pacote["estado"] == "erro":
-        return True
-    if pacote["estado"] != "concluido":
-        return False
-    if (pacote.get("docs_pendentes") or 0) > 0:
-        return False
+def _motivo_termino(lote_id: int, estado: str, docs_pendentes: int | None) -> str | None:
+    """Motivo de encerrar o stream, só com fatos verificáveis: estado do lote no banco e tarefas pós pendentes.
+    'erro' encerra sempre; 'concluido' só encerra sem documentos pendentes nem tarefas pós registradas
+    (a ordem importa: o banco é lido antes do Redis, e o classificador registra a tarefa antes do commit)."""
+    if estado == "erro":
+        return "erro"
+    if estado != "concluido" or (docs_pendentes or 0) > 0:
+        return None
     if tarefas_pos_pendentes(lote_id, r):
-        return False
-    etapa_atual = (pacote.get("ultimo_evento") or {}).get("etapa", "")
-    return etapa_atual in ("concluido", "")
+        return None
+    return "finalizado"
+
+
+def _lote_totalmente_finalizado(lote_id: int, pacote: dict) -> bool:
+    return _motivo_termino(lote_id, pacote["estado"], pacote.get("docs_pendentes")) is not None
+
+
+def _tick_stream(lote_id: int, reconstruir: bool) -> tuple[dict | None, str | None]:
+    """Todo o I/O (Postgres e Redis) de uma iteração do stream, para rodar em uma única chamada de thread.
+    Devolve (pacote, motivo): o pacote completo só é montado se `reconstruir` ou se o stream vai encerrar;
+    caso contrário é None. `motivo` é None enquanto o stream deve continuar."""
+    if not reconstruir:
+        with psycopg.connect(config.DATABASE_URL) as conn:
+            row = conn.execute("SELECT estado, docs_pendentes FROM lote WHERE id = %s", (lote_id,)).fetchone()
+        if row is None:
+            return montar_pacote_ausente(lote_id), "erro"
+        motivo = _motivo_termino(lote_id, row[0], row[1])
+        if motivo is None:
+            return None, None
+    try:
+        pacote = montar_pacote_evento(lote_id)
+    except HTTPException:  # lote apagado durante o stream
+        return montar_pacote_ausente(lote_id), "erro"
+    return pacote, _motivo_termino(lote_id, pacote["estado"], pacote.get("docs_pendentes"))
+
+
+def montar_pacote_ausente(lote_id: int) -> dict:
+    return {"id": lote_id, "estado": "erro", "docs_pendentes": 0, "ultimo_evento": None,
+            "historico_eventos": [], "documentos": []}
+
+
+def _frame(pacote: dict, motivo: str | None = None) -> str:
+    """Frame SSE `data: {json}`; no pacote final acrescenta os campos aditivos `fim` e `motivo`."""
+    if motivo is not None:
+        pacote = {**pacote, "fim": True, "motivo": motivo}
+    return f"data: {_serializar_pacote(pacote)}\n\n"
 
 
 async def stream_eventos_lote(lote_id: int, request: Request, once: bool = False):
     """Gerador assíncrono SSE (Server-Sent Events) alimentado por Redis Pub/Sub.
-    Todas as consultas ao banco rodam em thread pool (asyncio.to_thread) e apenas quando chega evento
-    no Redis Pub/Sub (ou a cada 15s como fallback), evitando bloquear o event loop com abas abertas."""
+    Todo o I/O (banco e Redis) de cada iteração roda em thread (asyncio.to_thread), sem bloquear o event loop.
+    O último pacote traz `"fim": true` e `"motivo"` (finalizado | erro | tempo_esgotado)."""
     pubsub = None
     if not once:
         try:
@@ -268,17 +315,22 @@ async def stream_eventos_lote(lote_id: int, request: Request, once: bool = False
         except Exception:
             pubsub = None
 
+    inicio = time.monotonic()
     try:
-        pacote = await asyncio.to_thread(montar_pacote_evento, lote_id)
+        pacote, motivo = await asyncio.to_thread(_tick_stream, lote_id, True)
         ultimo_json = _serializar_pacote(pacote, sort_keys=True)
-        yield f"data: {_serializar_pacote(pacote)}\n\n"
+        yield _frame(pacote, motivo)
 
-        if once or _lote_totalmente_finalizado(lote_id, pacote) or pubsub is None:
+        if once or motivo is not None or pubsub is None:
             return
 
         ticks_sem_consulta = 0
-        for _ in range(900):  # teto de 15 minutos
+        while True:
             if await request.is_disconnected():
+                break
+            if time.monotonic() - inicio >= STREAM_TETO_SEGUNDOS:
+                pacote, motivo = await asyncio.to_thread(_tick_stream, lote_id, True)
+                yield _frame(pacote, motivo or "tempo_esgotado")
                 break
             msg = await asyncio.to_thread(pubsub.get_message, True, 1.0)
             if msg is not None:
@@ -286,26 +338,25 @@ async def stream_eventos_lote(lote_id: int, request: Request, once: bool = False
                 while await asyncio.to_thread(pubsub.get_message, True, 0.0) is not None:
                     pass
                 ticks_sem_consulta = 0
-                pacote = await asyncio.to_thread(montar_pacote_evento, lote_id)
-                atual_json = _serializar_pacote(pacote, sort_keys=True)
-                ultimo_json = atual_json
-                yield f"data: {_serializar_pacote(pacote)}\n\n"
+                reconstruir = True
             else:
                 ticks_sem_consulta += 1
-                if ticks_sem_consulta >= 15:
+                reconstruir = ticks_sem_consulta >= 15
+                if reconstruir:
                     ticks_sem_consulta = 0
-                    pacote = await asyncio.to_thread(montar_pacote_evento, lote_id)
-                    atual_json = _serializar_pacote(pacote, sort_keys=True)
-                    if atual_json != ultimo_json:
-                        ultimo_json = atual_json
-                        yield f"data: {_serializar_pacote(pacote)}\n\n"
-                    else:
-                        yield ": keepalive\n\n"
-                else:
-                    yield ": keepalive\n\n"
-
-            if _lote_totalmente_finalizado(lote_id, pacote):
+            pacote, motivo = await asyncio.to_thread(_tick_stream, lote_id, reconstruir)
+            if motivo is not None:
+                yield _frame(pacote, motivo)
                 break
+            if pacote is None:
+                yield ": keepalive\n\n"
+                continue
+            atual_json = _serializar_pacote(pacote, sort_keys=True)
+            if msg is not None or atual_json != ultimo_json:
+                ultimo_json = atual_json
+                yield _frame(pacote)
+            else:
+                yield ": keepalive\n\n"
     finally:
         if pubsub is not None:
             try:

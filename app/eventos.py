@@ -34,8 +34,17 @@ def _chave_tarefas_pos(lote_id: int) -> str:
     return f"tarefas_pos:lote:{lote_id}"
 
 
+_cliente_modulo: redis.Redis | None = None
+
+
 def _cliente(r: redis.Redis | None = None) -> redis.Redis:
-    return r or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+    """Cliente passado pelo chamador ou um cliente de módulo criado sob demanda (o pool de conexões é reaproveitado)."""
+    global _cliente_modulo
+    if r is not None:
+        return r
+    if _cliente_modulo is None:
+        _cliente_modulo = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+    return _cliente_modulo
 
 
 def publicar_evento(
@@ -59,17 +68,15 @@ def publicar_evento(
     try:
         cli = _cliente(r)
         payload = json.dumps(evento, ensure_ascii=False)
-        cli.set(_chave_progresso(lote_id), payload, ex=TTL_EVENTOS)
-        if hasattr(cli, "rpush"):
-            cli.rpush(_chave_historico(lote_id), payload)
-            if hasattr(cli, "ltrim"):
-                cli.ltrim(_chave_historico(lote_id), -MAX_HISTORICO, -1)
-            if hasattr(cli, "expire"):
-                cli.expire(_chave_historico(lote_id), TTL_EVENTOS)
-        if hasattr(cli, "publish"):
-            cli.publish(canal_lote(lote_id), payload)
+        pipe = cli.pipeline(transaction=False)  # uma ida só ao Redis por evento
+        pipe.set(_chave_progresso(lote_id), payload, ex=TTL_EVENTOS)
+        pipe.rpush(_chave_historico(lote_id), payload)
+        pipe.ltrim(_chave_historico(lote_id), -MAX_HISTORICO, -1)
+        pipe.expire(_chave_historico(lote_id), TTL_EVENTOS)
+        pipe.publish(canal_lote(lote_id), payload)
+        pipe.execute()
     except Exception:
-        log.debug("não foi possível publicar evento SSE do lote %s", lote_id)
+        log.warning("não foi possível publicar evento SSE do lote %s", lote_id, exc_info=True)
     return evento
 
 

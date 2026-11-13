@@ -118,23 +118,33 @@ def classificar_documento(payload: dict) -> None:
     tarefas = [f"extracao:{doc_id}"]
     if vai_analisar_ponto:
         tarefas.append(f"analise:{doc_id}")
-    with psycopg.connect(config.DATABASE_URL) as conn:  # transação única: gravação + fan-in
-        if lote_cancelado(doc[2]):
-            _abortar_se_cancelado(conn, doc[2])
-            limpar_tarefas_pos(doc[2])
-            return
-        # só a transição segmentado -> (classificado | em_revisao) conta: não sobrescreve nem decrementa de novo
-        row = conn.execute(
-            "UPDATE documento SET estado = %s, tipo = %s, confianca = %s, modelo = %s, versao_prompt = %s, "
-            "probabilidades = %s, motivo_revisao = %s, segunda_opiniao = %s WHERE id = %s AND estado = 'segmentado' RETURNING lote_id",
-            (decisao.estado, decisao.tipo, resultado.confianca, resultado.modelo, resultado.versao_prompt,
-             Jsonb(resultado.probabilidades), decisao.motivo,
-             Jsonb(resultado.segunda_opiniao) if resultado.segunda_opiniao else None, doc_id),
-        ).fetchone()
-        if row is None:
-            return
-        registrar_tarefas_pos(row[0], tarefas)
-        restantes = _fan_in(conn, row[0])
+    # A tarefa pós é registrada ANTES do commit: se fosse depois, haveria uma janela com o lote já 'concluido' no
+    # banco e nenhuma tarefa pendente, e o stream SSE encerraria cedo. Se a transação falhar, a tarefa é removida.
+    registradas = False
+    try:
+        with psycopg.connect(config.DATABASE_URL) as conn:  # transação única: gravação + fan-in
+            if lote_cancelado(doc[2]):
+                _abortar_se_cancelado(conn, doc[2])
+                limpar_tarefas_pos(doc[2])
+                return
+            # só a transição segmentado -> (classificado | em_revisao) conta: não sobrescreve nem decrementa de novo
+            row = conn.execute(
+                "UPDATE documento SET estado = %s, tipo = %s, confianca = %s, modelo = %s, versao_prompt = %s, "
+                "probabilidades = %s, motivo_revisao = %s, segunda_opiniao = %s WHERE id = %s AND estado = 'segmentado' RETURNING lote_id",
+                (decisao.estado, decisao.tipo, resultado.confianca, resultado.modelo, resultado.versao_prompt,
+                 Jsonb(resultado.probabilidades), decisao.motivo,
+                 Jsonb(resultado.segunda_opiniao) if resultado.segunda_opiniao else None, doc_id),
+            ).fetchone()
+            if row is None:
+                return
+            registrar_tarefas_pos(row[0], tarefas)
+            registradas = True
+            restantes = _fan_in(conn, row[0])
+    except Exception:
+        if registradas:  # rollback ou falha no commit: não deixa tarefa órfã
+            for tarefa in tarefas:
+                concluir_tarefa_pos(doc[2], tarefa)
+        raise
     lote_id = row[0]
     rotulo_tipo = config.TIPOS_INFO.get(decisao.tipo or "", {}).get("nome", decisao.tipo or "Desconhecido")
     if restantes > 0:

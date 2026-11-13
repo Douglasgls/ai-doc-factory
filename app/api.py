@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
 from app.routers import r  # noqa: F401  (reexportado: conexão Redis compartilhada)
-from app.routers.auth.actions import exigir_usuario
+from app.routers.auth.actions import exigir_plataforma
 from app.routers.auth.routers import router as auth
 from app.routers.busca.routers import router as busca
 from app.routers.cadastro_empresas.routers import router as cadastro_empresas
@@ -22,8 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # Abertas: /health (healthcheck do compose) e /auth/login. Todo o resto exige token.
-# /auth/me se protege sozinha. Router novo entra na tupla protegida: o teste de varredura cobra isso.
+# /auth/me se protege sozinha (qualquer usuário autenticado). As rotas de dados exigem nível `plataforma` até
+# existir o filtro por organização (falha fechada). Router novo entra na tupla protegida: a varredura cobra isso.
 app.include_router(saude)
 app.include_router(auth)
 for router in (lotes, busca, documentos, revisao, empresas, cadastro_empresas, tipos):
-    app.include_router(router, dependencies=[Depends(exigir_usuario)])
+    app.include_router(router, dependencies=[Depends(exigir_plataforma)])

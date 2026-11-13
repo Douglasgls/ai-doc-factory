@@ -16,6 +16,7 @@ Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O q
 | `api` | FastAPI: upload, consulta, busca e revisão |
 | `worker_ocr_seg` | Consome `segmentar_lote`: rasteriza, faz OCR, segmenta em documentos |
 | `worker_classify` | Consome `classificar_documento`: classifica, roteia por confiança, fecha o lote |
+| `migrate` | One-shot: roda `alembic upgrade head` e sai; `api` e os workers só sobem depois que ele termina com sucesso |
 | `worker_extracao` | Consome `extrair_campos`: Gemini extrai empresa (CNPJ e razão social), datas e identificação em `documento_campos` (Goal 7); fora do fan-in do lote |
 | `worker_analise` | Consome `analisar_folha_ponto`: Gemini + cálculo em código + Jev, grava `analise_ponto` (Goal 6); fora do fan-in do lote |
 | `frontend` | Interface React servida por Nginx (`FRONTEND_PORT`, padrão 5173): login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa (ver [Frontend](#frontend)) |
@@ -44,7 +45,7 @@ POST /lotes (PDF/imagem)
               fan-in: lote.docs_pendentes = 0 => lote concluido
 ```
 
-**Segmentação em cascata** (`app/segmentacao.py`): página em branco herda o documento anterior; "Página 1 de N" abre documento e "Página k de N" (k>1) continua; senão, sem paginação, dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento mesmo com similaridade alta (sem perguntar ao Jev; se algum CNPJ é inválido, provável erro de OCR, não corta); depois, similaridade TF-IDF entre páginas consecutivas (abaixo de `SEG_SIM_BAIXO` abre, a partir de `SEG_SIM_ALTO` continua; CNPJs diferentes abaixo de `SEG_SIM_ALTO` abrem); na faixa ambígua pergunta Sim/Não ao Jev (só com `CLASSIFICADOR=jev`). Se o Jev não responde ou fica no meio, o sistema abre documento novo e marca `segmentacao_ambigua`, o que leva o documento à revisão. Os limiares ainda não foram calibrados.
+**Segmentação em cascata** (`app/segmentacao.py`): página em branco herda o documento anterior; "Página 1 de N" abre documento e "Página k de N" (k>1) continua só se for coerente com a última página paginada do documento (mesmo N e k maior; salto tolerado), senão abre documento novo marcado como ambíguo (revisão); a paginação só vale nas primeiras e últimas `SEG_PAG_LINHAS` linhas da página; senão, sem paginação, dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento mesmo com similaridade alta (sem perguntar ao Jev; se algum CNPJ é inválido, provável erro de OCR, não corta); depois, similaridade TF-IDF entre páginas consecutivas (abaixo de `SEG_SIM_BAIXO` abre, a partir de `SEG_SIM_ALTO` continua; CNPJs diferentes abaixo de `SEG_SIM_ALTO` abrem); na faixa ambígua pergunta Sim/Não ao Jev (só com `CLASSIFICADOR=jev`). Se o Jev não responde ou fica no meio, o sistema abre documento novo e marca `segmentacao_ambigua`, o que leva o documento à revisão. Os limiares ainda não foram calibrados.
 
 **Roteamento** (`app/roteamento.py`): confiança >= `CONF_AUTO` e sem desacordo entre modelos vira `classificado`; entre `CONF_MIN` e `CONF_AUTO`, ou com desacordo, ou segmentação ambígua, vira `em_revisao` com o tipo sugerido; abaixo de `CONF_MIN`, `em_revisao` com tipo `desconhecido`.
 
@@ -74,7 +75,7 @@ Edite o `.env`:
 - `API_PORT` define a porta da API no host (padrão 8000).
 - Para rodar sem rede e sem chaves, defina `CLASSIFICADOR=regras`. Com `CLASSIFICADOR=jev` (padrão do `.env.example`), preencha `OPENROUTER_API_KEY`, `JEV_MODEL` e `GEMINI_API_KEY`.
 
-- `AUTH_USUARIO`, `AUTH_SENHA` e `AUTH_SEGREDO` configuram o login do administrador (ver "Autenticação"). **Sem elas o sistema recusa o login (503) e toda rota protegida nega acesso.** Gere o segredo com `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- `AUTH_USUARIO` e `AUTH_SENHA` servem só para criar o primeiro administrador (ver "Autenticação"); `AUTH_SEGREDO` assina o token. **Sem `AUTH_SEGREDO` o sistema recusa o login (503) e toda rota protegida nega acesso.** Gere o segredo com `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 
 O `.env` está no `.gitignore`. Nunca o versione.
 
@@ -127,7 +128,7 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `372 passed, 1 skipped, 1 warning in 9.37s`, no commit `645f3f4`, em 2026-11-11, com `CLASSIFICADOR=regras`. Essa execução foi **fora do Docker**, com Postgres e Redis locais e Python 3.13 (o container usa Python 3.12), com o comando `python -m pytest tests -q`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `372 passed, 1 skipped, 1 warning in 9.37s`, no commit `645f3f4`, em 2026-11-11, com `CLASSIFICADOR=regras`. Essa execução foi **fora do Docker**, com Postgres e Redis locais e Python 3.13 (o container usa Python 3.12), com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
@@ -135,7 +136,27 @@ Com `CLASSIFICADOR=regras` no `.env`, a classificação usa palavras-chave (`app
 
 ### 6. Mudança de schema e dados locais
 
-O `sql/schema.sql` só é aplicado na primeira inicialização do volume do Postgres, e não há migrações. Se o schema mudar, é preciso recriar o banco:
+O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo. A `0002_modelo_acesso` cria as tabelas `tomador`, `prestador`, `contrato` e `usuario` (base do futuro controle de acesso por organização); a aplicação ainda não as usa.
+
+Criar uma nova revisão (dentro do container, o arquivo gerado fica na imagem; copie-o para `migrations/versions/` do repositório):
+
+```bash
+docker compose run --rm migrate alembic revision -m "descricao curta"
+```
+
+Edite `upgrade()`/`downgrade()` com SQL e rebuild (`docker compose up -d --build`). Para aplicar manualmente: `docker compose run --rm migrate alembic upgrade head`; para voltar uma: `alembic downgrade -1`.
+
+> **ATENÇÃO: quem já tem banco local criado pelo antigo `sql/schema.sql` (volume `pgdata` existente).** Antes do próximo `docker compose up`, rode **uma vez**:
+>
+> ```bash
+> docker compose run --rm migrate alembic stamp head
+> ```
+>
+> Isso apenas marca o baseline como aplicado, sem alterar tabelas nem dados. A alternativa é recomeçar do zero com `docker compose down -v` (apaga todos os dados locais). **Sem isso**, o serviço `migrate` falha com `relation "empresa" already exists` e, como a `api` e os workers só sobem depois que ele termina com sucesso, nenhum deles inicia.
+
+Banco novo (volume vazio) não precisa de nada: o `migrate` cria o schema. O `sql/schema.sql` não existe mais; o schema vive em `migrations/versions/`.
+
+Para recomeçar do zero:
 
 ```bash
 docker compose down -v
@@ -149,7 +170,11 @@ A pasta `frontend/` é a interface (Vite + React + TypeScript + Tailwind v4), e 
 
 ## Autenticação
 
-Há um único administrador, definido no ambiente (`AUTH_USUARIO`, `AUTH_SENHA`, `AUTH_SEGREDO`; `AUTH_EXPIRA_MIN` é a validade do token em minutos, padrão 480). Não há senha nem segredo padrão: sem as três variáveis, `POST /auth/login` responde 503 e as demais rotas protegidas também negam acesso. Ficam abertos só `GET /health`, `POST /auth/login`, `/docs` e `/openapi.json`.
+O login usa a tabela `usuario` (níveis `plataforma`, `tomador` e `prestador`; papéis `admin` e `membro`). `usuario` no corpo do login é o `email` gravado (sem diferenciar caixa nem espaços nas pontas). Só entra quem está `ativo`, tem senha definida e, se for de tomador ou prestador, pertence a organização `ativa`; toda falha devolve o mesmo 401. As senhas ficam em hash scrypt (sal por senha, custo gravado no próprio hash; o login regrava hashes com custo antigo). `AUTH_SEGREDO` assina o token e `AUTH_EXPIRA_MIN` é a validade em minutos (padrão 480). Não há segredo padrão: sem `AUTH_SEGREDO`, `POST /auth/login` responde 503 e as demais rotas protegidas também negam acesso.
+
+**Primeiro administrador:** `AUTH_USUARIO` e `AUTH_SENHA` agora servem **só** para criar o primeiro administrador. O serviço `migrate` do compose roda `python -m app.bootstrap_admin` depois do `alembic upgrade head`: se as duas variáveis estão definidas e não existe usuário com esse identificador, cria um usuário `plataforma`/`admin`; se já existe, não altera nada. **Trocar `AUTH_SENHA` depois não muda a senha de um usuário já criado.** Fora do Docker, rode o comando com as variáveis e `DATABASE_URL` no ambiente.
+
+A cada requisição o usuário é relido no banco: desativá-lo (ou à sua organização) ou mudar seu papel vale na hora, e o nível e o papel que valem são os do banco, não os do token. Enquanto não existe o filtro de dados por organização, todas as rotas de dados exigem nível `plataforma` (tomador e prestador recebem 403); `GET /auth/me` aceita qualquer usuário autenticado e devolve `id`, `email`, `nome`, `nivel`, `papel`, `tomador_id` e `prestador_id`. Tokens do formato anterior (emitidos antes desta mudança) são recusados: é preciso entrar de novo. Ficam abertos só `GET /health`, `POST /auth/login`, `/docs` e `/openapi.json`.
 
 Para obter o token (substitua pelos seus valores):
 
@@ -162,7 +187,7 @@ curl -X POST -H "Content-Type: application/json" \
 curl -H "Authorization: Bearer $TOKEN" localhost:8000/auth/me
 ```
 
-O token é um JWT HS256 (claims `sub`, `iat`, `exp`). No `/docs`, use o botão Authorize. Token em query string não é aceito, nem para a imagem da página: o cliente deve enviar o cabeçalho `Authorization`.
+O token é um JWT HS256 (claims `sub` = id do usuário, `nivel`, `papel`, `tomador_id`, `prestador_id`, `iat`, `exp`). No `/docs`, use o botão Authorize. Token em query string não é aceito, nem para a imagem da página: o cliente deve enviar o cabeçalho `Authorization`.
 
 ## Endpoints
 
@@ -173,6 +198,9 @@ O token é um JWT HS256 (claims `sub`, `iat`, `exp`). No `/docs`, use o botão A
 | `GET /health` | Verifica Postgres e Redis | `curl localhost:8000/health` |
 | `POST /lotes` | Envia PDF, JPEG, PNG ou TIFF (multipágina inclusive); imagens viram `original.pdf`. Arquivo inválido: 400. Campo opcional `empresa_id` vincula o lote a uma empresa cadastrada (404 se não existir; 409 se o lote já pertence a outra) | `curl -F "arquivo=@lote.pdf" localhost:8000/lotes` |
 | `GET /lotes/{id}` | Estado do lote e lista de documentos (intervalo, tipo, confiança, probabilidades) | `curl localhost:8000/lotes/1` |
+| `GET /lotes/{id}/eventos` | Stream SSE (`text/event-stream`) de acompanhamento do lote: cada frame `data: {json}` traz o mesmo corpo de `GET /lotes/{id}` (com `ultimo_evento` e `historico_eventos`); linhas `: keepalive` entre os frames. O último frame traz também `"fim": true` e `"motivo"`: `finalizado` (lote `concluido`, sem documentos pendentes nem extração/análise pendentes), `erro` (lote em `erro`) ou `tempo_esgotado` (conexão aberta por 900 s, contados em tempo real). `?once=true` envia um único frame e fecha. Lote inexistente: 404 | `curl -N localhost:8000/lotes/1/eventos` |
+| `POST /lotes/{id}/cancelar` | Cancela o processamento em andamento e devolve o lote. 404 se não existe; 409 se não há nada a cancelar (lote já finalizado) | `curl -X POST localhost:8000/lotes/1/cancelar` |
+| `POST /lotes/{id}/reprocessar` | Reenfileira um lote em `erro` a partir do `original.pdf` e devolve o lote em `recebido`. 404 se não existe; 409 se o lote não está em `erro` ou tem documentos revisados; 400 se o `original.pdf` não está disponível | `curl -X POST localhost:8000/lotes/1/reprocessar` |
 | `GET /documentos/{id}` | Documento com tipo, confiança, motivo de revisão e páginas (texto e `imagem_url`); também `campos` (extraídos, campo->valor), `pessoa` (`campos.nome` ou null), `nome_arquivo`, `n_paginas` e `processado_em` (criação do lote) | `curl localhost:8000/documentos/2` |
 | `GET /documentos?empresa_id=&falhou=` | Documentos agrupados por tipo (`grupos`; `sem_tipo` para quem não tem); cada item traz também `campos`, `pessoa`, `nome_arquivo`, `n_paginas` e `processado_em`. `empresa_id` filtra pela empresa do lote (404 se não existir); `falhou=true` só estado `erro`, `false` exclui | `curl "localhost:8000/documentos?falhou=false"` |
 | `PATCH /documentos/{id}/tipo` | Corrige o tipo (`{"tipo","revisor"}`) em qualquer estado exceto `segmentado` e `erro` (409); vira `revisado`; `tipo_original` guarda o primeiro tipo; dispara análise de ponto e extração como a revisão | `curl -X PATCH -H "Content-Type: application/json" -d '{"tipo":"aso","revisor":"ana"}' localhost:8000/documentos/1/tipo` |
@@ -219,9 +247,9 @@ Definidas no `.env` (modelo em `.env.example`), repassadas aos containers pelo `
 | `JEV_MODEL` | vazio | Modelo do Jev. Testado com `typesafe/jev-1.13` |
 | `GEMINI_API_KEY` | vazio | Chave do Google AI Studio. Só no `.env` |
 | `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo da segunda opinião |
-| `AUTH_USUARIO` | vazio | Usuário do administrador. Sem valor, o login responde 503 |
-| `AUTH_SENHA` | vazio | Senha do administrador. Só no `.env` |
-| `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env` |
+| `AUTH_USUARIO` | vazio | Identificador (e-mail) do primeiro administrador, criado por `python -m app.bootstrap_admin` se não existir |
+| `AUTH_SENHA` | vazio | Senha inicial desse administrador. Só no `.env`. Trocá-la depois não muda a senha de um usuário já criado |
+| `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env`. Sem ele, o login responde 503 |
 | `AUTH_EXPIRA_MIN` | `480` | Validade do token, em minutos |
 
 Também podem ser ajustadas por ambiente (valores em `app/config.py`, não listadas no `.env.example` nem repassadas pelo `docker-compose.yml` atual, então exigem editá-lo): `SEG_SIM_BAIXO`, `SEG_SIM_ALTO`, `SEG_LLM_CONTINUA`, `SEG_LLM_ABRE`, `LLM_TIMEOUT`, `LLM_TENTATIVAS`, `LLM_ESPERA`. As respostas dos LLMs são cacheadas em disco (volume `cache_llm`).
@@ -274,8 +302,8 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 
 - Os dados sintéticos são otimistas. A validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.
 - Um worker por fila: não há escala horizontal testada.
-- Autenticação mínima: um único usuário administrador, sem tabela de usuários nem papéis; sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
-- Sem migrações: `sql/schema.sql` só vale em banco novo (ver `docker compose down -v`).
+- Autenticação: o login usa a tabela `usuario`, mas ainda não há endpoints de gestão de usuários, convite nem troca de senha, e as rotas de dados só aceitam usuários de nível `plataforma` (tomador e prestador recebem 403 até existir o filtro por organização); sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
+- Migrações só em SQL cru (Alembic, sem models) e sem teste de upgrade a partir de bancos antigos além do baseline; quem tem banco criado pelo antigo `sql/schema.sql` precisa de `alembic stamp head` (ver seção 6).
 - Sem CI.
 - O Jev e o Gemini recebem texto (anonimizado, ver "Anonimização") e imagem de páginas dos documentos. Use `CLASSIFICADOR=regras` se o conteúdo não puder sair da máquina.
 - A confiança do classificador por regras é uma heurística sem calibração, usada só para roteamento.
@@ -327,7 +355,7 @@ Métricas por documento. Precisão e recall são das fronteiras (início de docu
 
 No teste, os lotes L0001 (2/4 exatos), L0006 (5/10) e L0008 (4/11) concentram os erros; os outros sete lotes têm 4/5 ou mais. O mesmo `L0001` de 4 documentos reais virou 7 previstos.
 
-**Mudança posterior à medição final.** Depois da medição final, a regra do CNPJ na segmentação mudou: sem paginação, dois CNPJs válidos pelos dígitos verificadores e diferentes abrem documento mesmo com similaridade alta (antes a similaridade alta decidia "continua" antes de olhar o CNPJ). Os números do conjunto de teste acima valem para a versão anterior e precisam ser medidos de novo em lotes novos. No conjunto de **ajuste** (não é métrica final), a mesma medição foi repetida com a regra nova: antes, 30 reais / 31 previstos, precisão 0,923, recall 0,960, exatos 26/30; depois, 30 reais / 32 previstos, precisão 0,926, recall 1,000, exatos 28/30.
+**Mudança posterior à medição final.** Depois da medição final, a regra do CNPJ na segmentação mudou: sem paginação, dois CNPJs válidos pelos dígitos verificadores e diferentes abrem documento mesmo com similaridade alta (antes a similaridade alta decidia "continua" antes de olhar o CNPJ). As regras de paginação também mudaram depois da medição: "Página k de N" (k>1) só continua o documento quando é coerente com a última página paginada dele (mesmo N e k maior; caso contrário abre documento novo e marca ambíguo), e a paginação só é lida nas primeiras e últimas linhas da página (`SEG_PAG_LINHAS`), não em frases do corpo. Os números do conjunto de teste acima valem para a versão anterior e precisam ser medidos de novo em lotes novos. No conjunto de **ajuste** (não é métrica final), a mesma medição foi repetida com a regra nova: antes, 30 reais / 31 previstos, precisão 0,923, recall 0,960, exatos 26/30; depois, 30 reais / 32 previstos, precisão 0,926, recall 1,000, exatos 28/30.
 
 ### Classificação (Goal 3), conjunto de teste
 

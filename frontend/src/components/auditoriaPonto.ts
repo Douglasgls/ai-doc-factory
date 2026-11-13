@@ -62,7 +62,18 @@ export type DimensaoPonto = 'horas_extras' | 'intervalos' | 'descanso' | 'regist
 export interface ScoreDimensao {
   normalizado: number | null
   indeterminada: boolean
+  /** true quando a dimensão nem foi perguntada ao Jev por falta de dados (ex.: sem semana completa). */
+  nao_avaliada?: boolean
+  motivo?: string | null
 }
+
+/** Rótulo curto de uma dimensão sem valor: não avaliada (falta de dados) é diferente de indeterminada (confiança baixa). */
+export const rotuloSemValor = (dim: ScoreDimensao | undefined): string =>
+  dim?.nao_avaliada
+    ? dim.motivo === 'sem_semana_completa'
+      ? 'Não avaliado: a folha não traz semanas completas'
+      : 'Não avaliado'
+    : 'Indeterminada'
 
 export interface AnalisePonto {
   documento_id: number
@@ -179,4 +190,13 @@ export const agruparDivergencias = (divergencias: Divergencia[]): Grupo[] => {
       basesLegais: [...new Set(itens.map((d) => d.base_legal).filter(Boolean))],
     }
   })
+}
+
+/** Texto sob o risco geral: avisa que o score é parcial quando alguma dimensão não foi avaliada. */
+export const textoBaseRisco = (scores: AnalisePonto['scores_dimensao']): string => {
+  const total = ORDEM_DIMENSOES.length
+  const naoAvaliadas = ORDEM_DIMENSOES.filter((d) => scores?.[d]?.nao_avaliada).length
+  return naoAvaliadas === 0
+    ? `É o maior risco entre as ${total} dimensões abaixo.`
+    : `É o maior risco entre as ${total - naoAvaliadas} dimensões avaliadas; ${naoAvaliadas} não avaliada${naoAvaliadas > 1 ? 's' : ''}.`
 }
