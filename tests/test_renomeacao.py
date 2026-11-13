@@ -146,3 +146,31 @@ def test_limpar_extracao_valida_competencia_e_tipo_exame():
     assert limpos["data_emissao"] == "2026-03-12"
     assert "inicio_ferias" not in limpos
 
+
+def test_rota_download_documento_retorna_pdf_e_content_disposition(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api import app
+    from app.routers.documentos import actions as doc_actions
+
+    monkeypatch.setattr(
+        doc_actions,
+        "download_documento",
+        lambda doc_id: (b"%PDF-1.4\n%mock\n", "holerite_douglas_paz_2026-03.pdf"),
+    )
+    client = TestClient(app)
+    resp = client.get("/documentos/123/download")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["content-disposition"] == 'attachment; filename="holerite_douglas_paz_2026-03.pdf"'
+    assert resp.content.startswith(b"%PDF-1.4")
+
+
+def test_rota_download_documento_inexistente_retorna_404():
+    from fastapi.testclient import TestClient
+    from app.api import app
+
+    client = TestClient(app)
+    resp = client.get("/documentos/99999999/download")
+    assert resp.status_code == 404
+
+
