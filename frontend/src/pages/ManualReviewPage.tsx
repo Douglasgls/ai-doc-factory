@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Check, X, Plus, ZoomIn } from 'lucide-react'
+import { Check, X, Plus, ZoomIn, ChevronLeft } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
 
@@ -541,10 +541,19 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
       </nav>
 
       {/* Header Title */}
-      <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#2d0a33] dark:text-[#f8f5fc]">
           Revisão manual
         </h1>
+
+        <button
+          type="button"
+          onClick={onBack}
+          className="self-start sm:self-auto inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border border-[#e1d9e6] dark:border-[#35223e] bg-white dark:bg-[#1a1120] hover:bg-[#f8f5fa] dark:hover:bg-[#25162a] text-[#2d0a33] dark:text-[#eae0ee] shadow-2xs transition-colors cursor-pointer"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span>Voltar para o dashboard</span>
+        </button>
       </div>
 
       {documents.length === 0 ? (
