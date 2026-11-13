@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronDown, FileText, Download, ClipboardCheck, ChevronRight } from 'lucide-react'
+import { Search, ChevronLeft, ChevronDown, FileText, Download, ClipboardCheck, ChevronRight, Eye } from 'lucide-react'
 import type { DocumentCategory, DetailedDocument } from '../types'
 import { downloadDocumento } from '../services/api'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
+import { DocumentPreviewModal, DocumentThumbnail } from '../components/DocumentPreviewModal'
 
 interface CategoryPageProps {
   category: DocumentCategory
@@ -20,6 +21,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   const [selectedConfidence, setSelectedConfidence] = useState('todas')
   const [sortBy, setSortBy] = useState<'recentes' | 'antigos' | 'confianca'>('recentes')
   const [auditDoc, setAuditDoc] = useState<{ id: number; filename: string } | null>(null)
+  const [previewDoc, setPreviewDoc] = useState<DetailedDocument | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const handleDownload = async (e: React.MouseEvent, doc: DetailedDocument) => {
@@ -244,10 +246,16 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                     : ''
                 }`}
               >
-                {/* Document Icon Box */}
-                <div className="w-10 h-10 rounded-xl bg-[#f5eff7] dark:bg-[#25152b] text-[#9333ea] dark:text-[#d67bf3] flex items-center justify-center shrink-0 mt-0.5">
-                  <FileText className="w-5 h-5 stroke-[1.8]" />
-                </div>
+                {/* Document Thumbnail Preview */}
+                <DocumentThumbnail
+                  loteId={doc.loteId}
+                  page={doc.startPage ?? 1}
+                  alt={`Preview de ${doc.filename}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPreviewDoc(doc)
+                  }}
+                />
 
                 {/* Document Content */}
                 <div className="flex-1 min-w-0">
@@ -264,6 +272,18 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                     </div>
 
                     <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPreviewDoc(doc)
+                        }}
+                        title="Visualizar documento"
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Visualizar</span>
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => handleDownload(e, doc)}
@@ -352,6 +372,13 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
           documentoId={auditDoc.id}
           filename={auditDoc.filename}
           onClose={() => setAuditDoc(null)}
+        />
+      )}
+
+      {previewDoc && (
+        <DocumentPreviewModal
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
         />
       )}
     </div>
