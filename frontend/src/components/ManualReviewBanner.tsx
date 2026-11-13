@@ -13,7 +13,18 @@ export const ManualReviewBanner: React.FC<ManualReviewBannerProps> = ({
   if (count <= 0) return null
 
   return (
-    <div className="w-full rounded-2xl border transition-all duration-200 p-4 sm:p-5 flex items-center justify-between gap-4 bg-white dark:bg-[#1a1120] border-[#ebe5ef] dark:border-[#2f1e39] shadow-xs">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onReviewClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onReviewClick()
+        }
+      }}
+      className="group w-full rounded-2xl border transition-all duration-200 p-4 sm:p-5 flex items-center justify-between gap-4 bg-white dark:bg-[#1a1120] border-[#ebe5ef] dark:border-[#2f1e39] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 shadow-xs hover:shadow-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
+    >
       <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
         {/* Warning Icon with badge */}
         <div className="relative shrink-0">
@@ -39,8 +50,11 @@ export const ManualReviewBanner: React.FC<ManualReviewBannerProps> = ({
       {/* Action button */}
       <button
         type="button"
-        onClick={onReviewClick}
-        className="shrink-0 flex items-center gap-1 text-sm font-semibold text-[#9333ea] dark:text-[#d67bf3] hover:text-[#7823c4] dark:hover:text-[#f38df9] transition-colors group cursor-pointer"
+        onClick={(e) => {
+          e.stopPropagation()
+          onReviewClick()
+        }}
+        className="shrink-0 flex items-center gap-1 text-sm font-semibold text-[#9333ea] dark:text-[#d67bf3] group-hover:text-[#7823c4] hover:text-[#7823c4] dark:group-hover:text-[#f38df9] dark:hover:text-[#f38df9] transition-colors cursor-pointer"
       >
         <span>Revisar</span>
         <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
