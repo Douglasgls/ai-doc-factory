@@ -96,7 +96,7 @@ export const ROTULO_DIMENSAO: Record<DimensaoPonto, string> = {
   horas_extras: 'Horas extras',
   intervalos: 'Intervalos',
   descanso: 'Descanso',
-  registro: 'Registro',
+  registro: 'Registro de ponto',
 }
 
 export const ORDEM_DIMENSOES: DimensaoPonto[] = ['horas_extras', 'intervalos', 'descanso', 'registro']
