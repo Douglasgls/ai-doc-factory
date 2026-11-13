@@ -195,37 +195,62 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
             </p>
           </div>
         ) : (
-          filteredDocuments.map((doc) => (
-            <div
-              key={doc.id}
-              className="w-full rounded-2xl p-4 sm:p-5 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 transition-all flex items-start gap-4 shadow-2xs"
-            >
-              {/* Document Icon Box */}
-              <div className="w-10 h-10 rounded-xl bg-[#f5eff7] dark:bg-[#25152b] text-[#9333ea] dark:text-[#d67bf3] flex items-center justify-center shrink-0 mt-0.5">
-                <FileText className="w-5 h-5 stroke-[1.8]" />
-              </div>
+          filteredDocuments.map((doc) => {
+            const isFolhaPonto = category.id === 'folha_ponto'
+            const openAudit = () =>
+              setAuditDoc({ id: Number(doc.id), filename: doc.filename })
 
-              {/* Document Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
-                    {doc.filename}
-                  </h3>
-                  
-                  {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
-                  {category.id === 'folha_ponto' && (
-                    <button
-                      type="button"
-                      onClick={() => setAuditDoc({ id: Number(doc.id), filename: doc.filename })}
-                      title="Abrir auditoria da folha de ponto"
-                      className="shrink-0 inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95] hover:bg-[#6c2c91] hover:text-white hover:border-[#6c2c91] dark:hover:bg-[#7e22ce] dark:hover:text-white dark:hover:border-[#7e22ce] shadow-2xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
-                    >
-                      <ClipboardCheck className="w-4 h-4 shrink-0" />
-                      <span>Ver auditoria</span>
-                      <ChevronRight className="w-3.5 h-3.5 opacity-70" />
-                    </button>
-                  )}
+            return (
+              <div
+                key={doc.id}
+                onClick={isFolhaPonto ? openAudit : undefined}
+                onKeyDown={
+                  isFolhaPonto
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openAudit()
+                        }
+                      }
+                    : undefined
+                }
+                role={isFolhaPonto ? 'button' : undefined}
+                tabIndex={isFolhaPonto ? 0 : undefined}
+                className={`group w-full rounded-2xl p-4 sm:p-5 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 transition-all flex items-start gap-4 shadow-2xs ${
+                  isFolhaPonto
+                    ? 'cursor-pointer hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40'
+                    : ''
+                }`}
+              >
+                {/* Document Icon Box */}
+                <div className="w-10 h-10 rounded-xl bg-[#f5eff7] dark:bg-[#25152b] text-[#9333ea] dark:text-[#d67bf3] flex items-center justify-center shrink-0 mt-0.5">
+                  <FileText className="w-5 h-5 stroke-[1.8]" />
                 </div>
+
+                {/* Document Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
+                      {doc.filename}
+                    </h3>
+
+                    {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
+                    {isFolhaPonto && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openAudit()
+                        }}
+                        title="Abrir auditoria da folha de ponto"
+                        className="shrink-0 inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95] group-hover:bg-[#6c2c91] group-hover:text-white group-hover:border-[#6c2c91] hover:bg-[#6c2c91] hover:text-white hover:border-[#6c2c91] dark:group-hover:bg-[#7e22ce] dark:group-hover:text-white dark:group-hover:border-[#7e22ce] shadow-2xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
+                      >
+                        <ClipboardCheck className="w-4 h-4 shrink-0" />
+                        <span>Ver auditoria</span>
+                        <ChevronRight className="w-3.5 h-3.5 opacity-70" />
+                      </button>
+                    )}
+                  </div>
                 <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#a093a8] mt-0.5">
                   {doc.personName} · {doc.pages} página{doc.pages > 1 ? 's' : ''} · Processado em {doc.processedDate} · Confiança {Math.round(doc.confidence * 100)}%
                 </p>
@@ -275,7 +300,8 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                 </div>
               </div>
             </div>
-          ))
+            )
+          })
         )}
       </div>
 
