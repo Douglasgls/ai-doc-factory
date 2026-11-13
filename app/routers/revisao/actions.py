@@ -5,6 +5,7 @@ from app import config
 from app.analise import enfileirar_analise
 from app.eventos import limpar_cancelado
 from app.extracao import enfileirar_extracao
+from app.renomeacao import atualizar_nome_padronizado
 from app.routers import r
 from app.routers.documentos.actions import campos_por_documento, extras_documento
 from app.routers.revisao.schemas import Revisao
@@ -42,6 +43,7 @@ def revisar_documento(documento_id: int, revisao: Revisao) -> dict:
             if estado is None:
                 raise HTTPException(404, "documento não encontrado")
             raise HTTPException(409, f"documento em estado '{estado[0]}' não aceita revisão")
+        atualizar_nome_padronizado(conn, documento_id)
     limpar_cancelado(row[6], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
     if revisao.tipo == "folha_ponto":
         enfileirar_analise(documento_id, r)  # nunca levanta: não derruba a revisão

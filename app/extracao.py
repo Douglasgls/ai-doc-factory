@@ -15,12 +15,26 @@ from app.classificar import _imagem_primeira_pagina, montar_texto
 from app.conformidade import parse_data
 from app.eventos import concluir_tarefa_pos, lote_cancelado, publicar_evento
 from app.filas import enfileirar
+from app.renomeacao import (
+    atualizar_nome_padronizado,
+    normalizar_competencia,
+    normalizar_tipo_exame,
+)
 
 log = logging.getLogger(__name__)
 
 TEXTO_MAX = 8000
 VALOR_MAX = 200
-DATAS = ("data_admissao", "data_exame", "data_termino")
+DATAS = (
+    "data_admissao",
+    "data_exame",
+    "data_termino",
+    "data_emissao",
+    "inicio_ferias",
+    "fim_ferias",
+    "inicio_periodo",
+    "fim_periodo",
+)
 
 
 def _remover_pendencia_por_doc(documento_id: int, prefixo: str, r: redis.Redis | None = None) -> None:
@@ -63,11 +77,19 @@ def limpar(dados) -> dict[str, str]:
             if d is None:
                 continue
             v = d.isoformat()
+        elif campo == "competencia":
+            comp = normalizar_competencia(v)
+            if comp is None:
+                continue
+            v = comp
         saida[campo] = v
     if isinstance(dados.get("distingue_prestadora"), bool):
         saida["distingue_prestadora"] = "true" if dados["distingue_prestadora"] else "false"
     if dados.get("tipo_prazo") in prompts.TIPOS_PRAZO:
         saida["tipo_prazo"] = dados["tipo_prazo"]
+    tipo_exame = normalizar_tipo_exame(dados.get("tipo_exame"))
+    if tipo_exame is not None:
+        saida["tipo_exame"] = tipo_exame
     return saida
 
 
@@ -160,6 +182,7 @@ def extrair_campos(payload: dict) -> None:
         for campo, valor in campos_limpos.items():
             conn.execute("INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, %s, %s, %s) "
                          "ON CONFLICT (documento_id, campo) DO NOTHING", (doc_id, campo, valor, origem))
+        atualizar_nome_padronizado(conn, doc_id)
         docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
     etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
     publicar_evento(

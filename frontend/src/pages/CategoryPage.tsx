@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronDown, FileText } from 'lucide-react'
+import { Search, ChevronLeft, ChevronDown, FileText, Download } from 'lucide-react'
 import type { DocumentCategory, DetailedDocument } from '../types'
+import { downloadDocumento } from '../services/api'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
 
 interface CategoryPageProps {
@@ -19,6 +20,19 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   const [selectedConfidence, setSelectedConfidence] = useState('todas')
   const [sortBy, setSortBy] = useState<'recentes' | 'antigos' | 'confianca'>('recentes')
   const [auditDoc, setAuditDoc] = useState<{ id: number; filename: string } | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+  const handleDownload = async (e: React.MouseEvent, doc: DetailedDocument) => {
+    e.stopPropagation()
+    setDownloadingId(doc.id)
+    try {
+      await downloadDocumento(Number(doc.id), doc.filename)
+    } catch {
+      // erro silencioso ou feedback mínimo sem quebrar a listagem
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   // Get unique person names for the dropdown
   const peopleList = useMemo(() => {
@@ -208,20 +222,40 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
               {/* Document Content */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
-                    {doc.filename}
-                  </h3>
-                  
-                  {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
-                  {category.id === 'folha_ponto' && (
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
+                      {doc.filename}
+                    </h3>
+                    {doc.originalFilename && doc.originalFilename !== doc.filename && (
+                      <p className="text-[11px] text-[#8f8298] dark:text-[#7f7188] truncate">
+                        Original: {doc.originalFilename}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="shrink-0 flex items-center gap-2">
                     <button
-                      onClick={() => setAuditDoc({ id: Number(doc.id), filename: doc.filename })}
-                      className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-[#f3e8ff] dark:bg-[#2e1065] text-[#7e22ce] dark:text-[#d8b4fe] border border-[#e9d5ff] dark:border-[#4c1d95] hover:bg-[#e9d5ff] transition-colors"
+                      type="button"
+                      onClick={(e) => handleDownload(e, doc)}
+                      disabled={downloadingId === doc.id}
+                      title="Baixar PDF com nome padronizado"
+                      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      <Search className="w-3 h-3" />
-                      Auditoria
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{downloadingId === doc.id ? 'Baixando...' : 'Baixar PDF'}</span>
                     </button>
-                  )}
+
+                    {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
+                    {category.id === 'folha_ponto' && (
+                      <button
+                        onClick={() => setAuditDoc({ id: Number(doc.id), filename: doc.filename })}
+                        className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-[#f3e8ff] dark:bg-[#2e1065] text-[#7e22ce] dark:text-[#d8b4fe] border border-[#e9d5ff] dark:border-[#4c1d95] hover:bg-[#e9d5ff] transition-colors"
+                      >
+                        <Search className="w-3 h-3" />
+                        Auditoria
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#a093a8] mt-0.5">
                   {doc.personName} · {doc.pages} página{doc.pages > 1 ? 's' : ''} · Processado em {doc.processedDate} · Confiança {Math.round(doc.confidence * 100)}%

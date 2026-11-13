@@ -210,6 +210,7 @@ export function App() {
               id: String(d.id),
               loteId: d.lote_id,
               filename: d.nome_arquivo || `Documento #${d.id}`,
+              originalFilename: d.nome_original,
               category: d.tipo || 'desconhecido',
               estado: d.estado,
               personName: d.pessoa || campos.nome || 'Não identificado',
