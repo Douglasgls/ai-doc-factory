@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class LoteCriadoOut(BaseModel):
@@ -6,6 +6,24 @@ class LoteCriadoOut(BaseModel):
     estado: str
     existente: bool  # True quando o mesmo arquivo (sha256) já tinha sido enviado
     empresa_id: int | None
+    reprocessando: bool | None = None  # só no reenvio de um lote em 'erro' (volta para 'recebido')
+
+
+class EventoProgressoOut(BaseModel):
+    """Evento de progresso do lote (Redis). Os extras variam por etapa; os que não vierem ficam ausentes."""
+    model_config = ConfigDict(extra="allow")
+    lote_id: int
+    etapa: str
+    mensagem: str
+    timestamp: str  # ISO 8601 UTC
+    pagina_atual: int | None = None
+    total_paginas: int | None = None
+    total_documentos: int | None = None
+    docs_pendentes: int | None = None
+    documento_id: int | None = None
+    tipo: str | None = None
+    estado_documento: str | None = None
+    segmentacao_ambigua: bool | None = None
 
 
 class DocumentoDoLoteOut(BaseModel):
@@ -28,3 +46,5 @@ class LoteOut(BaseModel):
     docs_pendentes: int
     empresa_id: int | None
     documentos: list[DocumentoDoLoteOut]
+    ultimo_evento: EventoProgressoOut | None = None  # None sem eventos no Redis (TTL ou lote antigo)
+    historico_eventos: list[EventoProgressoOut] = []

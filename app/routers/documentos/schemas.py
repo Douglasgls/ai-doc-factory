@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.routers.comum import DataHora
 from app.routers.documentos import validations
@@ -86,6 +86,7 @@ class ParametroPerfilOut(BaseModel):
 
 
 class DivergenciaPontoOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
     tipo: str
     data: str | None = None
     minutos: float | None = None
@@ -130,8 +131,20 @@ class ResumoTotaisPontoOut(BaseModel):
     dias_invalidos: int
 
 
+class DiaPontoOut(BaseModel):
+    model_config = ConfigDict(extra="allow")  # campos novos da apuração passam sem perda
+    data: str
+    pares: list[Any] | None = None  # ausente nas linhas gravadas (a apuração não persiste as marcações brutas por dia)
+    trabalhado_min: float
+    extras_min: float
+    extras_bruto_min: float | None = None
+    intervalo_min: float | None = None
+    noturno_real_min: float | None = None
+    noturno_computado_min: float | None = None
+
+
 class TotaisPontoOut(BaseModel):
-    dias: list[dict[str, Any]]  # por dia: data, trabalhado_min, extras_min, intervalo_min, noturno_*...
+    dias: list[DiaPontoOut]
     totais: ResumoTotaisPontoOut
     intervalo_pre_assinalado: bool
     intervalos_nao_verificados: list[Any]
@@ -149,12 +162,70 @@ class PontoBritanicoOut(BaseModel):
 
 
 class ScoreDimensaoOut(BaseModel):
-    score: float  # nível escolhido pelo Jev
-    confianca: float
-    n_niveis: int
-    probabilidades: dict[str, float]
-    normalizado: float | None  # None se indeterminada
+    """Uma dimensão de risco. Dimensão avaliada: score, confianca, n_niveis e probabilidades vêm do Jev.
+    Indeterminada (confiança baixa): normalizado nulo. Não avaliada (sem dados, ex.: descanso sem semana
+    completa): nao_avaliada=True, motivo preenchido e os campos do Jev nulos. Linhas gravadas antes do campo
+    `nao_avaliada` não o trazem (ausente)."""
+    score: float | None = None  # nível escolhido pelo Jev
+    confianca: float | None = None
+    n_niveis: int | None = None
+    probabilidades: dict[str, float] | None = None
+    normalizado: float | None = None  # None se indeterminada ou não avaliada
     indeterminada: bool
+    nao_avaliada: bool | None = None
+    motivo: str | None = None  # só quando nao_avaliada
+
+
+class ContagemHorasExtrasOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    dias_analisados: int | None = None
+    dias_acima_do_limite_diario: int | None = None
+    fracao_dos_dias_acima_do_limite: float | None = None
+    maior_excesso_diario_min: float | None = None
+    semanas_acima_de_44h: int | None = None
+    total_horas_extras_min: float | None = None
+
+
+class ContagemIntervalosOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    dias_analisados: int | None = None
+    dias_com_intervalo_intrajornada_insuficiente: int | None = None
+    maior_falta_de_intervalo_min: float | None = None
+    dias_com_falta_de_intervalo_pequena: int | None = None
+    dias_com_falta_de_intervalo_maior: int | None = None
+    limite_da_falta_pequena_min: float | None = None
+    dias_com_interjornada_menor_que_11h: int | None = None
+    maior_falta_de_interjornada_min: float | None = None
+    dias_com_intervalo_nao_verificado: int | None = None
+
+
+class ContagemDescansoOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    semanas_completas_avaliadas: int | None = None
+    semanas_sem_descanso_de_24h: int | None = None
+    maior_falta_de_descanso_min: float | None = None
+
+
+class ContagemRegistroOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    dias_com_marcacao_valida: int | None = None
+    dias_com_marcacao_invalida: int | None = None
+    ponto_britanico: str | None = None  # inconclusivo | sinal_de_ponto_britanico | sem_sinal
+    fracao_de_dias_com_horario_uniforme: float | None = None
+    totais_declarados_informados: bool | None = None
+    totais_declarados_divergentes: int | None = None
+    maior_diferenca_do_total_declarado_min: float | None = None
+
+
+class ContagensPontoOut(BaseModel):
+    """Contagens por dimensão (calculadas em código, base do julgamento do Jev). `nao_avaliadas` é a LISTA de
+    dimensões sem dados para avaliar (chave ausente em linhas anteriores ao PR #45)."""
+    model_config = ConfigDict(extra="allow")
+    horas_extras: ContagemHorasExtrasOut | None = None
+    intervalos: ContagemIntervalosOut | None = None
+    descanso: ContagemDescansoOut | None = None
+    registro: ContagemRegistroOut | None = None
+    nao_avaliadas: list[str] | None = None
 
 
 class AnalisePontoOut(BaseModel):
@@ -169,7 +240,7 @@ class AnalisePontoOut(BaseModel):
     diferencas_gemini: list[DiferencaGeminiOut] | None = None
     ponto_britanico: PontoBritanicoOut | None = None
     analise: str | None = None
-    contagens: dict[str, dict[str, Any]] | None = None
+    contagens: ContagensPontoOut | None = None
     scores_dimensao: dict[str, ScoreDimensaoOut] | None = None
     score_geral: float | None = None  # máximo das dimensões (0 a 1)
     requer_revisao: bool | None = None
