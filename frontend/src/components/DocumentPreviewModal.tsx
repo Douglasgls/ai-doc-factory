@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Download, FileText, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, FileText, X, ZoomIn } from 'lucide-react'
 import { downloadDocumento, fetchPageImage } from '../services/api'
 import type { DetailedDocument } from '../types'
 
@@ -82,17 +82,27 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
-  const [zoom, setZoom] = useState(1)
+  const [isZoomEnabled, setIsZoomEnabled] = useState(false)
+  const [isHoveringImage, setIsHoveringImage] = useState(false)
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 })
+
+  const handleImageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isZoomEnabled) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100))
+    const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
+    setZoomOrigin({ x, y })
+  }
 
   const currentPage = startPage + pageOffset
 
   useEffect(() => {
     setPageOffset(0)
-    setZoom(1)
+    setIsZoomEnabled(false)
   }, [doc.id])
 
   useEffect(() => {
-    setZoom(1)
+    setIsHoveringImage(false)
   }, [pageOffset])
 
   useEffect(() => {
@@ -171,38 +181,6 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
           </div>
 
           <div className="shrink-0 flex items-center gap-2">
-            {/* Controles de Lupa / Zoom */}
-            <div className="hidden sm:inline-flex items-center rounded-xl border border-[#e6dce9] dark:border-[#382343] bg-[#f6f2f8] dark:bg-[#25172d] p-0.5">
-              <button
-                type="button"
-                onClick={() => setZoom((z) => Math.max(1, Number((z - 0.5).toFixed(1))))}
-                disabled={zoom <= 1}
-                title="Diminuir zoom"
-                aria-label="Diminuir zoom"
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#4b3e56] dark:text-[#d5c7df] hover:bg-white dark:hover:bg-[#32203d] disabled:opacity-40 transition-colors cursor-pointer"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoom(1)}
-                title="Resetar zoom (100%)"
-                className="px-2 h-8 text-[11px] font-semibold text-[#4b3e56] dark:text-[#d5c7df] hover:bg-white dark:hover:bg-[#32203d] rounded-lg transition-colors cursor-pointer"
-              >
-                {Math.round(zoom * 100)}%
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoom((z) => Math.min(2.5, Number((z + 0.5).toFixed(1))))}
-                disabled={zoom >= 2.5}
-                title="Aumentar zoom (lupa)"
-                aria-label="Aumentar zoom"
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#4b3e56] dark:text-[#d5c7df] hover:bg-white dark:hover:bg-[#32203d] disabled:opacity-40 transition-colors cursor-pointer"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
             <button
               type="button"
               onClick={handleDownload}
@@ -225,10 +203,39 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
 
         {/* Image Area */}
         <div
-          className={`flex-1 overflow-auto bg-[#f6f2f8] dark:bg-[#120b17] p-4 flex min-h-[360px] ${
-            zoom > 1 ? 'items-start justify-start' : 'items-center justify-center'
+          onMouseEnter={() => setIsHoveringImage(true)}
+          onMouseLeave={() => setIsHoveringImage(false)}
+          onMouseMove={handleImageMouseMove}
+          className={`relative flex-1 overflow-hidden bg-[#f6f2f8] dark:bg-[#120b17] p-4 flex items-center justify-center min-h-[380px] ${
+            isZoomEnabled ? 'cursor-zoom-in' : ''
           }`}
         >
+          {!loading && !error && src && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsZoomEnabled((prev) => !prev)
+              }}
+              onMouseEnter={() => setIsHoveringImage(false)}
+              onMouseLeave={() => setIsHoveringImage(true)}
+              title={
+                isZoomEnabled
+                  ? 'Desativar lupa (clique para desligar o zoom)'
+                  : 'Ativar lupa (passe o mouse no documento para dar zoom)'
+              }
+              aria-pressed={isZoomEnabled}
+              className={`absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm backdrop-blur-md transition-all cursor-pointer ${
+                isZoomEnabled
+                  ? 'bg-[#6b1578] text-white ring-2 ring-[#d88cf5]/60 dark:bg-[#a21caf] dark:ring-[#f0abfc]/50'
+                  : 'bg-white/90 text-[#4a1852] border border-[#e3dae8] hover:bg-white dark:bg-[#23152b]/90 dark:text-[#e9d5ff] dark:border-[#3e274b] dark:hover:bg-[#2d1b37]'
+              }`}
+            >
+              <ZoomIn className="w-3.5 h-3.5 stroke-[2.2]" />
+              <span>{isZoomEnabled ? 'Lupa ativa' : 'Lupa'}</span>
+            </button>
+          )}
+
           {loading ? (
             <p className="text-sm text-[#6e6378] dark:text-[#a093a8]">Carregando visualização...</p>
           ) : error || !src ? (
@@ -239,14 +246,11 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
             <img
               src={src}
               alt={`${doc.filename} - página ${pageOffset + 1}`}
-              onClick={() => setZoom((z) => (z > 1 ? 1 : 2))}
-              title={zoom > 1 ? 'Clique para reduzir' : 'Clique para ampliar com a lupa'}
-              style={zoom > 1 ? { width: `${zoom * 100}%`, maxWidth: 'none' } : undefined}
-              className={`rounded-lg shadow-md border border-[#e6dce9] dark:border-[#2f1e39] bg-white transition-all ${
-                zoom > 1
-                  ? 'cursor-zoom-out'
-                  : 'max-w-full max-h-[70vh] cursor-zoom-in'
-              }`}
+              style={{
+                transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+                transform: isZoomEnabled && isHoveringImage ? 'scale(2.35)' : 'scale(1)',
+              }}
+              className="max-w-full max-h-[70vh] rounded-lg shadow-md border border-[#e6dce9] dark:border-[#2f1e39] bg-white transition-transform duration-150 ease-out select-none pointer-events-none"
             />
           )}
         </div>
