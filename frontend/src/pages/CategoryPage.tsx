@@ -1,9 +1,27 @@
 import React, { useState, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronDown, FileText, Download, ClipboardCheck, ChevronRight, Eye } from 'lucide-react'
+import {
+  Search,
+  ChevronLeft,
+  ChevronDown,
+  FileText,
+  Download,
+  ClipboardCheck,
+  ChevronRight,
+  Eye,
+  User,
+  Calendar,
+  List,
+} from 'lucide-react'
 import type { DocumentCategory, DetailedDocument } from '../types'
 import { downloadDocumento } from '../services/api'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
 import { DocumentPreviewModal, DocumentThumbnail } from '../components/DocumentPreviewModal'
+import {
+  type GroupMode,
+  agruparPorColaborador,
+  agruparPorCompetencia,
+  obterIniciais,
+} from '../utils/agrupamento'
 
 interface CategoryPageProps {
   category: DocumentCategory
@@ -24,9 +42,15 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   const [selectedPerson, setSelectedPerson] = useState('todas')
   const [selectedConfidence, setSelectedConfidence] = useState('todas')
   const [sortBy, setSortBy] = useState<'recentes' | 'antigos' | 'confianca'>('recentes')
+  const [groupMode, setGroupMode] = useState<GroupMode>('lista')
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [auditDoc, setAuditDoc] = useState<{ id: number; filename: string } | null>(null)
   const [previewDoc, setPreviewDoc] = useState<DetailedDocument | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
 
   const handleDownload = async (e: React.MouseEvent, doc: DetailedDocument) => {
     e.stopPropagation()
@@ -89,6 +113,16 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
     })
   }, [documents, searchTerm, selectedPerson, selectedConfidence, sortBy])
 
+  const gruposColaboradores = useMemo(
+    () => agruparPorColaborador(filteredDocuments),
+    [filteredDocuments]
+  )
+
+  const gruposCompetencias = useMemo(
+    () => agruparPorCompetencia(filteredDocuments),
+    [filteredDocuments]
+  )
+
   const campoLabels: Record<string, string> = {
     cpf: 'CPF',
     matricula: 'Matrícula',
@@ -106,6 +140,152 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
     nome_empresa: 'Empresa',
     razao_social_prestadora: 'Empresa',
     cnpj_prestadora: 'CNPJ',
+  }
+
+  const renderDocumentCard = (doc: DetailedDocument) => {
+    const isFolhaPonto = category.id === 'folha_ponto'
+    const openAudit = () =>
+      setAuditDoc({ id: Number(doc.id), filename: doc.filename })
+
+    return (
+      <div
+        key={doc.id}
+        onClick={isFolhaPonto ? openAudit : undefined}
+        onKeyDown={
+          isFolhaPonto
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  openAudit()
+                }
+              }
+            : undefined
+        }
+        role={isFolhaPonto ? 'button' : undefined}
+        tabIndex={isFolhaPonto ? 0 : undefined}
+        className={`group w-full rounded-2xl p-4 sm:p-5 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 transition-all flex items-start gap-4 shadow-2xs ${
+          isFolhaPonto
+            ? 'cursor-pointer hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40'
+            : ''
+        }`}
+      >
+        {/* Document Thumbnail Preview */}
+        <DocumentThumbnail
+          loteId={doc.loteId}
+          page={doc.startPage ?? 1}
+          alt={`Preview de ${doc.filename}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            setPreviewDoc(doc)
+          }}
+        />
+
+        {/* Document Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
+                {doc.filename}
+              </h3>
+              {doc.originalFilename && doc.originalFilename !== doc.filename && (
+                <p className="text-[11px] text-[#8f8298] dark:text-[#7f7188] truncate">
+                  Original: {doc.originalFilename}
+                </p>
+              )}
+            </div>
+
+            <div className="shrink-0 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setPreviewDoc(doc)
+                }}
+                title="Visualizar documento"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Visualizar</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => handleDownload(e, doc)}
+                disabled={downloadingId === doc.id}
+                title="Baixar PDF com nome padronizado"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{downloadingId === doc.id ? 'Baixando...' : 'Baixar PDF'}</span>
+              </button>
+
+              {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
+              {isFolhaPonto && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openAudit()
+                  }}
+                  title="Abrir auditoria da folha de ponto"
+                  className="shrink-0 inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95] group-hover:bg-[#6c2c91] group-hover:text-white group-hover:border-[#6c2c91] hover:bg-[#6c2c91] hover:text-white hover:border-[#6c2c91] dark:group-hover:bg-[#7e22ce] dark:group-hover:text-white dark:group-hover:border-[#7e22ce] shadow-2xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
+                >
+                  <ClipboardCheck className="w-4 h-4 shrink-0" />
+                  <span>Ver auditoria</span>
+                  <ChevronRight className="w-3.5 h-3.5 opacity-70" />
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#a093a8] mt-0.5">
+            {doc.personName} · {doc.pages} página{doc.pages > 1 ? 's' : ''} · Processado em {doc.processedDate} · Confiança {Math.round(doc.confidence * 100)}%
+          </p>
+
+          {/* Metadata Badges / Tags */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {Object.entries(doc.campos || {})
+              .filter(([k, v]) => k !== 'nome' && k !== 'distingue_prestadora' && v)
+              .map(([key, value]) => (
+                <span
+                  key={key}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]"
+                >
+                  {campoLabels[key] || key}: {value}
+                </span>
+              ))}
+            {!doc.campos && doc.metadata.registrationNumber && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
+                Nº de registro: {doc.metadata.registrationNumber}
+              </span>
+            )}
+            {!doc.campos && doc.metadata.categoryType && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
+                Categoria: {doc.metadata.categoryType}
+              </span>
+            )}
+            {!doc.campos && doc.metadata.expirationDate && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
+                Validade: {doc.metadata.expirationDate}
+              </span>
+            )}
+            {!doc.campos && doc.metadata.cpfNumber && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
+                CPF: {doc.metadata.cpfNumber}
+              </span>
+            )}
+            {!doc.campos && doc.metadata.rgNumber && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
+                RG: {doc.metadata.rgNumber}
+              </span>
+            )}
+            {!doc.campos && doc.metadata.address && (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
+                Endereço: {doc.metadata.address}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -192,8 +372,52 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
         />
       </div>
 
-      {/* Filter Row */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm">
+      {/* Filter and View Mode Row */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs sm:text-sm">
+        {/* View Mode Toggle: Lista | Colaborador | Competência */}
+        <div className="inline-flex items-center p-1 rounded-xl bg-white dark:bg-[#1a1120] border border-[#ebe5ef] dark:border-[#2f1e39] shadow-2xs self-start">
+          <button
+            type="button"
+            onClick={() => setGroupMode('lista')}
+            title="Visualização em lista contínua"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              groupMode === 'lista'
+                ? 'bg-[#9333ea] text-white shadow-xs'
+                : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+            }`}
+          >
+            <List className="w-3.5 h-3.5" />
+            <span>Lista</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setGroupMode('colaborador')}
+            title="Agrupar documentos por colaborador"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              groupMode === 'colaborador'
+                ? 'bg-[#9333ea] text-white shadow-xs'
+                : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+            }`}
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Por Colaborador</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setGroupMode('competencia')}
+            title="Agrupar documentos por competência / mês"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              groupMode === 'competencia'
+                ? 'bg-[#9333ea] text-white shadow-xs'
+                : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Por Competência</span>
+          </button>
+        </div>
+
+        {/* Filters: People, Confidence & Sort */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {/* People Filter Dropdown */}
           <div className="relative">
@@ -202,7 +426,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
               onChange={(e) => setSelectedPerson(e.target.value)}
               className="appearance-none pl-3.5 pr-8 py-2 rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] text-[#2d0a33] dark:text-[#e4d6eb] focus:outline-none cursor-pointer shadow-2xs font-medium"
             >
-              <option value="todas">Todos</option>
+              <option value="todas">Todos os colaboradores</option>
               {peopleList.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -226,25 +450,25 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
             </select>
             <ChevronDown className="w-3.5 h-3.5 text-[#8f8298] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
-        </div>
 
-        {/* Sort Dropdown */}
-        <div className="relative self-end sm:self-auto">
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'recentes' | 'antigos' | 'confianca')}
-            className="appearance-none pl-3.5 pr-8 py-2 rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] text-[#2d0a33] dark:text-[#e4d6eb] focus:outline-none cursor-pointer shadow-2xs font-medium"
-          >
-            <option value="recentes">Mais recentes</option>
-            <option value="antigos">Mais antigos</option>
-            <option value="confianca">Maior confiança</option>
-          </select>
-          <ChevronDown className="w-3.5 h-3.5 text-[#8f8298] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          {/* Sort Dropdown */}
+          <div className="relative self-end sm:self-auto">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'recentes' | 'antigos' | 'confianca')}
+              className="appearance-none pl-3.5 pr-8 py-2 rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] text-[#2d0a33] dark:text-[#e4d6eb] focus:outline-none cursor-pointer shadow-2xs font-medium"
+            >
+              <option value="recentes">Mais recentes</option>
+              <option value="antigos">Mais antigos</option>
+              <option value="confianca">Maior confiança</option>
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-[#8f8298] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
         </div>
       </div>
 
-      {/* Document Cards List */}
-      <div className="space-y-3 pt-2">
+      {/* Document Cards List / Groups */}
+      <div className="space-y-4 pt-2">
         {filteredDocuments.length === 0 ? (
           <div className="py-16 text-center rounded-2xl border border-dashed border-[#ebe5ef] dark:border-[#2f1e39] bg-white/50 dark:bg-[#1a1120]/50">
             <FileText className="w-12 h-12 mx-auto text-[#a092a8] dark:text-[#5f5367] mb-2" />
@@ -255,152 +479,114 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
               Tente redefinir os filtros ou o termo de pesquisa.
             </p>
           </div>
-        ) : (
-          filteredDocuments.map((doc) => {
-            const isFolhaPonto = category.id === 'folha_ponto'
-            const openAudit = () =>
-              setAuditDoc({ id: Number(doc.id), filename: doc.filename })
-
-            return (
-              <div
-                key={doc.id}
-                onClick={isFolhaPonto ? openAudit : undefined}
-                onKeyDown={
-                  isFolhaPonto
-                    ? (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          openAudit()
-                        }
-                      }
-                    : undefined
-                }
-                role={isFolhaPonto ? 'button' : undefined}
-                tabIndex={isFolhaPonto ? 0 : undefined}
-                className={`group w-full rounded-2xl p-4 sm:p-5 border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] hover:border-[#c026d3]/40 dark:hover:border-[#c026d3]/50 transition-all flex items-start gap-4 shadow-2xs ${
-                  isFolhaPonto
-                    ? 'cursor-pointer hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40'
-                    : ''
-                }`}
-              >
-                {/* Document Thumbnail Preview */}
-                <DocumentThumbnail
-                  loteId={doc.loteId}
-                  page={doc.startPage ?? 1}
-                  alt={`Preview de ${doc.filename}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setPreviewDoc(doc)
-                  }}
-                />
-
-                {/* Document Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
-                        {doc.filename}
-                      </h3>
-                      {doc.originalFilename && doc.originalFilename !== doc.filename && (
-                        <p className="text-[11px] text-[#8f8298] dark:text-[#7f7188] truncate">
-                          Original: {doc.originalFilename}
+        ) : groupMode === 'lista' ? (
+          /* MODO 1: Lista Direta */
+          <div className="space-y-3">
+            {filteredDocuments.map(renderDocumentCard)}
+          </div>
+        ) : groupMode === 'colaborador' ? (
+          /* MODO 2: Agrupado por Colaborador */
+          <div className="space-y-4">
+            {gruposColaboradores.map((grupo) => {
+              const isCollapsed = collapsedGroups[grupo.nome] ?? false
+              return (
+                <div
+                  key={grupo.nome}
+                  className="rounded-2xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white/70 dark:bg-[#1a1120]/70 overflow-hidden shadow-2xs transition-all"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(grupo.nome)}
+                    className="w-full p-4 sm:p-5 flex items-center justify-between gap-3 text-left hover:bg-[#f8f5fa] dark:hover:bg-[#201428] transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#6c2c91] to-[#a855f7] text-white font-bold flex items-center justify-center text-xs sm:text-sm shadow-xs shrink-0">
+                        {obterIniciais(grupo.nome)}
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
+                          {grupo.nome}
+                        </h3>
+                        <p className="text-xs text-[#8f8298] dark:text-[#7f7188] truncate mt-0.5">
+                          {grupo.cpf && `CPF: ${grupo.cpf}`}
+                          {grupo.cpf && grupo.matricula && ' · '}
+                          {grupo.matricula && `Matrícula: ${grupo.matricula}`}
+                          {!grupo.cpf && !grupo.matricula && 'Colaborador identificado'}
                         </p>
-                      )}
+                      </div>
                     </div>
-
-                    <div className="shrink-0 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setPreviewDoc(doc)
-                        }}
-                        title="Visualizar documento"
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Visualizar</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDownload(e, doc)}
-                        disabled={downloadingId === doc.id}
-                        title="Baixar PDF com nome padronizado"
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#4b3e56] dark:text-[#d5c7df] border border-[#e6dce9] dark:border-[#382343] hover:bg-[#ebe2f0] dark:hover:bg-[#32203d] transition-colors cursor-pointer disabled:opacity-50"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>{downloadingId === doc.id ? 'Baixando...' : 'Baixar PDF'}</span>
-                      </button>
-
-                      {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
-                      {isFolhaPonto && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openAudit()
-                          }}
-                          title="Abrir auditoria da folha de ponto"
-                          className="shrink-0 inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95] group-hover:bg-[#6c2c91] group-hover:text-white group-hover:border-[#6c2c91] hover:bg-[#6c2c91] hover:text-white hover:border-[#6c2c91] dark:group-hover:bg-[#7e22ce] dark:group-hover:text-white dark:group-hover:border-[#7e22ce] shadow-2xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
-                        >
-                          <ClipboardCheck className="w-4 h-4 shrink-0" />
-                          <span>Ver auditoria</span>
-                          <ChevronRight className="w-3.5 h-3.5 opacity-70" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#a093a8] mt-0.5">
-                  {doc.personName} · {doc.pages} página{doc.pages > 1 ? 's' : ''} · Processado em {doc.processedDate} · Confiança {Math.round(doc.confidence * 100)}%
-                </p>
-
-                {/* Metadata Badges / Tags */}
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  {Object.entries(doc.campos || {})
-                    .filter(([k, v]) => k !== 'nome' && k !== 'distingue_prestadora' && v)
-                    .map(([key, value]) => (
-                      <span
-                        key={key}
-                        className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]"
-                      >
-                        {campoLabels[key] || key}: {value}
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95]">
+                        {grupo.docs.length} documento{grupo.docs.length !== 1 ? 's' : ''}
                       </span>
-                    ))}
-                  {!doc.campos && doc.metadata.registrationNumber && (
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
-                      Nº de registro: {doc.metadata.registrationNumber}
-                    </span>
-                  )}
-                  {!doc.campos && doc.metadata.categoryType && (
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
-                      Categoria: {doc.metadata.categoryType}
-                    </span>
-                  )}
-                  {!doc.campos && doc.metadata.expirationDate && (
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
-                      Validade: {doc.metadata.expirationDate}
-                    </span>
-                  )}
-                  {!doc.campos && doc.metadata.cpfNumber && (
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
-                      CPF: {doc.metadata.cpfNumber}
-                    </span>
-                  )}
-                  {!doc.campos && doc.metadata.rgNumber && (
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
-                      RG: {doc.metadata.rgNumber}
-                    </span>
-                  )}
-                  {!doc.campos && doc.metadata.address && (
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]">
-                      Endereço: {doc.metadata.address}
-                    </span>
+                      <ChevronDown
+                        className={`w-4 h-4 text-[#8f8298] transition-transform duration-200 ${
+                          isCollapsed ? '-rotate-90' : 'rotate-0'
+                        }`}
+                      />
+                    </div>
+                  </button>
+
+                  {!isCollapsed && (
+                    <div className="p-3 sm:p-4 pt-0 space-y-3 border-t border-[#ebe5ef]/60 dark:border-[#2f1e39]/60">
+                      {grupo.docs.map(renderDocumentCard)}
+                    </div>
                   )}
                 </div>
-              </div>
-            </div>
-            )
-          })
+              )
+            })}
+          </div>
+        ) : (
+          /* MODO 3: Agrupado por Competência / Mês */
+          <div className="space-y-4">
+            {gruposCompetencias.map((grupo) => {
+              const isCollapsed = collapsedGroups[grupo.chave] ?? false
+              return (
+                <div
+                  key={grupo.chave}
+                  className="rounded-2xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white/70 dark:bg-[#1a1120]/70 overflow-hidden shadow-2xs transition-all"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(grupo.chave)}
+                    className="w-full p-4 sm:p-5 flex items-center justify-between gap-3 text-left hover:bg-[#f8f5fa] dark:hover:bg-[#201428] transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#9333ea] to-[#c026d3] text-white font-bold flex items-center justify-center shadow-xs shrink-0">
+                        <Calendar className="w-5 h-5 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-bold text-[#2d0a33] dark:text-[#f8f5fc] truncate">
+                          {grupo.titulo}
+                        </h3>
+                        <p className="text-xs text-[#8f8298] dark:text-[#7f7188] truncate mt-0.5">
+                          {grupo.chave !== 'Outros / Sem data'
+                            ? `Competência: ${grupo.chave}`
+                            : 'Documentos sem data formal'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95]">
+                        {grupo.docs.length} documento{grupo.docs.length !== 1 ? 's' : ''}
+                      </span>
+                      <ChevronDown
+                        className={`w-4 h-4 text-[#8f8298] transition-transform duration-200 ${
+                          isCollapsed ? '-rotate-90' : 'rotate-0'
+                        }`}
+                      />
+                    </div>
+                  </button>
+
+                  {!isCollapsed && (
+                    <div className="p-3 sm:p-4 pt-0 space-y-3 border-t border-[#ebe5ef]/60 dark:border-[#2f1e39]/60">
+                      {grupo.docs.map(renderDocumentCard)}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
 
