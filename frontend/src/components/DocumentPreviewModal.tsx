@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Download, FileText, X, ZoomIn } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, FileText, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { downloadDocumento, fetchPageImage } from '../services/api'
 import type { DetailedDocument } from '../types'
 
@@ -82,12 +82,18 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [zoom, setZoom] = useState(1)
 
   const currentPage = startPage + pageOffset
 
   useEffect(() => {
     setPageOffset(0)
+    setZoom(1)
   }, [doc.id])
+
+  useEffect(() => {
+    setZoom(1)
+  }, [pageOffset])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -165,6 +171,38 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
           </div>
 
           <div className="shrink-0 flex items-center gap-2">
+            {/* Controles de Lupa / Zoom */}
+            <div className="hidden sm:inline-flex items-center rounded-xl border border-[#e6dce9] dark:border-[#382343] bg-[#f6f2f8] dark:bg-[#25172d] p-0.5">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.max(1, Number((z - 0.5).toFixed(1))))}
+                disabled={zoom <= 1}
+                title="Diminuir zoom"
+                aria-label="Diminuir zoom"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#4b3e56] dark:text-[#d5c7df] hover:bg-white dark:hover:bg-[#32203d] disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoom(1)}
+                title="Resetar zoom (100%)"
+                className="px-2 h-8 text-[11px] font-semibold text-[#4b3e56] dark:text-[#d5c7df] hover:bg-white dark:hover:bg-[#32203d] rounded-lg transition-colors cursor-pointer"
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(2.5, Number((z + 0.5).toFixed(1))))}
+                disabled={zoom >= 2.5}
+                title="Aumentar zoom (lupa)"
+                aria-label="Aumentar zoom"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#4b3e56] dark:text-[#d5c7df] hover:bg-white dark:hover:bg-[#32203d] disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={handleDownload}
@@ -186,7 +224,11 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
         </div>
 
         {/* Image Area */}
-        <div className="flex-1 overflow-auto bg-[#f6f2f8] dark:bg-[#120b17] p-4 flex items-center justify-center min-h-[360px]">
+        <div
+          className={`flex-1 overflow-auto bg-[#f6f2f8] dark:bg-[#120b17] p-4 flex min-h-[360px] ${
+            zoom > 1 ? 'items-start justify-start' : 'items-center justify-center'
+          }`}
+        >
           {loading ? (
             <p className="text-sm text-[#6e6378] dark:text-[#a093a8]">Carregando visualização...</p>
           ) : error || !src ? (
@@ -197,7 +239,14 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
             <img
               src={src}
               alt={`${doc.filename} - página ${pageOffset + 1}`}
-              className="max-w-full max-h-[70vh] rounded-lg shadow-md border border-[#e6dce9] dark:border-[#2f1e39] bg-white"
+              onClick={() => setZoom((z) => (z > 1 ? 1 : 2))}
+              title={zoom > 1 ? 'Clique para reduzir' : 'Clique para ampliar com a lupa'}
+              style={zoom > 1 ? { width: `${zoom * 100}%`, maxWidth: 'none' } : undefined}
+              className={`rounded-lg shadow-md border border-[#e6dce9] dark:border-[#2f1e39] bg-white transition-all ${
+                zoom > 1
+                  ? 'cursor-zoom-out'
+                  : 'max-w-full max-h-[70vh] cursor-zoom-in'
+              }`}
             />
           )}
         </div>
@@ -232,3 +281,4 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
     </div>
   )
 }
+
