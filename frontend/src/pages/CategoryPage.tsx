@@ -219,7 +219,6 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
             </p>
           </div>
         ) : (
-<<<<<<< HEAD
           filteredDocuments.map((doc) => {
             const isFolhaPonto = category.id === 'folha_ponto'
             const openAudit = () =>
