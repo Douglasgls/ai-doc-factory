@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronDown, FileText } from 'lucide-react'
+import { Search, ChevronLeft, ChevronDown, FileText, ClipboardCheck, ChevronRight } from 'lucide-react'
 import type { DocumentCategory, DetailedDocument } from '../types'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
 
@@ -215,11 +215,14 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                   {/* Status de Auditoria (Integração com Goal 6 do Backend) */}
                   {category.id === 'folha_ponto' && (
                     <button
+                      type="button"
                       onClick={() => setAuditDoc({ id: Number(doc.id), filename: doc.filename })}
-                      className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold bg-[#f3e8ff] dark:bg-[#2e1065] text-[#7e22ce] dark:text-[#d8b4fe] border border-[#e9d5ff] dark:border-[#4c1d95] hover:bg-[#e9d5ff] transition-colors"
+                      title="Abrir auditoria da folha de ponto"
+                      className="shrink-0 inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#f6effb] dark:bg-[#2b1738] text-[#6c2c91] dark:text-[#d8b4fe] border border-[#e3d2f0] dark:border-[#4c1d95] hover:bg-[#6c2c91] hover:text-white hover:border-[#6c2c91] dark:hover:bg-[#7e22ce] dark:hover:text-white dark:hover:border-[#7e22ce] shadow-2xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6c2c91]/40"
                     >
-                      <Search className="w-3 h-3" />
-                      Auditoria
+                      <ClipboardCheck className="w-4 h-4 shrink-0" />
+                      <span>Ver auditoria</span>
+                      <ChevronRight className="w-3.5 h-3.5 opacity-70" />
                     </button>
                   )}
                 </div>
