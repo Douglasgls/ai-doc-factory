@@ -43,3 +43,14 @@ def obter_documento(documento_id: int):
 def analise_ponto(documento_id: int):
     """Apoio à auditoria, não parecer jurídico; convenção coletiva e acordo de compensação podem alterar os limites."""
     return actions.obter_analise_ponto(documento_id)
+
+
+@router.get("/documentos/{documento_id}/download")
+def download_documento(documento_id: int):
+    """Baixa o PDF recortado do documento com o nome padronizado."""
+    pdf_bytes, nome_arquivo = actions.download_documento(documento_id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )

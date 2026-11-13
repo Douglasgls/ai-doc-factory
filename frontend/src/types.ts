@@ -23,6 +23,7 @@ export interface DetailedDocument {
   id: string
   loteId?: number
   filename: string
+  originalFilename?: string
   category: string
   estado?: string
   personName: string

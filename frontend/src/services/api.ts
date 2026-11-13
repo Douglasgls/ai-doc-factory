@@ -41,6 +41,26 @@ export const fetchPageImage = async (loteId: number, pagina: number, signal?: Ab
   return response.blob();
 };
 
+/** Baixa o PDF recortado do documento com o nome padronizado. */
+export const downloadDocumento = async (documentoId: number, fallbackFilename: string): Promise<void> => {
+  const response = await authFetch(`/documentos/${documentoId}/download`);
+  if (!response.ok) {
+    throw new Error('Falha ao baixar documento');
+  }
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const filename = match?.[1] || fallbackFilename;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export interface LoginResponse {
   access_token: string;
   token_type: string;
@@ -97,6 +117,7 @@ export interface DocumentoResponse {
   campos?: Record<string, string>;
   pessoa?: string | null;
   nome_arquivo?: string;
+  nome_original?: string;
   n_paginas?: number;
   processado_em?: string;
   paginas: { numero: number; imagem_url?: string; texto_ocr?: string | null }[];
