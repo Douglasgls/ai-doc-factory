@@ -8,9 +8,11 @@ import psycopg
 import pytest
 import redis
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from app import analise, classificar, config, extracao
 from app.api import app
+from app.database import SessionLocal, get_engine
 from app.eventos import (
     limpar_cancelado,
     limpar_tarefas_pos,
@@ -147,38 +149,42 @@ def test_c_revisao_humana_depois_do_cancelar_enfileira_e_handlers_nao_sao_barrad
     assert _estados(lote_id) == ("concluido", 0, ["revisado", "revisado"])
 
 
-class _ConnAtrasada:
-    """Proxy de conexão: atrasa (ou quebra) em certos comandos SQL, para abrir a janela da corrida."""
+_OUVINTES: list = []
 
-    def __init__(self, real, atraso_apos: str | None, atraso: float, falha_em: str | None):
-        self._real, self._apos, self._atraso, self._falha = real, atraso_apos, atraso, falha_em
 
-    def execute(self, sql, *a, **k):
-        if self._falha and sql.lstrip().startswith(self._falha):
+def _conn_proxy(monkeypatch, modulo=None, apos=None, atraso=0.0, falha_em=None):
+    """Atrasa (ou quebra) em certos comandos SQL do engine do SQLAlchemy, para abrir a janela da corrida.
+    Os ouvintes saem no fim do teste (fixture `_sem_ouvintes`) ou em `_desligar_proxy()`."""
+    engine = get_engine()
+
+    def antes(conn, cursor, statement, parameters, context, executemany):
+        if falha_em and statement.lstrip().startswith(falha_em):
             raise psycopg.OperationalError("falha injetada no banco")
-        res = self._real.execute(sql, *a, **k)
-        if self._apos and sql.lstrip().startswith(self._apos):
-            time.sleep(self._atraso)
-        return res
 
-    def __enter__(self):
-        self._real.__enter__()
-        return self
-
-    def __exit__(self, *exc):
-        return self._real.__exit__(*exc)
-
-    def __getattr__(self, nome):
-        return getattr(self._real, nome)
+    def depois(conn, cursor, statement, parameters, context, executemany):
+        if apos and statement.lstrip().startswith(apos):
+            time.sleep(atraso)
+    event.listen(engine, "before_cursor_execute", antes)
+    event.listen(engine, "after_cursor_execute", depois)
+    _OUVINTES.extend([(engine, "before_cursor_execute", antes), (engine, "after_cursor_execute", depois)])
 
 
-def _conn_proxy(monkeypatch, modulo, apos=None, atraso=0.0, falha_em=None):
-    real = psycopg.connect
+def _desligar_proxy():
+    while _OUVINTES:
+        engine, nome, fn = _OUVINTES.pop()
+        event.remove(engine, nome, fn)
 
-    class Falso:
-        connect = staticmethod(lambda *a, **k: _ConnAtrasada(real(*a, **k), apos, atraso, falha_em))
-        OperationalError = psycopg.OperationalError
-    monkeypatch.setattr(modulo, "psycopg", Falso)
+
+@pytest.fixture(autouse=True)
+def _sem_ouvintes():
+    yield
+    _desligar_proxy()
+
+
+def _cancelar(lote_id: int) -> dict:
+    """A action numa sessão própria, como na requisição (cada thread da corrida tem a sua)."""
+    with SessionLocal() as sessao:
+        return lotes_actions.cancelar_lote(sessao, lote_id)
 
 
 def _correr(alvos: list, intervalo: float = 0.25) -> list[BaseException]:
@@ -207,7 +213,7 @@ def test_d_corrida_classificador_primeiro(novo_lote, monkeypatch):
         return original(conn, lid)
     monkeypatch.setattr(classificar, "_fan_in", fan_in_lento)
     erros = _correr([lambda: classificar.classificar_documento({"documento_id": d1}),
-                     lambda: lotes_actions.cancelar_lote(lote_id)])
+                     lambda: _cancelar(lote_id)])
     assert erros == []
     estado, pendentes, docs = _estados(lote_id)
     assert (estado, pendentes) == ("erro", 0)
@@ -218,7 +224,7 @@ def test_d_corrida_classificador_primeiro(novo_lote, monkeypatch):
 def test_d_corrida_cancelar_primeiro(novo_lote, monkeypatch):
     lote_id, (d1, d2) = novo_lote("classificando", 2, [("segmentado", None), ("segmentado", None)])
     _conn_proxy(monkeypatch, lotes_actions, apos="UPDATE documento", atraso=0.8)
-    erros = _correr([lambda: lotes_actions.cancelar_lote(lote_id),
+    erros = _correr([lambda: _cancelar(lote_id),
                      lambda: classificar.classificar_documento({"documento_id": d1})])
     assert erros == []
     # o job em voo perdeu a corrida: não classifica, não decrementa, não reabre o lote
@@ -231,7 +237,7 @@ def test_d_corrida_cancelar_primeiro(novo_lote, monkeypatch):
 def test_d_dois_cliques_simultaneos(novo_lote, monkeypatch):
     lote_id, _ = novo_lote("classificando", 1, [("classificado", "holerite"), ("segmentado", None)])
     _conn_proxy(monkeypatch, lotes_actions, apos="UPDATE documento", atraso=0.5)
-    erros = _correr([lambda: lotes_actions.cancelar_lote(lote_id)] * 2, intervalo=0.1)
+    erros = _correr([lambda: _cancelar(lote_id)] * 2, intervalo=0.1)
     assert erros == []
     assert _estados(lote_id) == ("erro", 0, ["classificado", "erro"])
 
@@ -241,11 +247,11 @@ def test_e_falha_do_banco_nao_grava_flag_nem_limpa_tarefas(novo_lote, monkeypatc
     registrar_tarefas_pos(lote_id, ["extracao:1"], r)
     _conn_proxy(monkeypatch, lotes_actions, falha_em="UPDATE lote")
     with pytest.raises(psycopg.OperationalError):
-        lotes_actions.cancelar_lote(lote_id)
+        _cancelar(lote_id)
     assert not lote_cancelado(lote_id, r)
     assert tarefas_pos_pendentes(lote_id, r) == {"extracao:1"}
     assert obter_progresso_lote(lote_id, r)[0] is None
-    monkeypatch.undo()
+    _desligar_proxy()
     assert _estados(lote_id) == ("classificando", 1, ["segmentado"])  # rollback do UPDATE de documento
 
 

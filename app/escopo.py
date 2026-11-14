@@ -148,7 +148,7 @@ def exigir_documento_no_escopo(session: Session, usuario: UsuarioContexto, docum
         raise HTTPException(404, "documento não encontrado")
 
 
-def exigir_contrato_de_upload(conn, usuario: UsuarioContexto, contrato_id: int | None) -> None:
+def exigir_contrato_de_upload(session: Session, usuario: UsuarioContexto, contrato_id: int | None) -> None:
     """Prestador: contrato_id obrigatório (422) e tem que ser um contrato seu ativo (404). Plataforma: sem exigência
     aqui (a validação de existência/atividade é a de sempre). Tomador não chega aqui (403 antes)."""
     if usuario.nivel == "plataforma":
@@ -156,11 +156,10 @@ def exigir_contrato_de_upload(conn, usuario: UsuarioContexto, contrato_id: int |
     _checar_escrita(usuario, True)
     if contrato_id is None:
         raise HTTPException(422, "contrato_id é obrigatório para o upload")
-    cond, args = condicao_contrato(usuario)
-    if not _id_valido(contrato_id) or conn.execute(
-            "SELECT 1 FROM contrato c JOIN tomador t ON t.id = c.tomador_id "
-            f"JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s AND {cond}",
-            [contrato_id, *args]).fetchone() is None:
+    if not _id_valido(contrato_id) or session.execute(
+            select(Contrato.id).join(Tomador, Tomador.id == Contrato.tomador_id)
+            .join(Prestador, Prestador.id == Contrato.prestador_id)
+            .where(Contrato.id == contrato_id, filtro_contrato(usuario))).first() is None:
         raise HTTPException(404, f"contrato {contrato_id} não encontrado")
 
 

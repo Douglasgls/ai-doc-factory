@@ -169,7 +169,7 @@ def test_saude_e_tipos():
     assert [t["slug"] for t in tipos] == list(config.TIPOS_INFO)
 
 
-def test_upload_de_lote():
+def test_upload_de_lote(sessao):
     pdf = b"%PDF-1.4 " + uuid.uuid4().hex.encode()
     r = client.post("/lotes", files={"arquivo": ("a.pdf", pdf, "application/pdf")})
     assert r.status_code == 200, r.text
@@ -180,23 +180,23 @@ def test_upload_de_lote():
         r2 = client.post("/lotes", files={"arquivo": ("a.pdf", pdf, "application/pdf")})
         assert r2.json()["existente"] is True and r2.json()["lote_id"] == lote
         assert "reprocessando" not in r2.json()  # chave condicional: ausente fora do reenvio de lote em erro
-        _confere_resposta("POST /lotes", r2, lote_actions.criar_lote(pdf, pdf, "a.pdf"), LoteCriadoOut)
+        _confere_resposta("POST /lotes", r2, lote_actions.criar_lote(sessao, pdf, pdf, "a.pdf"), LoteCriadoOut)
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
-def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch):
+def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch, sessao):
     monkeypatch.setattr(lote_actions, "enfileirar", lambda *a, **k: None)
     pdf = b"%PDF-1.4 " + uuid.uuid4().hex.encode()
-    lote = lote_actions.criar_lote(pdf, pdf, "e.pdf")["lote_id"]
+    lote = lote_actions.criar_lote(sessao, pdf, pdf, "e.pdf")["lote_id"]
 
     def em_erro():
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("UPDATE lote SET estado = 'erro' WHERE id = %s", (lote,))
     try:
         em_erro()
-        esperado = lote_actions.criar_lote(pdf, pdf, "e.pdf")  # a action reprocessa e devolve reprocessando
+        esperado = lote_actions.criar_lote(sessao, pdf, pdf, "e.pdf")  # a action reprocessa e devolve reprocessando
         assert esperado["reprocessando"] is True
         em_erro()
         r = client.post("/lotes", files={"arquivo": ("e.pdf", pdf, "application/pdf")})
@@ -208,11 +208,11 @@ def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch):
             conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
-def test_lote_com_e_sem_eventos(cenario, limpar_eventos):
+def test_lote_com_e_sem_eventos(cenario, limpar_eventos, sessao):
     lote, ids = cenario
     limpar_eventos.append(lote)
     redis_cliente.delete(eventos._chave_progresso(lote), eventos._chave_historico(lote))
-    sem = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(lote))
+    sem = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
     assert sem["ultimo_evento"] is None and sem["historico_eventos"] == []
 
     eventos.publicar_evento(lote, "ocr", "Lendo OCR", r=redis_cliente, pagina_atual=1, total_paginas=3)
@@ -220,15 +220,15 @@ def test_lote_com_e_sem_eventos(cenario, limpar_eventos):
                             estado_documento="classificado", docs_pendentes=2, total_documentos=5)
     eventos.publicar_evento(lote, "concluido", "Pronto", r=redis_cliente, segmentacao_ambigua=False,
                             extra_desconhecido="preservado")  # chave fora do schema não pode sumir
-    com = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(lote))
+    com = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
     assert [e["etapa"] for e in com["historico_eventos"]] == ["ocr", "classificando", "concluido"]
     assert com["ultimo_evento"]["etapa"] == "concluido" and com["ultimo_evento"]["extra_desconhecido"] == "preservado"
     assert com["historico_eventos"][0]["pagina_atual"] == 1 and "docs_pendentes" not in com["historico_eventos"][0]
 
 
-def test_lote_busca_documentos(cenario):
+def test_lote_busca_documentos(cenario, sessao):
     lote, ids = cenario
-    corpo = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(lote))
+    corpo = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
     assert [d["id"] for d in corpo["documentos"]] == ids
     assert corpo["documentos"][-1]["confianca"] is None  # segmentado: nulos preservados
 
