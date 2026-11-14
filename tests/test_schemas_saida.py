@@ -419,7 +419,7 @@ def test_auth_login_e_me(auth_real, sessao):
             conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
 
 
-def test_convites(auth_real):
+def test_convites(auth_real, sessao):
     import time
 
     import jwt
@@ -434,12 +434,12 @@ def test_convites(auth_real):
         r = client.post("/convites", headers=h, json={"email": email, "nivel": "plataforma", "papel": "membro"})
         assert r.status_code == 201
         token = r.json()["token"]
-        listado = next(c for c in conv_actions.listar(PLATAFORMA) if c["id"] == r.json()["id"])
+        listado = next(c for c in conv_actions.listar(sessao, PLATAFORMA) if c["id"] == r.json()["id"])
         crua = {k: listado[k] for k in ("id", "email", "nivel", "papel", "expira_em")} | {"token": token}
         _confere_resposta("POST /convites", r, crua, ConviteCriadoOut, status=201)
-        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(PLATAFORMA), ConviteOut)
+        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(sessao, PLATAFORMA), ConviteOut)
         r = client.get(f"/convites/{token}")
-        _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(token), ConvitePublicoOut)
+        _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(sessao, token), ConvitePublicoOut)
         r = client.post(f"/convites/{token}/aceitar", json={"nome": "Pessoa Schemas", "senha": "senha-de-teste-schemas"})
         contexto = auth_actions.UsuarioContexto(id=0, email=email, nome="x", nivel="plataforma", papel="membro",
                                                 tomador_id=None, prestador_id=None)

@@ -9,11 +9,11 @@ declaram a dependência (por rota) ou passam o usuário às listagens.
 Listagens filtram na consulta SQL (`condicao_lote`, `condicao_contrato`); recurso por id passa pelas dependências
 `lote_para_leitura`/`lote_para_escrita`/`documento_para_leitura`/`documento_para_escrita`."""
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import ColumnElement, and_, false, select, true
+from sqlalchemy import ColumnElement, and_, exists, false, func, select, true
 from sqlalchemy.orm import Session, aliased
 
 from app.database import get_session
-from app.models import Contrato, Documento, Lote, Prestador, Tomador
+from app.models import Contrato, Convite, Documento, Lote, Prestador, Tomador, Usuario
 from app.routers.auth.actions import ID_MAX, UsuarioContexto, exigir_plataforma, exigir_usuario  # noqa: F401
 
 METODOS_LEITURA = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -65,16 +65,18 @@ _PRESTADOR_COM_CONVITE_PENDENTE = "já há convite pendente para este prestador"
 _NEGADO_CONVITE = "sem permissão para criar este convite"
 
 
-def prestador_tem_usuario_ativo(conn, prestador_id: int) -> bool:
-    return conn.execute("SELECT 1 FROM usuario WHERE prestador_id = %s AND ativo", (prestador_id,)).fetchone() is not None
+def prestador_tem_usuario_ativo(session: Session, prestador_id: int) -> bool:
+    return session.execute(select(1).where(exists().where(Usuario.prestador_id == prestador_id, Usuario.ativo))
+                           ).first() is not None
 
 
-def prestador_tem_convite_pendente(conn, prestador_id: int) -> bool:
-    return conn.execute("SELECT 1 FROM convite WHERE prestador_id = %s AND usado_em IS NULL AND expira_em > now()",
-                        (prestador_id,)).fetchone() is not None
+def prestador_tem_convite_pendente(session: Session, prestador_id: int) -> bool:
+    return session.execute(select(1).where(exists().where(
+        Convite.prestador_id == prestador_id, Convite.usado_em.is_(None), Convite.expira_em > func.now()))
+    ).first() is not None
 
 
-def motivo_recusa_convite(conn, usuario: UsuarioContexto, nivel: str, papel: str,
+def motivo_recusa_convite(session: Session, usuario: UsuarioContexto, nivel: str, papel: str,
                           tomador_id: int | None, prestador_id: int | None) -> str | None:
     """Único lugar que decide quem pode convidar quem. None = permitido; senão, o motivo da recusa (403).
 
@@ -93,17 +95,19 @@ def motivo_recusa_convite(conn, usuario: UsuarioContexto, nivel: str, papel: str
         if nivel == "tomador":
             return None if tomador_id == usuario.tomador_id else _NEGADO_CONVITE
         if nivel == "prestador" and papel == "admin" and prestador_id is not None:
-            if conn.execute("SELECT 1 FROM contrato c JOIN tomador t ON t.id = c.tomador_id "
-                            "JOIN prestador p ON p.id = c.prestador_id "
-                            "WHERE c.tomador_id = %s AND c.prestador_id = %s AND c.ativo AND t.ativo AND p.ativo",
-                            (usuario.tomador_id, prestador_id)).fetchone() is None:
+            if session.execute(
+                    select(1).select_from(Contrato).join(Tomador, Tomador.id == Contrato.tomador_id)
+                    .join(Prestador, Prestador.id == Contrato.prestador_id)
+                    .where(Contrato.tomador_id == usuario.tomador_id, Contrato.prestador_id == prestador_id,
+                           Contrato.ativo, Tomador.ativo, Prestador.ativo)).first() is None:
                 return _NEGADO_CONVITE
-            if prestador_tem_usuario_ativo(conn, prestador_id):
+            if prestador_tem_usuario_ativo(session, prestador_id):
                 return _PRESTADOR_JA_TEM_ACESSO
-            if conn.execute(
-                    "SELECT 1 FROM convite c LEFT JOIN usuario u ON u.id = c.criado_por "
-                    "WHERE c.prestador_id = %s AND c.usado_em IS NULL AND c.expira_em > now() "
-                    "AND u.tomador_id IS DISTINCT FROM %s", (prestador_id, usuario.tomador_id)).fetchone():
+            if session.execute(
+                    select(1).select_from(Convite).outerjoin(Usuario, Usuario.id == Convite.criado_por)
+                    .where(Convite.prestador_id == prestador_id, Convite.usado_em.is_(None),
+                           Convite.expira_em > func.now(),
+                           Usuario.tomador_id.is_distinct_from(usuario.tomador_id))).first():
                 return _PRESTADOR_COM_CONVITE_PENDENTE
             return None
         return _NEGADO_CONVITE
@@ -112,9 +116,9 @@ def motivo_recusa_convite(conn, usuario: UsuarioContexto, nivel: str, papel: str
     return _NEGADO_CONVITE
 
 
-def pode_convidar(conn, usuario: UsuarioContexto, nivel: str, papel: str,
+def pode_convidar(session: Session, usuario: UsuarioContexto, nivel: str, papel: str,
                   tomador_id: int | None, prestador_id: int | None) -> bool:
-    return motivo_recusa_convite(conn, usuario, nivel, papel, tomador_id, prestador_id) is None
+    return motivo_recusa_convite(session, usuario, nivel, papel, tomador_id, prestador_id) is None
 
 
 def _id_valido(id_: int) -> bool:
