@@ -452,7 +452,7 @@ def test_convites(auth_real):
             conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
 
 
-def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch):
+def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch, sessao):
     sufixo = uuid.uuid4().hex[:8]
     email_plat, email_conv = f"schemas-plat-{sufixo}@exemplo.invalid", f"schemas-terc-{sufixo}@exemplo.invalid"
     tomador = orgs.tomador()
@@ -474,7 +474,7 @@ def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch):
         corpo = _confere_resposta("POST /terceirizadas", r, gravado[0], TerceirizadaOut, status=201)
         assert corpo["acesso"] == "convite_criado" and corpo["convite"]["token"]
         r = client.get("/usuarios", headers=h)
-        _confere_resposta("GET /usuarios", r, usu_actions.listar(auth_actions.UsuarioContexto(
+        _confere_resposta("GET /usuarios", r, usu_actions.listar(sessao, auth_actions.UsuarioContexto(
             id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
             prestador_id=None)), UsuarioListadoOut)
         assert "senha_hash" not in r.text and uid in [u["id"] for u in r.json()]
