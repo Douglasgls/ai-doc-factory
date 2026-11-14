@@ -6,24 +6,26 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
-import psycopg
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import func, select, true, update
+from sqlalchemy.orm import Session
 
 from app import config, senhas
+from app.database import get_session
+from app.models import Prestador, Tomador, Usuario
 
 ALGORITMO = "HS256"
 bearer = HTTPBearer(auto_error=False, description="Token obtido em POST /auth/login")
 ID_MAX = 2 ** 63 - 1  # BIGINT
 
-# Colunas lidas do usuário e do estado da organização (sem organização, conta como ativa).
-_SELECT_USUARIO = """
-    SELECT u.id, u.email, u.nome, u.senha_hash, u.nivel, u.papel, u.tomador_id, u.prestador_id, u.ativo,
-           COALESCE(t.ativo, p.ativo, true) AS organizacao_ativa
-      FROM usuario u
-      LEFT JOIN tomador t ON t.id = u.tomador_id
-      LEFT JOIN prestador p ON p.id = u.prestador_id
-"""
+
+
+def _consulta_usuario():
+    """Usuário e o estado da organização (sem organização, conta como ativa)."""
+    return (select(Usuario, func.coalesce(Tomador.ativo, Prestador.ativo, true()).label("organizacao_ativa"))
+            .outerjoin(Tomador, Tomador.id == Usuario.tomador_id)
+            .outerjoin(Prestador, Prestador.id == Usuario.prestador_id))
 
 
 @dataclass(frozen=True)
@@ -52,26 +54,27 @@ def _hash_ficticio() -> str:
     return senhas.gerar_hash("senha-ficticia-sem-uso")
 
 
-def _contexto(linha) -> UsuarioContexto:
-    return UsuarioContexto(id=linha[0], email=linha[1], nome=linha[2], nivel=linha[4], papel=linha[5],
-                           tomador_id=linha[6], prestador_id=linha[7])
+def _contexto(u: Usuario) -> UsuarioContexto:
+    return UsuarioContexto(id=u.id, email=u.email, nome=u.nome, nivel=u.nivel, papel=u.papel,
+                           tomador_id=u.tomador_id, prestador_id=u.prestador_id)
 
 
-def login(identificador: str, senha: str) -> dict:
+def login(session: Session, identificador: str, senha: str) -> dict:
     _exigir_configuracao()
     email = identificador.strip().lower()
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        linha = conn.execute(_SELECT_USUARIO + " WHERE lower(u.email) = %s", (email,)).fetchone()
-        # Sempre roda uma verificação de hash (a real ou a fictícia): o tempo não revela se o e-mail existe.
-        hash_gravado = linha[3] if linha else None
-        senha_ok = senhas.verificar(senha, hash_gravado or _hash_ficticio())
-        if not (linha and hash_gravado and senha_ok and linha[8] and linha[9]):
-            raise _nao_autorizado("usuário ou senha inválidos")
-        if senhas.precisa_rehash(hash_gravado):
-            # Condição no hash antigo: não sobrescreve uma troca de senha feita no meio do caminho.
-            conn.execute("UPDATE usuario SET senha_hash = %s WHERE id = %s AND senha_hash = %s",
-                         (senhas.gerar_hash(senha), linha[0], hash_gravado))
-    return emitir_token(_contexto(linha))
+    linha = session.execute(_consulta_usuario().where(func.lower(Usuario.email) == email)).first()
+    usuario = linha[0] if linha else None
+    # Sempre roda uma verificação de hash (a real ou a fictícia): o tempo não revela se o e-mail existe.
+    hash_gravado = usuario.senha_hash if usuario else None
+    senha_ok = senhas.verificar(senha, hash_gravado or _hash_ficticio())
+    if not (usuario and hash_gravado and senha_ok and usuario.ativo and linha[1]):
+        raise _nao_autorizado("usuário ou senha inválidos")
+    if senhas.precisa_rehash(hash_gravado):
+        # Condição no hash antigo: não sobrescreve uma troca de senha feita no meio do caminho.
+        session.execute(update(Usuario).where(Usuario.id == usuario.id, Usuario.senha_hash == hash_gravado)
+                        .values(senha_hash=senhas.gerar_hash(senha)).execution_options(synchronize_session=False))
+        session.commit()
+    return emitir_token(_contexto(usuario))
 
 
 def emitir_token(usuario: UsuarioContexto) -> dict:
@@ -86,7 +89,8 @@ def emitir_token(usuario: UsuarioContexto) -> dict:
     return {"access_token": token, "token_type": "bearer", "expira_em": expira.isoformat()}
 
 
-def exigir_usuario(credenciais: HTTPAuthorizationCredentials | None = Depends(bearer)) -> UsuarioContexto:
+def exigir_usuario(credenciais: HTTPAuthorizationCredentials | None = Depends(bearer),
+                   session: Session = Depends(get_session)) -> UsuarioContexto:
     """Valida o token e devolve o usuário como está AGORA no banco; recusa se sumiu ou foi desativado."""
     _exigir_configuracao()
     negado = _nao_autorizado("não autenticado")
@@ -101,11 +105,13 @@ def exigir_usuario(credenciais: HTTPAuthorizationCredentials | None = Depends(be
     # Formato antigo (sub = nome do admin) e qualquer sub que não seja um id numérico caem aqui.
     if not isinstance(sub, str) or not sub.isascii() or not sub.isdigit() or int(sub) > ID_MAX:
         raise negado
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        linha = conn.execute(_SELECT_USUARIO + " WHERE u.id = %s", (int(sub),)).fetchone()
-    if linha is None or not linha[8] or not linha[9]:
+    linha = session.execute(_consulta_usuario().where(Usuario.id == int(sub))).first()
+    # Libera a conexão já aqui: a leitura do usuário é uma transação própria, como antes, e nenhuma conexão
+    # fica presa (por exemplo, durante um stream SSE) até o fim da requisição.
+    session.commit()
+    if linha is None or not linha[0].ativo or not linha[1]:
         raise negado
-    return _contexto(linha)
+    return _contexto(linha[0])
 
 
 def exigir_plataforma(usuario: UsuarioContexto = Depends(exigir_usuario)) -> UsuarioContexto:

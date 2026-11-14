@@ -397,7 +397,7 @@ def test_organizacoes(orgs):
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
 
-def test_auth_login_e_me(auth_real):
+def test_auth_login_e_me(auth_real, sessao):
     email = f"schemas-{uuid.uuid4().hex[:8]}@exemplo.invalid"
     senha = "senha-de-teste-schemas"
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
@@ -406,11 +406,11 @@ def test_auth_login_e_me(auth_real):
             "'plataforma', 'admin') RETURNING id", (email, senhas.gerar_hash(senha, n=2 ** 10, r=8, p=1))).fetchone()[0]
     try:
         r = client.post("/auth/login", json={"usuario": email, "senha": senha})
-        corpo = _confere_resposta("POST /auth/login", r, auth_actions.login(email, senha), TokenOut,
+        corpo = _confere_resposta("POST /auth/login", r, auth_actions.login(sessao, email, senha), TokenOut,
                                   ignorar=("access_token", "expira_em"))  # token e expiração mudam a cada chamada
         assert corpo["access_token"] and corpo["expira_em"]
         token = corpo["access_token"]
-        contexto = auth_actions.exigir_usuario(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
+        contexto = auth_actions.exigir_usuario(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token), sessao)
         r = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         corpo = _confere_resposta("GET /auth/me", r, {**asdict(contexto), "usuario": contexto.email}, UsuarioOut)
         assert corpo["id"] == uid and corpo["usuario"] == email and corpo["nivel"] == "plataforma"

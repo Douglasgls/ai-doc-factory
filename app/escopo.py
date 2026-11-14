@@ -8,14 +8,36 @@ declaram a dependência (por rota) ou passam o usuário às listagens.
 
 Listagens filtram na consulta SQL (`condicao_lote`, `condicao_contrato`); recurso por id passa pelas dependências
 `lote_para_leitura`/`lote_para_escrita`/`documento_para_leitura`/`documento_para_escrita`."""
-import psycopg
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy import ColumnElement, and_, false, select, true
+from sqlalchemy.orm import Session, aliased
 
-from app import config
+from app.database import get_session
+from app.models import Contrato, Documento, Lote, Prestador, Tomador
 from app.routers.auth.actions import ID_MAX, UsuarioContexto, exigir_plataforma, exigir_usuario  # noqa: F401
 
 METODOS_LEITURA = frozenset({"GET", "HEAD", "OPTIONS"})
 _NEGADO_ESCRITA = "somente leitura: usuários do nível tomador não alteram dados"
+
+
+def filtro_contrato(usuario: UsuarioContexto, c=Contrato, t=Tomador, p=Prestador) -> ColumnElement[bool]:
+    """Condição sobre contrato `c` já unido a tomador `t` e prestador `p` (entidades ou aliases)."""
+    if usuario.nivel == "plataforma":
+        return true()
+    if usuario.nivel == "tomador":
+        return and_(c.tomador_id == usuario.tomador_id, t.ativo)
+    if usuario.nivel == "prestador":
+        return and_(c.prestador_id == usuario.prestador_id, c.ativo, t.ativo, p.ativo)
+    return false()  # nível desconhecido: falha fechada
+
+
+def filtro_lote(usuario: UsuarioContexto, lote=Lote) -> ColumnElement[bool]:
+    """Condição sobre `lote` (entidade ou alias): o lote está no escopo do usuário."""
+    if usuario.nivel == "plataforma":
+        return true()
+    ce, te, pe = aliased(Contrato), aliased(Tomador), aliased(Prestador)
+    return (select(1).select_from(ce).join(te, te.id == ce.tomador_id).join(pe, pe.id == ce.prestador_id)
+            .where(ce.id == lote.contrato_id, filtro_contrato(usuario, ce, te, pe)).exists())
 
 
 def condicao_contrato(usuario: UsuarioContexto, c: str = "c", t: str = "t", p: str = "p") -> tuple[str, list]:
@@ -104,22 +126,21 @@ def _checar_escrita(usuario: UsuarioContexto, escrita: bool) -> None:
         raise HTTPException(403, _NEGADO_ESCRITA)
 
 
-def exigir_lote_no_escopo(conn, usuario: UsuarioContexto, lote_id: int, escrita: bool = False) -> None:
+def exigir_lote_no_escopo(session: Session, usuario: UsuarioContexto, lote_id: int, escrita: bool = False) -> None:
     """403 se o nível não pode escrever; 404 se o lote não existe ou está fora do escopo."""
     _checar_escrita(usuario, escrita)
-    cond, args = condicao_lote(usuario, "l")
-    if not _id_valido(lote_id) or conn.execute(
-            f"SELECT 1 FROM lote l WHERE l.id = %s AND {cond}", [lote_id, *args]).fetchone() is None:
+    if not _id_valido(lote_id) or session.execute(
+            select(Lote.id).where(Lote.id == lote_id, filtro_lote(usuario))).first() is None:
         raise HTTPException(404, "lote não encontrado")
 
 
-def exigir_documento_no_escopo(conn, usuario: UsuarioContexto, documento_id: int, escrita: bool = False) -> None:
+def exigir_documento_no_escopo(session: Session, usuario: UsuarioContexto, documento_id: int,
+                               escrita: bool = False) -> None:
     """Idem para documento: vale o escopo do lote a que ele pertence."""
     _checar_escrita(usuario, escrita)
-    cond, args = condicao_lote(usuario, "l")
-    if not _id_valido(documento_id) or conn.execute(
-            f"SELECT 1 FROM documento d JOIN lote l ON l.id = d.lote_id WHERE d.id = %s AND {cond}",
-            [documento_id, *args]).fetchone() is None:
+    if not _id_valido(documento_id) or session.execute(
+            select(Documento.id).join(Lote, Lote.id == Documento.lote_id)
+            .where(Documento.id == documento_id, filtro_lote(usuario))).first() is None:
         raise HTTPException(404, "documento não encontrado")
 
 
@@ -148,26 +169,31 @@ def acesso_a_dados(request: Request, usuario: UsuarioContexto = Depends(exigir_u
     return usuario
 
 
-def _verificar(verificador, escrita: bool, id_: int, usuario: UsuarioContexto) -> int:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        verificador(conn, usuario, id_, escrita=escrita)
+def _verificar(verificador, escrita: bool, id_: int, usuario: UsuarioContexto, session: Session) -> int:
+    verificador(session, usuario, id_, escrita=escrita)
+    # Libera a conexão: a checagem é uma transação própria, como antes, e nada fica preso durante um stream SSE.
+    session.commit()
     return id_
 
 
-def lote_para_leitura(lote_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados)) -> int:
-    return _verificar(exigir_lote_no_escopo, False, lote_id, usuario)
+def lote_para_leitura(lote_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados),
+                      session: Session = Depends(get_session)) -> int:
+    return _verificar(exigir_lote_no_escopo, False, lote_id, usuario, session)
 
 
-def lote_para_escrita(lote_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados)) -> int:
-    return _verificar(exigir_lote_no_escopo, True, lote_id, usuario)
+def lote_para_escrita(lote_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados),
+                      session: Session = Depends(get_session)) -> int:
+    return _verificar(exigir_lote_no_escopo, True, lote_id, usuario, session)
 
 
-def documento_para_leitura(documento_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados)) -> int:
-    return _verificar(exigir_documento_no_escopo, False, documento_id, usuario)
+def documento_para_leitura(documento_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados),
+                           session: Session = Depends(get_session)) -> int:
+    return _verificar(exigir_documento_no_escopo, False, documento_id, usuario, session)
 
 
-def documento_para_escrita(documento_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados)) -> int:
-    return _verificar(exigir_documento_no_escopo, True, documento_id, usuario)
+def documento_para_escrita(documento_id: int, usuario: UsuarioContexto = Depends(acesso_a_dados),
+                           session: Session = Depends(get_session)) -> int:
+    return _verificar(exigir_documento_no_escopo, True, documento_id, usuario, session)
 
 
 # Dependências que fecham o acesso por recurso; a varredura de rotas exige uma delas em toda rota com id na URL.
