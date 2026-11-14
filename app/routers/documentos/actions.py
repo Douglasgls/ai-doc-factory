@@ -2,16 +2,19 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-import psycopg
 from fastapi import HTTPException
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
 
 from app import config
 from app.anonimizacao import mascarar_campos, mascarar_documentos, mascarar_estrutura
 from app.analise import enfileirar_analise
-from app.escopo import condicao_contrato, condicao_lote
+from app.escopo import filtro_contrato, filtro_lote
 from app.eventos import limpar_cancelado
 from app.extracao import enfileirar_extracao
-from app.renomeacao import atualizar_nome_padronizado, gerar_nome_padronizado
+from app.models import AnalisePonto, Contrato, Documento, DocumentoCampo, Lote, Pagina, Prestador, Tomador
+from app.renomeacao import atualizar_nome_padronizado_sessao, gerar_nome_padronizado
 from app.routers import r
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.documentos.schemas import AtualizacaoCampos
@@ -23,14 +26,14 @@ _COLUNAS_ANALISE = ("estado", "erro", "perfil", "marcacoes", "intervalo_pre_assi
                     "custo", "atualizado_em")
 
 
-def campos_por_documento(conn, ids: list[int]) -> dict[int, dict]:
+def campos_por_documento(session: Session, ids: list[int]) -> dict[int, dict]:
     """documento_id -> {campo: valor}, em uma consulta só."""
     if not ids:
         return {}
     out: dict[int, dict] = {}
-    for doc_id, campo, valor in conn.execute(
-            "SELECT documento_id, campo, valor FROM documento_campos WHERE documento_id = ANY(%s) ORDER BY campo",
-            (ids,)):
+    for doc_id, campo, valor in session.execute(
+            select(DocumentoCampo.documento_id, DocumentoCampo.campo, DocumentoCampo.valor)
+            .where(DocumentoCampo.documento_id.in_(ids)).order_by(DocumentoCampo.campo)):
         out.setdefault(doc_id, {})[campo] = valor
     return out
 
@@ -55,20 +58,18 @@ def extras_documento(
     }
 
 
-def obter_documento(documento_id: int) -> dict:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        d = conn.execute(
-            "SELECT d.id, d.lote_id, d.ordem, d.pagina_ini, d.pagina_fim, d.estado, d.tipo, d.confianca, "
-            "d.segmentacao_ambigua, d.tipo_original, d.revisor, d.revisado_em, d.motivo_revisao, d.probabilidades, "
-            "l.nome_arquivo, l.criado_em, d.nome_padronizado "
-            "FROM documento d JOIN lote l ON l.id = d.lote_id WHERE d.id = %s", (documento_id,)
-        ).fetchone()
-        if d is None:
-            raise HTTPException(404, "documento não encontrado")
-        paginas = conn.execute(
-            "SELECT numero, texto FROM pagina WHERE documento_id = %s ORDER BY numero", (documento_id,)
-        ).fetchall()
-        campos = campos_por_documento(conn, [documento_id]).get(documento_id, {})
+def obter_documento(session: Session, documento_id: int) -> dict:
+    d = session.execute(
+        select(Documento.id, Documento.lote_id, Documento.ordem, Documento.pagina_ini, Documento.pagina_fim,
+               Documento.estado, Documento.tipo, Documento.confianca, Documento.segmentacao_ambigua,
+               Documento.tipo_original, Documento.revisor, Documento.revisado_em, Documento.motivo_revisao,
+               Documento.probabilidades, Lote.nome_arquivo, Lote.criado_em, Documento.nome_padronizado)
+        .join(Lote, Lote.id == Documento.lote_id).where(Documento.id == documento_id)).first()
+    if d is None:
+        raise HTTPException(404, "documento não encontrado")
+    paginas = session.execute(
+        select(Pagina.numero, Pagina.texto).where(Pagina.documento_id == documento_id).order_by(Pagina.numero)).all()
+    campos = campos_por_documento(session, [documento_id]).get(documento_id, {})
     return {
         "id": d[0], "lote_id": d[1], "ordem": d[2], "pagina_ini": d[3], "pagina_fim": d[4], "estado": d[5],
         "tipo": d[6], "confianca": d[7], "segmentacao_ambigua": d[8],
@@ -82,13 +83,12 @@ def obter_documento(documento_id: int) -> dict:
     }
 
 
-def obter_analise_ponto(documento_id: int) -> dict:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        doc = conn.execute("SELECT tipo FROM documento WHERE id = %s", (documento_id,)).fetchone()
-        if doc is None:
-            raise HTTPException(404, "documento não encontrado")
-        row = conn.execute(f"SELECT {', '.join(_COLUNAS_ANALISE)} FROM analise_ponto WHERE documento_id = %s",
-                           (documento_id,)).fetchone()
+def obter_analise_ponto(session: Session, documento_id: int) -> dict:
+    doc = session.execute(select(Documento.tipo).where(Documento.id == documento_id)).first()
+    if doc is None:
+        raise HTTPException(404, "documento não encontrado")
+    row = session.execute(select(*(getattr(AnalisePonto, c) for c in _COLUNAS_ANALISE))
+                          .where(AnalisePonto.documento_id == documento_id)).first()
     if row is None:
         if doc[0] == "folha_ponto":
             return {"documento_id": documento_id, "estado": "pendente"}
@@ -99,36 +99,28 @@ def obter_analise_ponto(documento_id: int) -> dict:
 SEM_TIPO = "sem_tipo"
 
 
-def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None, *,
+def listar_documentos(session: Session, contrato_id: int | None = None, falhou: bool | None = None, *,
                       usuario: UsuarioContexto) -> dict:
     """Documentos agrupados pelo campo `tipo` (uma consulta só). Falha = estado 'erro'.
     `usuario` é obrigatório: o filtro de escopo vai no SQL; contrato_id fora do escopo é 404, como o inexistente."""
-    condicoes, args = [], []
-    cond, cargs = condicao_lote(usuario)
-    condicoes.append(cond)
-    args.extend(cargs)
+    consulta = (select(Documento.id, Documento.lote_id, Documento.ordem, Documento.pagina_ini, Documento.pagina_fim,
+                       Documento.estado, Documento.tipo, Documento.confianca, Lote.contrato_id, Lote.nome_arquivo,
+                       Lote.criado_em, Documento.nome_padronizado)
+                .join(Lote, Lote.id == Documento.lote_id).where(filtro_lote(usuario)))
     if contrato_id is not None:
-        condicoes.append("l.contrato_id = %s")
-        args.append(contrato_id)
+        consulta = consulta.where(Lote.contrato_id == contrato_id)
     if falhou is True:
-        condicoes.append("d.estado = 'erro'")
+        consulta = consulta.where(Documento.estado == "erro")
     elif falhou is False:
-        condicoes.append("d.estado <> 'erro'")
-    where = f"WHERE {' AND '.join(condicoes)}" if condicoes else ""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        if contrato_id is not None:
-            ccond, cargs = condicao_contrato(usuario)
-            if conn.execute("SELECT 1 FROM contrato c JOIN tomador t ON t.id = c.tomador_id "
-                            f"JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s AND {ccond}",
-                            [contrato_id, *cargs]).fetchone() is None:
-                raise HTTPException(404, "contrato não encontrado")
-        rows = conn.execute(
-            "SELECT d.id, d.lote_id, d.ordem, d.pagina_ini, d.pagina_fim, d.estado, d.tipo, d.confianca, "
-            f"l.contrato_id, l.nome_arquivo, l.criado_em, d.nome_padronizado FROM documento d JOIN lote l ON l.id = d.lote_id {where} "
-            "ORDER BY d.lote_id, d.ordem",
-            args,
-        ).fetchall()
-        campos = campos_por_documento(conn, [r_[0] for r_ in rows])
+        consulta = consulta.where(Documento.estado != "erro")
+    if contrato_id is not None:
+        if session.execute(
+                select(Contrato.id).join(Tomador, Tomador.id == Contrato.tomador_id)
+                .join(Prestador, Prestador.id == Contrato.prestador_id)
+                .where(Contrato.id == contrato_id, filtro_contrato(usuario))).first() is None:
+            raise HTTPException(404, "contrato não encontrado")
+    rows = session.execute(consulta.order_by(Documento.lote_id, Documento.ordem)).all()
+    campos = campos_por_documento(session, [r_[0] for r_ in rows])
     grupos: dict[str, list] = {}
     for id_, lote_id, ordem, ini, fim, estado, tipo, conf, contrato, nome_arq, criado, nome_pad in rows:
         grupos.setdefault(tipo or SEM_TIPO, []).append(
@@ -141,59 +133,61 @@ def listar_documentos(contrato_id: int | None = None, falhou: bool | None = None
     return {"grupos": [{"tipo": t, "total": len(grupos[t]), "documentos": grupos[t]} for t in chaves]}
 
 
-def atualizar_tipo(documento_id: int, revisao: Revisao) -> dict:
+def atualizar_tipo(session: Session, documento_id: int, revisao: Revisao) -> dict:
     """Corrige o tipo em qualquer estado, exceto 'segmentado' e 'erro'. tipo_original só é gravado se ainda NULL."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        atual = conn.execute(
-            "SELECT estado, tipo, lote_id FROM documento WHERE id = %s FOR UPDATE", (documento_id,)).fetchone()
-        if atual is None:
-            raise HTTPException(404, "documento não encontrado")
-        if atual[0] in ("segmentado", "erro"):
-            raise HTTPException(409, f"documento em estado '{atual[0]}' não aceita alteração de tipo")
-        conn.execute(
-            "UPDATE documento SET estado = 'revisado', tipo_original = COALESCE(tipo_original, tipo), "
-            "tipo = %s, revisor = %s, revisado_em = now() WHERE id = %s",
-            (revisao.tipo, revisao.revisor, documento_id))
-        atualizar_nome_padronizado(conn, documento_id)
+    atual = session.execute(select(Documento.estado, Documento.tipo, Documento.lote_id)
+                            .where(Documento.id == documento_id).with_for_update()).first()
+    if atual is None:
+        raise HTTPException(404, "documento não encontrado")
+    if atual[0] in ("segmentado", "erro"):
+        raise HTTPException(409, f"documento em estado '{atual[0]}' não aceita alteração de tipo")
+    session.execute(update(Documento).where(Documento.id == documento_id).values(
+        estado="revisado", tipo_original=func.coalesce(Documento.tipo_original, Documento.tipo),
+        tipo=revisao.tipo, revisor=revisao.revisor, revisado_em=func.now()
+    ).execution_options(synchronize_session=False))
+    atualizar_nome_padronizado_sessao(session, documento_id)
+    session.commit()  # antes de enfileirar: o worker precisa enxergar o estado novo
     limpar_cancelado(atual[2], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
     if revisao.tipo == "folha_ponto" and atual[1] != "folha_ponto":
         enfileirar_analise(documento_id, r)  # nunca levanta
     enfileirar_extracao(documento_id, r)  # depois do commit; nunca levanta
-    return obter_documento(documento_id)
+    return obter_documento(session, documento_id)
 
 
-def excluir_documento(documento_id: int) -> None:
+def excluir_documento(session: Session, documento_id: int) -> None:
     """Apaga só a linha de `documento`. analise_ponto e documento_campos caem por ON DELETE CASCADE;
     `pagina.documento_id` vira NULL (páginas e texto permanecem). Arquivos em disco e `lote.docs_pendentes`
     não são tocados; por isso lote em andamento (fan-in e filas em uso) recusa com 409."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        row = conn.execute(
-            "SELECT l.estado FROM documento d JOIN lote l ON l.id = d.lote_id WHERE d.id = %s FOR UPDATE OF d",
-            (documento_id,)).fetchone()
-        if row is None:
-            raise HTTPException(404, "documento não encontrado")
-        if row[0] not in ("concluido", "erro"):
-            raise HTTPException(409, f"lote em andamento (estado '{row[0]}'); aguarde a conclusão para excluir")
-        conn.execute("DELETE FROM documento WHERE id = %s", (documento_id,))
+    row = session.execute(
+        select(Lote.estado).select_from(Documento).join(Lote, Lote.id == Documento.lote_id)
+        .where(Documento.id == documento_id).with_for_update(of=Documento)).first()
+    if row is None:
+        raise HTTPException(404, "documento não encontrado")
+    if row[0] not in ("concluido", "erro"):
+        raise HTTPException(409, f"lote em andamento (estado '{row[0]}'); aguarde a conclusão para excluir")
+    session.execute(delete(Documento).where(Documento.id == documento_id)
+                    .execution_options(synchronize_session=False))
+    session.commit()
 
 
-def atualizar_campos(documento_id: int, corpo: AtualizacaoCampos) -> dict:
+def atualizar_campos(session: Session, documento_id: int, corpo: AtualizacaoCampos) -> dict:
     """String não vazia -> upsert com origem 'humano'; null -> remove o campo. Qualquer estado de documento."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        if conn.execute("SELECT 1 FROM documento WHERE id = %s FOR UPDATE", (documento_id,)).fetchone() is None:
-            raise HTTPException(404, "documento não encontrado")
-        for nome, valor in corpo.campos.items():
-            if valor is None:
-                conn.execute("DELETE FROM documento_campos WHERE documento_id = %s AND campo = %s",
-                             (documento_id, nome))
-            else:
-                conn.execute(
-                    "INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, %s, %s, 'humano') "
-                    "ON CONFLICT (documento_id, campo) DO UPDATE SET valor = EXCLUDED.valor, "
-                    "origem = EXCLUDED.origem, atualizado_em = now()",
-                    (documento_id, nome, valor.strip()))
-        atualizar_nome_padronizado(conn, documento_id)
-    return obter_documento(documento_id)
+    if session.execute(select(Documento.id).where(Documento.id == documento_id).with_for_update()).first() is None:
+        raise HTTPException(404, "documento não encontrado")
+    for nome, valor in corpo.campos.items():
+        if valor is None:
+            session.execute(delete(DocumentoCampo).where(DocumentoCampo.documento_id == documento_id,
+                                                         DocumentoCampo.campo == nome)
+                            .execution_options(synchronize_session=False))
+        else:
+            novo = pg_insert(DocumentoCampo).values(documento_id=documento_id, campo=nome, valor=valor.strip(),
+                                                    origem="humano")
+            session.execute(novo.on_conflict_do_update(
+                index_elements=[DocumentoCampo.documento_id, DocumentoCampo.campo],
+                set_={"valor": novo.excluded.valor, "origem": novo.excluded.origem, "atualizado_em": func.now()}))
+    atualizar_nome_padronizado_sessao(session, documento_id)
+    session.commit()
+    return obter_documento(session, documento_id)
 
 
 def _recortar_paginas_pdf(pdf_origem: Path, pagina_ini: int, pagina_fim: int) -> bytes:
@@ -223,20 +217,19 @@ def _recortar_paginas_pdf(pdf_origem: Path, pagina_ini: int, pagina_fim: int) ->
             raise HTTPException(500, f"erro ao gerar PDF do documento: {exc}") from exc
 
 
-def download_documento(documento_id: int) -> tuple[bytes, str]:
+def download_documento(session: Session, documento_id: int) -> tuple[bytes, str]:
     """Retorna (bytes_pdf, nome_padronizado) recortando apenas as páginas do documento."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        row = conn.execute(
-            "SELECT d.lote_id, d.pagina_ini, d.pagina_fim, d.tipo, d.nome_padronizado, l.nome_arquivo, p.razao_social "
-            "FROM documento d "
-            "JOIN lote l ON l.id = d.lote_id "
-            "LEFT JOIN contrato c ON c.id = l.contrato_id LEFT JOIN prestador p ON p.id = c.prestador_id "
-            "WHERE d.id = %s",
-            (documento_id,),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(404, "documento não encontrado")
-        campos = campos_por_documento(conn, [documento_id]).get(documento_id, {})
+    row = session.execute(
+        select(Documento.lote_id, Documento.pagina_ini, Documento.pagina_fim, Documento.tipo,
+               Documento.nome_padronizado, Lote.nome_arquivo, Prestador.razao_social)
+        .join(Lote, Lote.id == Documento.lote_id)
+        .outerjoin(Contrato, Contrato.id == Lote.contrato_id)
+        .outerjoin(Prestador, Prestador.id == Contrato.prestador_id)
+        .where(Documento.id == documento_id)).first()
+    if row is None:
+        raise HTTPException(404, "documento não encontrado")
+    campos = campos_por_documento(session, [documento_id]).get(documento_id, {})
+    session.commit()  # libera a conexão antes do pdfseparate/pdfunite
 
     lote_id, ini, fim, tipo, nome_pad, nome_orig, nome_emp = row
     nome_final = nome_pad or gerar_nome_padronizado(

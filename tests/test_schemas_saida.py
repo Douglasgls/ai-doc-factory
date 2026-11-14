@@ -240,39 +240,39 @@ def test_lote_busca_documentos(cenario, sessao):
                     busca_actions.buscar("palavrainexistentezzz", 20, PLATAFORMA)) == []
 
     doc = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[0]}", DocumentoOut,
-                   doc_actions.obter_documento(ids[0]))
+                   doc_actions.obter_documento(sessao, ids[0]))
     assert "529.982.247-25" not in doc["paginas"][0]["texto"]
     assert doc["campos"]["cpf"] != CPF and doc["pessoa"] == "Maria Silva"
     assert doc["campos"]["rg"] != "12.345.678-9" and doc["campos"]["pis"] != "123.45678.90-1"  # máscara aplicada
     sem_campos = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[4]}", DocumentoOut,
-                          doc_actions.obter_documento(ids[4]))
+                          doc_actions.obter_documento(sessao, ids[4]))
     assert sem_campos["campos"] == {} and sem_campos["pessoa"] is None and sem_campos["confianca"] is None
 
-    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(usuario=PLATAFORMA))
+    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(sessao, usuario=PLATAFORMA))
     assert grupos["grupos"]
     _confere("GET /documentos", "/documentos?falhou=true", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, True, usuario=PLATAFORMA))
+             doc_actions.listar_documentos(sessao, None, True, usuario=PLATAFORMA))
     _confere("GET /documentos", "/documentos?falhou=false", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, False, usuario=PLATAFORMA))
+             doc_actions.listar_documentos(sessao, None, False, usuario=PLATAFORMA))
 
 
-def test_revisao_e_correcoes(cenario, extracoes):
+def test_revisao_e_correcoes(cenario, extracoes, sessao):
     lote, ids = cenario
-    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao(PLATAFORMA))
+    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao(sessao, PLATAFORMA))
     assert ids[3] in {i["id"] for i in fila}
 
     r = client.post(f"/documentos/{ids[3]}/revisao", json={"tipo": "atestado_medico", "revisor": "ana"})
     corpo = _confere_resposta("POST /documentos/{documento_id}/revisao", r,
-                              rev_actions.revisar_documento(ids[3], Revisao(tipo="atestado_medico", revisor="ana")),
+                              rev_actions.revisar_documento(sessao, ids[3], Revisao(tipo="atestado_medico", revisor="ana")),
                               RevisaoOut, ignorar=("revisado_em",))  # a segunda chamada regrava revisado_em
     assert set(corpo) == {"id", "estado", "tipo", "tipo_original", "revisor", "revisado_em"}
     assert corpo["tipo_original"] == "recibo_ferias" and corpo["estado"] == "revisado"
 
     r = client.patch(f"/documentos/{ids[1]}/tipo", json={"tipo": "aso", "revisor": "ana"})
-    _confere_resposta("PATCH /documentos/{documento_id}/tipo", r, doc_actions.obter_documento(ids[1]), DocumentoOut)
+    _confere_resposta("PATCH /documentos/{documento_id}/tipo", r, doc_actions.obter_documento(sessao, ids[1]), DocumentoOut)
 
     r = client.put(f"/documentos/{ids[0]}/campos", json={"campos": {"nome": "Outra Pessoa"}, "revisor": "ana"})
-    corpo = _confere_resposta("PUT /documentos/{documento_id}/campos", r, doc_actions.obter_documento(ids[0]),
+    corpo = _confere_resposta("PUT /documentos/{documento_id}/campos", r, doc_actions.obter_documento(sessao, ids[0]),
                               DocumentoOut)
     assert corpo["campos"]["nome"] == "Outra Pessoa"
 
@@ -325,16 +325,16 @@ def test_conformidade(cenario, empresa_sem_nada_analisavel, sessao):
              ConformidadeLoteOut, emp_actions.conformidade_lote(sessao, empresa_sem_nada_analisavel))
 
 
-def test_analise_ponto(cenario, monkeypatch):
+def test_analise_ponto(cenario, monkeypatch, sessao):
     lote, ids = cenario
     rota = "GET /documentos/{documento_id}/analise-ponto"
     url = f"/documentos/{ids[2]}/analise-ponto"
-    pendente = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    pendente = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert pendente == {"documento_id": ids[2], "estado": "pendente"}
 
     # folha só com dias úteis: o descanso semanal não é avaliado (nao_avaliada, motivo; campos do Jev nulos)
     _analisar_ponto(monkeypatch, ids[2])
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["estado"] == "concluida" and corpo["score_geral"] == pytest.approx(2 / 3)
     assert corpo["divergencias"][0]["base_legal"] and set(corpo["scores_dimensao"]) == {
         "horas_extras", "intervalos", "descanso", "registro"}
@@ -345,25 +345,25 @@ def test_analise_ponto(cenario, monkeypatch):
 
     # semana completa: descanso avaliado
     _analisar_ponto(monkeypatch, ids[2], marcacoes=SEMANA_COMPLETA)
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["contagens"]["nao_avaliadas"] == [] and corpo["scores_dimensao"]["descanso"]["score"] == 0.0
 
     # dimensão indeterminada (confiança baixa): normalizado nulo, revisão pedida
     _analisar_ponto(monkeypatch, ids[2], marcacoes=SEMANA_COMPLETA, confianca_intervalos=0.1)
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["scores_dimensao"]["intervalos"]["indeterminada"] is True
     assert corpo["scores_dimensao"]["intervalos"]["normalizado"] is None and corpo["requer_revisao"] is True
 
     # horário contratual e totais declarados lidos da folha
     _analisar_ponto(monkeypatch, ids[2], horario_contratual=[["08:00", "12:00"], ["13:00", "17:00"]],
                     totais_declarados={"total_horas_min": 2400, "horas_extras_min": 0})
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["totais"]["declarados"]["comparado"] is True and corpo["totais"]["horario_contratual"]
 
     # falha definitiva: linha em erro, sem os demais campos
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         analise._gravar(conn, ids[2], "erro", {}, erro="análise falhou após as tentativas")
-    erro = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    erro = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert erro["estado"] == "erro" and erro["erro"] and erro["score_geral"] is None
 
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto

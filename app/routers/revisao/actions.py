@@ -1,28 +1,28 @@
-import psycopg
 from fastapi import HTTPException
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
 
-from app import config
 from app.analise import enfileirar_analise
 from app.eventos import limpar_cancelado
-from app.escopo import condicao_lote
+from app.escopo import filtro_lote
 from app.extracao import enfileirar_extracao
-from app.renomeacao import atualizar_nome_padronizado
+from app.models import Documento, Lote
+from app.renomeacao import atualizar_nome_padronizado_sessao
 from app.routers import r
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.documentos.actions import campos_por_documento, extras_documento
 from app.routers.revisao.schemas import Revisao
 
 
-def fila_revisao(usuario: UsuarioContexto) -> list[dict]:
+def fila_revisao(session: Session, usuario: UsuarioContexto) -> list[dict]:
     """Fila só dos lotes no escopo de `usuario` (obrigatório)."""
-    cond, cargs = condicao_lote(usuario)
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        docs = conn.execute(
-            "SELECT d.id, d.lote_id, d.tipo, d.confianca, d.motivo_revisao, d.pagina_ini, d.pagina_fim, "
-            "l.nome_arquivo, l.criado_em FROM documento d JOIN lote l ON l.id = d.lote_id "
-            f"WHERE d.estado = 'em_revisao' AND {cond} ORDER BY d.lote_id, d.ordem", cargs
-        ).fetchall()
-        campos = campos_por_documento(conn, [d[0] for d in docs])
+    docs = session.execute(
+        select(Documento.id, Documento.lote_id, Documento.tipo, Documento.confianca, Documento.motivo_revisao,
+               Documento.pagina_ini, Documento.pagina_fim, Lote.nome_arquivo, Lote.criado_em)
+        .join(Lote, Lote.id == Documento.lote_id)
+        .where(Documento.estado == "em_revisao", filtro_lote(usuario))
+        .order_by(Documento.lote_id, Documento.ordem)).all()
+    campos = campos_por_documento(session, [d[0] for d in docs])
     return [
         {"id": i, "lote_id": l, "tipo_sugerido": t, "confianca": c, "motivo": m,
          "imagem_url": f"/lotes/{l}/paginas/{p}/imagem", "pagina_ini": p, "pagina_fim": pf,
@@ -31,23 +31,24 @@ def fila_revisao(usuario: UsuarioContexto) -> list[dict]:
     ]
 
 
-def revisar_documento(documento_id: int, revisao: Revisao) -> dict:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        # um único UPDATE condicional; no lado direito, tipo e tipo_original ainda são os valores antigos,
-        # então tipo_original guarda o tipo sugerido na primeira revisão e não muda nas seguintes
-        row = conn.execute(
-            "UPDATE documento SET estado = 'revisado', tipo_original = COALESCE(tipo_original, tipo), "
-            "tipo = %s, revisor = %s, revisado_em = now() "
-            "WHERE id = %s AND estado IN ('em_revisao', 'revisado') "
-            "RETURNING id, estado, tipo, tipo_original, revisor, revisado_em, lote_id",
-            (revisao.tipo, revisao.revisor, documento_id),
-        ).fetchone()
-        if row is None:
-            estado = conn.execute("SELECT estado FROM documento WHERE id = %s", (documento_id,)).fetchone()
-            if estado is None:
-                raise HTTPException(404, "documento não encontrado")
-            raise HTTPException(409, f"documento em estado '{estado[0]}' não aceita revisão")
-        atualizar_nome_padronizado(conn, documento_id)
+def revisar_documento(session: Session, documento_id: int, revisao: Revisao) -> dict:
+    # um único UPDATE condicional; no lado direito, tipo e tipo_original ainda são os valores antigos,
+    # então tipo_original guarda o tipo sugerido na primeira revisão e não muda nas seguintes
+    row = session.execute(
+        update(Documento)
+        .where(Documento.id == documento_id, Documento.estado.in_(("em_revisao", "revisado")))
+        .values(estado="revisado", tipo_original=func.coalesce(Documento.tipo_original, Documento.tipo),
+                tipo=revisao.tipo, revisor=revisao.revisor, revisado_em=func.now())
+        .returning(Documento.id, Documento.estado, Documento.tipo, Documento.tipo_original, Documento.revisor,
+                   Documento.revisado_em, Documento.lote_id)
+        .execution_options(synchronize_session=False)).first()
+    if row is None:
+        estado = session.execute(select(Documento.estado).where(Documento.id == documento_id)).first()
+        if estado is None:
+            raise HTTPException(404, "documento não encontrado")
+        raise HTTPException(409, f"documento em estado '{estado[0]}' não aceita revisão")
+    atualizar_nome_padronizado_sessao(session, documento_id)
+    session.commit()  # antes de enfileirar: o worker precisa enxergar o estado novo
     limpar_cancelado(row[6], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
     if revisao.tipo == "folha_ponto":
         enfileirar_analise(documento_id, r)  # nunca levanta: não derruba a revisão
