@@ -4,8 +4,7 @@ on:
   workflow_run:
     workflows: [ci]
     types: [completed]
-    # Deploy only on master branch or infra-gcp branch depois alterar para apenas a master branch
-    branches: [master, chore/infra-gcp]
+    branches: [master]
   workflow_dispatch:
 
 concurrency:
