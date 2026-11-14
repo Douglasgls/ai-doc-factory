@@ -2,21 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Check, X, Plus, ZoomIn, ChevronLeft } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
-
-export interface CategoryOption {
-  slug: string
-  name: string
-}
-
-export const OFFICIAL_CATEGORY_OPTIONS: CategoryOption[] = [
-  { slug: 'aso', name: 'ASO (Atestado de Saúde Ocupacional)' },
-  { slug: 'folha_pagamento', name: 'Folha de pagamento' },
-  { slug: 'folha_ponto', name: 'Folha de ponto' },
-  { slug: 'holerite', name: 'Holerite' },
-  { slug: 'recibo_ferias', name: 'Recibo de férias' },
-  { slug: 'atestado_medico', name: 'Atestado médico' },
-  { slug: 'contrato_trabalho', name: 'Contrato de trabalho' },
-]
+import { OFFICIAL_CATEGORY_OPTIONS, type CategoryOption } from './reviewCategories'
 
 const VALID_CATEGORY_SLUGS = new Set(OFFICIAL_CATEGORY_OPTIONS.map((c) => c.slug))
 
@@ -51,11 +37,16 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   onConfirm,
 }) => {
   const isValidSuggestion = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
-  const [selectedCategory, setSelectedCategory] = useState(
+  const [chosenCategory, setSelectedCategory] = useState(
     isValidSuggestion
       ? doc.suggestedType
       : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
   )
+  const selectedCategory = VALID_CATEGORY_SLUGS.has(chosenCategory)
+    ? chosenCategory
+    : isValidSuggestion
+      ? doc.suggestedType
+      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
   const [personName, setPersonName] = useState(doc.personName)
   const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
   const [currentPage, setCurrentPage] = useState(0)
@@ -70,13 +61,6 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
     const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
     setZoomOrigin({ x, y })
   }
-
-  useEffect(() => {
-    const valid = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
-      ? doc.suggestedType
-      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
-    setSelectedCategory((prev) => (VALID_CATEGORY_SLUGS.has(prev) ? prev : valid))
-  }, [doc.id, doc.suggestedType, availableCategories])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -111,26 +95,30 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   }
 
   // <img src> não envia Authorization: baixa a imagem autenticada e usa um object URL (revogado ao trocar/desmontar)
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
-  const [imageFailed, setImageFailed] = useState(false)
+  const imageKey = `${doc.loteId}:${doc.startPage + currentPage}`
+  const [imageState, setImageState] = useState<{ key: string; url: string | null; failed: boolean }>({
+    key: '',
+    url: null,
+    failed: false,
+  })
   useEffect(() => {
     const controller = new AbortController()
     let objectUrl: string | null = null
-    setImageUrl(null)
-    setImageFailed(false)
     fetchPageImage(doc.loteId, doc.startPage + currentPage, controller.signal)
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)
-        setImageUrl(objectUrl)
+        setImageState({ key: imageKey, url: objectUrl, failed: false })
       })
       .catch(() => {
-        if (!controller.signal.aborted) setImageFailed(true)
+        if (!controller.signal.aborted) setImageState({ key: imageKey, url: null, failed: true })
       })
     return () => {
       controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [doc.loteId, doc.startPage, currentPage])
+  }, [doc.loteId, doc.startPage, currentPage, imageKey])
+  const imageUrl = imageState.key === imageKey ? imageState.url : null
+  const imageFailed = imageState.key === imageKey && imageState.failed
 
   const suggestedLabel =
     doc.suggestedTypeLabel ||

@@ -1,5 +1,7 @@
 # Segredos
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -22,3 +24,10 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.local.tfvars
+backend.hcl

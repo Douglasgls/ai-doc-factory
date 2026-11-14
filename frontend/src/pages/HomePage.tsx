@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
-import ConformidadeEmpresaModal, { formatarCnpjVisual } from '../components/ConformidadeEmpresaModal'
+import ConformidadeEmpresaModal from '../components/ConformidadeEmpresaModal'
+import { formatarCnpjVisual } from '../components/conformidadeEmpresa'
 import { ManualReviewBanner } from '../components/ManualReviewBanner'
 import { MetricsCard } from '../components/MetricsCard'
 import { FilterBar, type FilterType } from '../components/FilterBar'

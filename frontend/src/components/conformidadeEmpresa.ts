@@ -406,3 +406,9 @@ export const agruparAcoes = (g: Avaliacao, rotulos: Rotulos): AcaoAgrupada[] => 
 
 /** Soma dos pontos descontados; bate com 100 - score_bruto (app/conformidade.py). */
 export const somaDescontos = (g: Avaliacao): number => g.descontos.reduce((s, d) => s + d.pontos, 0)
+
+export function formatarCnpjVisual(valor: string): string {
+  const digitos = valor.replace(/\D/g, '')
+  if (digitos.length !== 14) return valor
+  return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5, 8)}/${digitos.slice(8, 12)}-${digitos.slice(12, 14)}`
+}

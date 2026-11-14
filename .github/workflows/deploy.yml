@@ -1,0 +1,75 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    # Deploy only on master branch or infra-gcp branch depois alterar para apenas a master branch
+    branches: [master, chore/infra-gcp]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker "${REGISTRY%%/*}" --quiet
+        env:
+          REGISTRY: ${{ vars.GCP_REGISTRY }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ vars.GCP_REGISTRY }}/api:${{ env.SHA }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ vars.GCP_REGISTRY }}/frontend:${{ env.SHA }}
+          build-args: |
+            VITE_API_URL=${{ vars.APP_URL }}
+            VITE_API_PREFIX=/api
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+      url: ${{ vars.APP_URL }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: |
+          gcloud compute ssh "${{ vars.GCP_VM_NAME }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --zone "${{ vars.GCP_ZONE }}" \
+            --tunnel-through-iap --quiet \
+            --command "sudo /opt/ai-doc-factory/deploy.sh $SHA"
+      - run: curl -fsS --retry 20 --retry-delay 6 --retry-all-errors "${{ vars.APP_URL }}/api/health"

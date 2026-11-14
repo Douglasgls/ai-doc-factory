@@ -1,0 +1,125 @@
+#!/bin/bash
+# Bootstrap idempotente; roda a cada boot. O deploy em si é feito pelo CI via deploy.sh.
+set -euo pipefail
+
+BASE=/opt/ai-doc-factory
+APP=$BASE/app
+
+if ! swapon --show | grep -q /swapfile; then
+  [ -f /swapfile ] || { fallocate -l 2G /swapfile; chmod 600 /swapfile; mkswap /swapfile; }
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+if ! command -v docker >/dev/null; then
+  curl -fsSL https://get.docker.com | sh
+fi
+
+mkdir -p $BASE
+[ -d $APP/.git ] || git clone --filter=blob:none ${repo_url} $APP
+
+cat > $BASE/Caddyfile <<'EOF'
+%{ if acme_email != "" ~}
+{
+	email ${acme_email}
+}
+
+%{ endif ~}
+${domain} {
+	encode gzip
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy frontend:80
+	}
+}
+EOF
+
+cat > $BASE/docker-compose.gcp.yml <<'EOF'
+services:
+  migrate:
+    image: ${registry_url}/api:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+  worker_ocr_seg:
+    image: ${registry_url}/api:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+  worker_classify:
+    image: ${registry_url}/api:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+  worker_analise:
+    image: ${registry_url}/api:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+  worker_extracao:
+    image: ${registry_url}/api:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+  api:
+    image: ${registry_url}/api:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+    ports: !reset []
+  frontend:
+    image: ${registry_url}/frontend:$${IMAGE_TAG:?IMAGE_TAG}
+    build: !reset null
+    ports: !reset []
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - /opt/ai-doc-factory/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+      frontend: {condition: service_started}
+
+volumes:
+  caddy_data:
+  caddy_config:
+EOF
+
+cat > $BASE/deploy.sh <<'EOF'
+#!/bin/bash
+# Uso: sudo /opt/ai-doc-factory/deploy.sh <git-sha>
+set -euo pipefail
+
+TAG=$1
+BASE=/opt/ai-doc-factory
+APP=$BASE/app
+META=http://metadata.google.internal/computeMetadata/v1
+
+meta() { curl -sf -H 'Metadata-Flavor: Google' "$META/$1"; }
+TOKEN=$(meta instance/service-accounts/default/token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+PROJECT=$(meta project/project-id)
+
+git -C $APP fetch --depth 1 origin "$TAG"
+git -C $APP checkout --force FETCH_HEAD
+
+umask 077
+curl -sf -H "Authorization: Bearer $TOKEN" \
+  "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/${secret_id}/versions/latest:access" \
+  | python3 -c '
+import base64, json, sys
+env = base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode()
+skip = ("CORS_ORIGINS=", "IMAGE_TAG=")
+for line in env.splitlines():
+    if not line.startswith(skip):
+        print(line)
+' > $APP/.env
+echo "CORS_ORIGINS=https://${domain}" >> $APP/.env
+echo "IMAGE_TAG=$TAG" >> $APP/.env
+
+echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin https://${registry_host}
+
+cd $APP
+compose() { docker compose -f docker-compose.yml -f $BASE/docker-compose.gcp.yml "$@"; }
+compose pull --quiet
+compose up -d --remove-orphans
+
+echo "$TAG" > $BASE/IMAGE_TAG
+docker image prune -af --filter until=168h >/dev/null
+EOF
+chmod 750 $BASE/deploy.sh

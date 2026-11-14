@@ -79,21 +79,33 @@ services:
   worker_ocr_seg:
     <<: *app
     command: python -m app.worker segmentar_lote
+    deploy:
+      mode: replicated
+      replicas: 4
     healthcheck: *worker-health
 
   worker_classify:
     <<: *app
     command: python -m app.worker classificar_documento
+    deploy:
+      mode: replicated
+      replicas: 2
     healthcheck: *worker-health
 
   worker_analise:
     <<: *app
     command: python -m app.worker analisar_folha_ponto
+    deploy:
+      mode: replicated
+      replicas: 2
     healthcheck: *worker-health
 
   worker_extracao:
     <<: *app
     command: python -m app.worker extrair_campos
+    deploy:
+      mode: replicated
+      replicas: 2
     healthcheck: *worker-health
 
   frontend:

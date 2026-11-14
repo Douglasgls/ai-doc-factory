@@ -16,27 +16,26 @@ export const DocumentThumbnail: React.FC<ThumbnailProps> = ({
   alt,
   onClick,
 }) => {
-  const [src, setSrc] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
+  const key = `${loteId}:${page}`
+  const [state, setState] = useState<{ key: string; src: string | null; failed: boolean }>({
+    key: '',
+    src: null,
+    failed: false,
+  })
 
   useEffect(() => {
-    if (!loteId || !page) {
-      setSrc(null)
-      setFailed(true)
-      return
-    }
+    if (!loteId || !page) return
     const ctrl = new AbortController()
     let objectUrl: string | null = null
-    setFailed(false)
 
     fetchPageImage(loteId, page, ctrl.signal)
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)
-        setSrc(objectUrl)
+        setState({ key, src: objectUrl, failed: false })
       })
       .catch(() => {
         if (!ctrl.signal.aborted) {
-          setFailed(true)
+          setState({ key, src: null, failed: true })
         }
       })
 
@@ -44,7 +43,9 @@ export const DocumentThumbnail: React.FC<ThumbnailProps> = ({
       ctrl.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [loteId, page])
+  }, [loteId, page, key])
+  const src = state.key === key ? state.src : null
+  const failed = !loteId || !page || (state.key === key && state.failed)
 
   return (
     <button
@@ -78,9 +79,6 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
   const startPage = doc.startPage ?? 1
   const totalPages = Math.max(1, doc.pages || 1)
   const [pageOffset, setPageOffset] = useState(0)
-  const [src, setSrc] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [isZoomEnabled, setIsZoomEnabled] = useState(false)
   const [isHoveringImage, setIsHoveringImage] = useState(false)
@@ -96,14 +94,17 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
 
   const currentPage = startPage + pageOffset
 
-  useEffect(() => {
+  const [prevDocId, setPrevDocId] = useState(doc.id)
+  const [prevPageOffset, setPrevPageOffset] = useState(pageOffset)
+  if (prevDocId !== doc.id) {
+    setPrevDocId(doc.id)
     setPageOffset(0)
     setIsZoomEnabled(false)
-  }, [doc.id])
-
-  useEffect(() => {
+  }
+  if (prevPageOffset !== pageOffset) {
+    setPrevPageOffset(pageOffset)
     setIsHoveringImage(false)
-  }, [pageOffset])
+  }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -115,35 +116,37 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, pageOffset, totalPages])
 
+  const imageKey = `${doc.loteId}:${currentPage}`
+  const [imageState, setImageState] = useState<{ key: string; src: string | null; error: boolean }>({
+    key: '',
+    src: null,
+    error: false,
+  })
+
   useEffect(() => {
-    if (!doc.loteId) {
-      setLoading(false)
-      setError(true)
-      return
-    }
+    if (!doc.loteId) return
     const ctrl = new AbortController()
     let objectUrl: string | null = null
-    setLoading(true)
-    setError(false)
 
     fetchPageImage(doc.loteId, currentPage, ctrl.signal)
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)
-        setSrc(objectUrl)
-        setLoading(false)
+        setImageState({ key: imageKey, src: objectUrl, error: false })
       })
       .catch(() => {
-        if (!ctrl.signal.aborted) {
-          setError(true)
-          setLoading(false)
-        }
+        if (!ctrl.signal.aborted) setImageState({ key: imageKey, src: null, error: true })
       })
 
     return () => {
       ctrl.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [doc.loteId, currentPage])
+  }, [doc.loteId, currentPage, imageKey])
+
+  const current = imageState.key === imageKey
+  const src = current ? imageState.src : null
+  const error = !doc.loteId || (current && imageState.error)
+  const loading = !!doc.loteId && !current
 
   const handleDownload = async () => {
     setDownloading(true)

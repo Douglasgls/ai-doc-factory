@@ -16,6 +16,7 @@ import {
   corDaFaixa,
   formatarPercentual,
   formatarPontos,
+  formatarCnpjVisual,
   gerarResumo,
   listaPt,
   motivosProvisorio,
@@ -51,12 +52,6 @@ const CONTAGEM_CURTA: Record<CriterioChave, (bons: number, total: number) => str
 function capitalizarFrase(texto: string): string {
   if (!texto) return ''
   return texto.charAt(0).toUpperCase() + texto.slice(1)
-}
-
-export function formatarCnpjVisual(valor: string): string {
-  const digitos = valor.replace(/\D/g, '')
-  if (digitos.length !== 14) return valor
-  return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5, 8)}/${digitos.slice(8, 12)}-${digitos.slice(12, 14)}`
 }
 
 interface CardAcao {
