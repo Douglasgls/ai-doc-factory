@@ -6,7 +6,7 @@ declaram a dependência (por rota) ou passam o usuário às listagens.
 - prestador: leitura e escrita em lotes de contratos ATIVOS do seu prestador (com tomador e prestador ativos).
 - Lote sem contrato: só plataforma. Fora do escopo = 404, igual a inexistente.
 
-Listagens filtram na consulta SQL (`condicao_lote`, `condicao_contrato`); recurso por id passa pelas dependências
+Listagens filtram na consulta SQL (`filtro_lote`, `filtro_contrato`, expressões SQLAlchemy); recurso por id passa pelas dependências
 `lote_para_leitura`/`lote_para_escrita`/`documento_para_leitura`/`documento_para_escrita`."""
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import ColumnElement, and_, exists, false, func, select, true
@@ -38,26 +38,6 @@ def filtro_lote(usuario: UsuarioContexto, lote=Lote) -> ColumnElement[bool]:
     ce, te, pe = aliased(Contrato), aliased(Tomador), aliased(Prestador)
     return (select(1).select_from(ce).join(te, te.id == ce.tomador_id).join(pe, pe.id == ce.prestador_id)
             .where(ce.id == lote.contrato_id, filtro_contrato(usuario, ce, te, pe)).exists())
-
-
-def condicao_contrato(usuario: UsuarioContexto, c: str = "c", t: str = "t", p: str = "p") -> tuple[str, list]:
-    """Condição SQL sobre contrato `c` já unido a tomador `t` e prestador `p`, e seus parâmetros."""
-    if usuario.nivel == "plataforma":
-        return "TRUE", []
-    if usuario.nivel == "tomador":
-        return f"({c}.tomador_id = %s AND {t}.ativo)", [usuario.tomador_id]
-    if usuario.nivel == "prestador":
-        return f"({c}.prestador_id = %s AND {c}.ativo AND {t}.ativo AND {p}.ativo)", [usuario.prestador_id]
-    return "FALSE", []  # nível desconhecido: falha fechada
-
-
-def condicao_lote(usuario: UsuarioContexto, l: str = "l") -> tuple[str, list]:
-    """Condição SQL sobre a tabela `lote` (alias `l`): o lote está no escopo do usuário."""
-    if usuario.nivel == "plataforma":
-        return "TRUE", []
-    cond, args = condicao_contrato(usuario, "ce", "te", "pe")
-    return (f"EXISTS (SELECT 1 FROM contrato ce JOIN tomador te ON te.id = ce.tomador_id "
-            f"JOIN prestador pe ON pe.id = ce.prestador_id WHERE ce.id = {l}.contrato_id AND {cond})"), args
 
 
 _PRESTADOR_JA_TEM_ACESSO = "prestador já tem acesso; peça ao administrador dele para convidar"

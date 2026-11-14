@@ -233,11 +233,11 @@ def test_lote_busca_documentos(cenario, sessao):
     assert corpo["documentos"][-1]["confianca"] is None  # segmentado: nulos preservados
 
     achados = _confere("GET /busca", "/busca?q=schemasunico&limite=100", ResultadoBuscaOut,
-                       busca_actions.buscar("schemasunico", 100, PLATAFORMA))
+                       busca_actions.buscar(sessao, "schemasunico", 100, PLATAFORMA))
     assert {a["documento_id"] for a in achados} >= set(ids)
     assert "529.982.247-25" not in json.dumps(achados)  # anonimização preservada
     assert _confere("GET /busca", "/busca?q=palavrainexistentezzz", ResultadoBuscaOut,
-                    busca_actions.buscar("palavrainexistentezzz", 20, PLATAFORMA)) == []
+                    busca_actions.buscar(sessao, "palavrainexistentezzz", 20, PLATAFORMA)) == []
 
     doc = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[0]}", DocumentoOut,
                    doc_actions.obter_documento(sessao, ids[0]))
