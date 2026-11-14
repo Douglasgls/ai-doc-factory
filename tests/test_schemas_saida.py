@@ -369,31 +369,31 @@ def test_analise_ponto(cenario, monkeypatch):
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto
 
 
-def test_organizacoes(orgs):
+def test_organizacoes(orgs, sessao):
     def achar(itens, id_):
         return next(i for i in itens if i["id"] == id_)
     r = client.post("/tomadores", json={"nome": "Schemas " + uuid.uuid4().hex[:8], "cnpj": "11.222.333/0001-81"})
     tomador = r.json()["id"]
     orgs.registrar("tomador", tomador)
-    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(), tomador), TomadorOut, status=201)
-    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores())
+    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(sessao), tomador), TomadorOut, status=201)
+    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores(sessao))
     assert achar(lista, tomador)["cnpj"] == "11222333000181"
 
     r = client.post("/prestadores", json={"cnpj": "12345678000195", "razao_social": "Schemas " + uuid.uuid4().hex[:8]})
     prestador = r.json()["id"]
     orgs.registrar("prestador", prestador)
-    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(), prestador), PrestadorOut,
+    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(sessao), prestador), PrestadorOut,
                       status=201)
-    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores())
+    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores(sessao))
 
     r = client.post("/contratos", json={"tomador_id": tomador, "prestador_id": prestador,
                                         "vigencia_inicio": "2026-01-01"})
     contrato = r.json()["id"]
     orgs.registrar("contrato", contrato)
-    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(usuario=PLATAFORMA), contrato), ContratoOut, status=201)
-    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(usuario=PLATAFORMA))
+    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(sessao, usuario=PLATAFORMA))
     filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
-                         org_actions.listar_contratos(tomador, prestador, usuario=PLATAFORMA))
+                         org_actions.listar_contratos(sessao, tomador, prestador, usuario=PLATAFORMA))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
 

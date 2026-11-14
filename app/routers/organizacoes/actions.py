@@ -1,26 +1,28 @@
-"""Tomadores, prestadores e contratos (só a plataforma). A unicidade e as chaves estrangeiras são garantidas
-pelo banco: o INSERT roda direto e a violação da constraint vira 409/404/422 (sem SELECT antes, sem corrida)."""
 import psycopg
 from fastapi import HTTPException
+from sqlalchemy import case, exists, func, insert, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from app import config
-from app.escopo import condicao_contrato
+from app.escopo import filtro_contrato
+from app.models import Contrato, Convite, Prestador, Tomador, Usuario
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.organizacoes.schemas import NovoContrato, NovoPrestador, NovoTomador
 
-_COLUNAS_TOMADOR = "id, nome, cnpj, ativo, criado_em"
-_COLUNAS_PRESTADOR = "id, cnpj, razao_social, ativo, criado_em"
-_SELECT_CONTRATO = """
-    SELECT c.id, c.tomador_id, c.prestador_id, c.ativo, c.vigencia_inicio, c.vigencia_fim, c.criado_em,
-           t.nome, t.ativo, p.razao_social, p.cnpj, p.ativo,
-           CASE WHEN EXISTS (SELECT 1 FROM usuario u WHERE u.prestador_id = p.id AND u.ativo) THEN 'ativo'
-                WHEN EXISTS (SELECT 1 FROM convite cv WHERE cv.prestador_id = p.id AND cv.usado_em IS NULL
-                             AND cv.expira_em > now()) THEN 'convite_pendente'
-                ELSE 'sem_acesso' END
-      FROM contrato c
-      JOIN tomador t ON t.id = c.tomador_id
-      JOIN prestador p ON p.id = c.prestador_id
-"""
+_COLUNAS_TOMADOR = (Tomador.id, Tomador.nome, Tomador.cnpj, Tomador.ativo, Tomador.criado_em)
+_COLUNAS_PRESTADOR = (Prestador.id, Prestador.cnpj, Prestador.razao_social, Prestador.ativo, Prestador.criado_em)
+
+
+def _select_contrato():
+    tem_usuario = exists().where(Usuario.prestador_id == Prestador.id, Usuario.ativo)
+    tem_convite = exists().where(Convite.prestador_id == Prestador.id, Convite.usado_em.is_(None),
+                                 Convite.expira_em > func.now())
+    acesso = case((tem_usuario, "ativo"), (tem_convite, "convite_pendente"), else_="sem_acesso")
+    return (select(Contrato.id, Contrato.tomador_id, Contrato.prestador_id, Contrato.ativo, Contrato.vigencia_inicio,
+                   Contrato.vigencia_fim, Contrato.criado_em, Tomador.nome, Tomador.ativo, Prestador.razao_social,
+                   Prestador.cnpj, Prestador.ativo, acesso)
+            .join(Tomador, Tomador.id == Contrato.tomador_id)
+            .join(Prestador, Prestador.id == Contrato.prestador_id))
 
 
 def _tomador(l) -> dict:
@@ -37,85 +39,85 @@ def _contrato(l) -> dict:
                      "acesso_prestador"), l))
 
 
-def _existente(consulta: str, args: tuple) -> int | None:
+def _existente(session: Session, consulta) -> int | None:
     """Id da linha que causou o conflito (só para a mensagem); None se já sumiu."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        linha = conn.execute(consulta, args).fetchone()
-    return linha[0] if linha else None
+    return session.execute(consulta).scalar()
 
 
 def _conflito(entidade: str, onde: str, id_: int | None) -> HTTPException:
     return HTTPException(409, f"já existe {entidade} {id_} com {onde}" if id_ else f"já existe {entidade} com {onde}")
 
 
-def criar_tomador(corpo: NovoTomador) -> dict:
+def criar_tomador(session: Session, corpo: NovoTomador) -> dict:
     try:
-        with psycopg.connect(config.DATABASE_URL) as conn:
-            return _tomador(conn.execute(
-                f"INSERT INTO tomador (nome, cnpj) VALUES (%s, %s) RETURNING {_COLUNAS_TOMADOR}",
-                (corpo.nome, corpo.cnpj)).fetchone())
-    except psycopg.errors.UniqueViolation as e:
-        if e.diag.constraint_name == "tomador_cnpj_key":
+        linha = session.execute(
+            insert(Tomador).values(nome=corpo.nome, cnpj=corpo.cnpj).returning(*_COLUNAS_TOMADOR)).one()
+        session.commit()
+        return _tomador(linha)
+    except IntegrityError as e:
+        session.rollback()  # a transação abortou; a consulta do id existente precisa de uma nova
+        if not isinstance(e.orig, psycopg.errors.UniqueViolation):
+            raise
+        if e.orig.diag.constraint_name == "tomador_cnpj_key":
             raise _conflito("o tomador", f"o CNPJ {corpo.cnpj}",
-                            _existente("SELECT id FROM tomador WHERE cnpj = %s", (corpo.cnpj,)))
+                            _existente(session, select(Tomador.id).where(Tomador.cnpj == corpo.cnpj)))
         raise _conflito("o tomador", f"o nome '{corpo.nome}' (sem diferenciar caixa nem espaços nas pontas)",
-                        _existente("SELECT id FROM tomador WHERE lower(btrim(nome)) = lower(btrim(%s))", (corpo.nome,)))
+                        _existente(session, select(Tomador.id).where(
+                            func.lower(func.btrim(Tomador.nome)) == func.lower(func.btrim(corpo.nome)))))
 
 
-def listar_tomadores() -> list[dict]:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        return [_tomador(l) for l in conn.execute(f"SELECT {_COLUNAS_TOMADOR} FROM tomador ORDER BY id")]
+def listar_tomadores(session: Session) -> list[dict]:
+    return [_tomador(l) for l in session.execute(select(*_COLUNAS_TOMADOR).order_by(Tomador.id))]
 
 
-def criar_prestador(corpo: NovoPrestador) -> dict:
+def criar_prestador(session: Session, corpo: NovoPrestador) -> dict:
     try:
-        with psycopg.connect(config.DATABASE_URL) as conn:
-            return _prestador(conn.execute(
-                f"INSERT INTO prestador (cnpj, razao_social) VALUES (%s, %s) RETURNING {_COLUNAS_PRESTADOR}",
-                (corpo.cnpj, corpo.razao_social)).fetchone())
-    except psycopg.errors.UniqueViolation:
+        linha = session.execute(insert(Prestador).values(cnpj=corpo.cnpj, razao_social=corpo.razao_social)
+                                .returning(*_COLUNAS_PRESTADOR)).one()
+        session.commit()
+        return _prestador(linha)
+    except IntegrityError as e:
+        session.rollback()
+        if not isinstance(e.orig, psycopg.errors.UniqueViolation):
+            raise
         raise _conflito("o prestador", f"o CNPJ {corpo.cnpj}",
-                        _existente("SELECT id FROM prestador WHERE cnpj = %s", (corpo.cnpj,)))
+                        _existente(session, select(Prestador.id).where(Prestador.cnpj == corpo.cnpj)))
 
 
-def listar_prestadores() -> list[dict]:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        return [_prestador(l) for l in conn.execute(f"SELECT {_COLUNAS_PRESTADOR} FROM prestador ORDER BY id")]
+def listar_prestadores(session: Session) -> list[dict]:
+    return [_prestador(l) for l in session.execute(select(*_COLUNAS_PRESTADOR).order_by(Prestador.id))]
 
 
-def criar_contrato(corpo: NovoContrato) -> dict:
+def criar_contrato(session: Session, corpo: NovoContrato) -> dict:
     try:
-        with psycopg.connect(config.DATABASE_URL) as conn:
-            id_ = conn.execute(
-                "INSERT INTO contrato (tomador_id, prestador_id, vigencia_inicio, vigencia_fim) "
-                "VALUES (%s, %s, %s, %s) RETURNING id",
-                (corpo.tomador_id, corpo.prestador_id, corpo.vigencia_inicio, corpo.vigencia_fim)).fetchone()[0]
-            return _contrato(conn.execute(_SELECT_CONTRATO + " WHERE c.id = %s", (id_,)).fetchone())
-    except psycopg.errors.UniqueViolation:
-        raise _conflito("o contrato", f"o tomador {corpo.tomador_id} e o prestador {corpo.prestador_id}",
-                        _existente("SELECT id FROM contrato WHERE tomador_id = %s AND prestador_id = %s",
-                                   (corpo.tomador_id, corpo.prestador_id)))
-    except psycopg.errors.ForeignKeyViolation as e:
-        quem = "prestador" if "prestador" in (e.diag.constraint_name or "") else "tomador"
-        id_ = corpo.prestador_id if quem == "prestador" else corpo.tomador_id
-        raise HTTPException(404, f"{quem} {id_} não encontrado")
-    except psycopg.errors.CheckViolation:  # contrato_vigencia_check (o schema já recusa antes; rede de segurança)
-        raise HTTPException(422, "vigencia_fim não pode ser anterior a vigencia_inicio")
+        id_ = session.execute(insert(Contrato).values(
+            tomador_id=corpo.tomador_id, prestador_id=corpo.prestador_id, vigencia_inicio=corpo.vigencia_inicio,
+            vigencia_fim=corpo.vigencia_fim).returning(Contrato.id)).scalar_one()
+        linha = session.execute(_select_contrato().where(Contrato.id == id_)).one()
+        session.commit()
+        return _contrato(linha)
+    except IntegrityError as e:
+        session.rollback()
+        erro = e.orig
+        if isinstance(erro, psycopg.errors.UniqueViolation):
+            raise _conflito("o contrato", f"o tomador {corpo.tomador_id} e o prestador {corpo.prestador_id}",
+                            _existente(session, select(Contrato.id).where(
+                                Contrato.tomador_id == corpo.tomador_id, Contrato.prestador_id == corpo.prestador_id)))
+        if isinstance(erro, psycopg.errors.ForeignKeyViolation):
+            quem = "prestador" if "prestador" in (erro.diag.constraint_name or "") else "tomador"
+            id_ = corpo.prestador_id if quem == "prestador" else corpo.tomador_id
+            raise HTTPException(404, f"{quem} {id_} não encontrado")
+        if isinstance(erro, psycopg.errors.CheckViolation):  # contrato_vigencia_check (o schema já recusa antes)
+            raise HTTPException(422, "vigencia_fim não pode ser anterior a vigencia_inicio")
+        raise
 
 
-def listar_contratos(tomador_id: int | None = None, prestador_id: int | None = None, *,
+def listar_contratos(session: Session, tomador_id: int | None = None, prestador_id: int | None = None, *,
                      usuario: UsuarioContexto) -> list[dict]:
     """Contratos no escopo de `usuario` (obrigatório), com filtros opcionais por tomador e prestador."""
-    condicoes, args = [], []
-    cond, cargs = condicao_contrato(usuario)
-    condicoes.append(cond)
-    args.extend(cargs)
+    consulta = _select_contrato().where(filtro_contrato(usuario))
     if tomador_id is not None:
-        condicoes.append("c.tomador_id = %s")
-        args.append(tomador_id)
+        consulta = consulta.where(Contrato.tomador_id == tomador_id)
     if prestador_id is not None:
-        condicoes.append("c.prestador_id = %s")
-        args.append(prestador_id)
-    where = f" WHERE {' AND '.join(condicoes)}" if condicoes else ""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        return [_contrato(l) for l in conn.execute(_SELECT_CONTRATO + where + " ORDER BY c.id", args)]
+        consulta = consulta.where(Contrato.prestador_id == prestador_id)
+    return [_contrato(l) for l in session.execute(consulta.order_by(Contrato.id))]
