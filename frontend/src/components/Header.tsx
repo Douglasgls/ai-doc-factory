@@ -1,5 +1,5 @@
 import React from 'react'
-import { Sun, Moon, LogOut, FileText } from 'lucide-react'
+import { Briefcase, Building2, FileText, LogOut, Moon, Sun, Users } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
 // import { Search } from 'lucide-react'
@@ -94,13 +94,14 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('organizacoes')}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'organizacoes'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
                     : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
                 }`}
               >
-                Organizações
+                <Building2 className="w-4 h-4" />
+                <span>Organizações</span>
               </button>
             )}
 
@@ -108,13 +109,14 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('terceirizadas')}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'terceirizadas'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
                     : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
                 }`}
               >
-                Terceirizadas
+                <Briefcase className="w-4 h-4" />
+                <span>Terceirizadas</span>
               </button>
             )}
 
@@ -122,13 +124,14 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('equipe')}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'equipe'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
                     : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
                 }`}
               >
-                Equipe
+                <Users className="w-4 h-4" />
+                <span>Equipe</span>
               </button>
             )}
 
