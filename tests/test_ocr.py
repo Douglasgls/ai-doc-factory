@@ -18,3 +18,21 @@ def test_ocr_portugues_com_acento(tmp_path):
     ImageDraw.Draw(im).text((50, 50), "Funcionário: Zeferino Tavares", fill="black", font=ImageFont.truetype(FONTE, 30))
     im.save(png)
     assert "Funcionário: Zeferino" in ocr_imagem(png)
+
+
+def test_tesseract_roda_com_uma_thread_openmp(monkeypatch, tmp_path):
+    """O paralelismo é do pool e das réplicas; cada tesseract não pode abrir uma thread por núcleo."""
+    import subprocess
+
+    from app import ocr
+
+    chamadas = []
+
+    def falso_run(cmd, **kw):
+        chamadas.append(kw.get("env") or {})
+        return subprocess.CompletedProcess(cmd, 0, stdout="texto\x00", stderr="")
+
+    monkeypatch.setattr(ocr.subprocess, "run", falso_run)
+    assert ocr.ocr_imagem(tmp_path / "x.png") == "texto"
+    assert chamadas[0].get("OMP_THREAD_LIMIT") == "1"
+    assert "PATH" in chamadas[0]  # herda o ambiente
