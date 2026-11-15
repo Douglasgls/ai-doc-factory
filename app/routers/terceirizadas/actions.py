@@ -2,11 +2,13 @@
 social), contrato ativo e, se o prestador ainda não tem acesso, o convite do administrador dele. A linha do prestador
 fica travada até o commit, então cadastros simultâneos do mesmo CNPJ se serializam: um prestador, um contrato por
 tomador e no máximo um convite."""
-import psycopg
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
 
-from app import config
 from app.escopo import prestador_tem_convite_pendente, prestador_tem_usuario_ativo
+from app.models import Contrato, Prestador, Tomador
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.convites.actions import criar_na_transacao
 from app.routers.terceirizadas.schemas import NovaTerceirizada
@@ -24,41 +26,43 @@ def _tomador_alvo(usuario: UsuarioContexto, corpo: NovaTerceirizada) -> int:
     return usuario.tomador_id
 
 
-def _prestador_travado(conn, cnpj: str, razao_social: str) -> tuple:
+def _prestador_travado(session: Session, cnpj: str, razao_social: str) -> tuple:
     """(id, cnpj, razao_social, ativo) do prestador do CNPJ, criado se não existir, com a linha travada."""
     for _ in range(3):
-        conn.execute("INSERT INTO prestador (cnpj, razao_social) VALUES (%s, %s) ON CONFLICT (cnpj) DO NOTHING",
-                     (cnpj, razao_social))
-        linha = conn.execute("SELECT id, cnpj, razao_social, ativo FROM prestador WHERE cnpj = %s "
-                             "FOR NO KEY UPDATE", (cnpj,)).fetchone()
+        session.execute(pg_insert(Prestador).values(cnpj=cnpj, razao_social=razao_social)
+                        .on_conflict_do_nothing(index_elements=[Prestador.cnpj]))
+        linha = session.execute(
+            select(Prestador.id, Prestador.cnpj, Prestador.razao_social, Prestador.ativo)
+            .where(Prestador.cnpj == cnpj).with_for_update(key_share=True)).first()
         if linha:
-            return linha
+            return tuple(linha)
     raise HTTPException(503, "não foi possível cadastrar agora; tente de novo")
 
 
-def cadastrar(corpo: NovaTerceirizada, usuario: UsuarioContexto) -> dict:
+def cadastrar(session: Session, corpo: NovaTerceirizada, usuario: UsuarioContexto) -> dict:
     tomador_id = _tomador_alvo(usuario, corpo)
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        ativo = conn.execute("SELECT ativo FROM tomador WHERE id = %s", (tomador_id,)).fetchone()
-        if ativo is None or not ativo[0]:
-            raise HTTPException(404, "tomador não encontrado ou desativado")
-        prestador_id, cnpj, razao_social, prestador_ativo = _prestador_travado(conn, corpo.cnpj, corpo.razao_social)
-        if not prestador_ativo:
-            raise HTTPException(409, "terceirizada desativada")
-        contrato = conn.execute("INSERT INTO contrato (tomador_id, prestador_id) VALUES (%s, %s) "
-                                "ON CONFLICT (tomador_id, prestador_id) DO NOTHING RETURNING id, ativo",
-                                (tomador_id, prestador_id)).fetchone()
-        if contrato is None:
-            raise HTTPException(409, "terceirizada já cadastrada")
-        convite = None
-        if prestador_tem_usuario_ativo(conn, prestador_id):
-            acesso = "ja_tem_acesso"
-        elif prestador_tem_convite_pendente(conn, prestador_id):
-            acesso = "convite_pendente"
-        else:
-            acesso = "convite_criado"
-            c = criar_na_transacao(conn, corpo.email, "prestador", "admin", None, prestador_id, usuario.id)
-            convite = {k: c[k] for k in ("id", "email", "expira_em", "token")}
+    ativo = session.execute(select(Tomador.ativo).where(Tomador.id == tomador_id)).first()
+    if ativo is None or not ativo[0]:
+        raise HTTPException(404, "tomador não encontrado ou desativado")
+    prestador_id, cnpj, razao_social, prestador_ativo = _prestador_travado(session, corpo.cnpj, corpo.razao_social)
+    if not prestador_ativo:
+        raise HTTPException(409, "terceirizada desativada")
+    contrato = session.execute(
+        pg_insert(Contrato).values(tomador_id=tomador_id, prestador_id=prestador_id)
+        .on_conflict_do_nothing(index_elements=[Contrato.tomador_id, Contrato.prestador_id])
+        .returning(Contrato.id, Contrato.ativo)).first()
+    if contrato is None:
+        raise HTTPException(409, "terceirizada já cadastrada")
+    convite = None
+    if prestador_tem_usuario_ativo(session, prestador_id):
+        acesso = "ja_tem_acesso"
+    elif prestador_tem_convite_pendente(session, prestador_id):
+        acesso = "convite_pendente"
+    else:
+        acesso = "convite_criado"
+        c = criar_na_transacao(session, corpo.email, "prestador", "admin", None, prestador_id, usuario.id)
+        convite = {k: c[k] for k in ("id", "email", "expira_em", "token")}
+    session.commit()
     return {"contrato": {"id": contrato[0], "ativo": contrato[1]},
             "prestador": {"id": prestador_id, "cnpj": cnpj, "razao_social": razao_social},
             "acesso": acesso, "convite": convite}

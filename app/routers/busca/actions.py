@@ -1,38 +1,35 @@
-import psycopg
+from sqlalchemy import func, literal_column, select
+from sqlalchemy.orm import Session
 
-from app import config
 from app.anonimizacao import mascarar_documentos
-from app.escopo import condicao_lote
+from app.escopo import filtro_lote
+from app.models import Documento, Lote, Pagina
 from app.routers.auth.actions import UsuarioContexto
 
 _OPCOES = "StartSel=<b>, StopSel=</b>, MaxFragments=2, MaxWords=25, MinWords=8"
+# Configuração como literal SQL (não parâmetro): a expressão do índice usa 'portuguese'::regconfig constante.
+_PT = literal_column("'portuguese'")
 
 
 # A expressão to_tsvector('portuguese', coalesce(texto, '')) precisa ser idêntica à do índice pagina_texto_fts_idx.
 # A busca acontece no texto original (achar por nome ou CPF segue funcionando); o trecho devolvido é montado
 # sobre o texto com CPF, RG e PIS mascarados, para a resposta não revelar o identificador.
-def buscar(q: str, limite: int, usuario: UsuarioContexto) -> list[dict]:
+def buscar(session: Session, q: str, limite: int, usuario: UsuarioContexto) -> list[dict]:
     """Resultados só dos lotes no escopo de `usuario` (obrigatório: sem ele não há filtro possível)."""
-    cond, cargs = condicao_lote(usuario)
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        linhas = conn.execute(
-            f"""
-            SELECT p.lote_id, p.numero, p.documento_id, d.tipo, l.nome_arquivo, coalesce(p.texto, '')
-              FROM pagina p
-              JOIN lote l ON l.id = p.lote_id
-              LEFT JOIN documento d ON d.id = p.documento_id,
-                   websearch_to_tsquery('portuguese', %s) AS query
-             WHERE to_tsvector('portuguese', coalesce(p.texto, '')) @@ query AND {cond}
-             ORDER BY ts_rank(to_tsvector('portuguese', coalesce(p.texto, '')), query) DESC, p.lote_id, p.numero
-             LIMIT %s
-            """,
-            (q, *cargs, limite),
-        ).fetchall()
-        saida = []
-        for lote_id, numero, doc_id, tipo, arquivo, texto in linhas:
-            trecho = conn.execute(
-                "SELECT ts_headline('portuguese', %s, websearch_to_tsquery('portuguese', %s), %s)",
-                (mascarar_documentos(texto), q, _OPCOES)).fetchone()[0]
-            saida.append({"lote_id": lote_id, "pagina": numero, "trecho": trecho, "documento_id": doc_id,
-                          "tipo": tipo, "nome_arquivo": arquivo})
+    consulta = func.websearch_to_tsquery(_PT, q)
+    vetor = func.to_tsvector(_PT, func.coalesce(Pagina.texto, literal_column("''")))
+    linhas = session.execute(
+        select(Pagina.lote_id, Pagina.numero, Pagina.documento_id, Documento.tipo, Lote.nome_arquivo,
+               func.coalesce(Pagina.texto, ""))
+        .join(Lote, Lote.id == Pagina.lote_id)
+        .outerjoin(Documento, Documento.id == Pagina.documento_id)
+        .where(vetor.op("@@")(consulta), filtro_lote(usuario))
+        .order_by(func.ts_rank(vetor, consulta).desc(), Pagina.lote_id, Pagina.numero)
+        .limit(limite)).all()
+    saida = []
+    for lote_id, numero, doc_id, tipo, arquivo, texto in linhas:
+        trecho = session.execute(select(func.ts_headline(_PT, mascarar_documentos(texto), consulta, _OPCOES))
+                                 ).scalar_one()
+        saida.append({"lote_id": lote_id, "pagina": numero, "trecho": trecho, "documento_id": doc_id,
+                      "tipo": tipo, "nome_arquivo": arquivo})
     return saida

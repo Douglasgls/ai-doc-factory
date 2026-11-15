@@ -156,7 +156,7 @@ def test_rota_download_documento_retorna_pdf_e_content_disposition(monkeypatch):
     monkeypatch.setattr(
         doc_actions,
         "download_documento",
-        lambda doc_id: (b"%PDF-1.4\n%mock\n", "holerite_douglas_paz_2026-03.pdf"),
+        lambda session, doc_id: (b"%PDF-1.4\n%mock\n", "holerite_douglas_paz_2026-03.pdf"),
     )
     client = TestClient(app)
     app.dependency_overrides[documento_para_leitura] = lambda: 123  # o documento 123 não existe no banco

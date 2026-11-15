@@ -1,7 +1,9 @@
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from app.database import get_session
 from app.routers.auth import actions
 from app.routers.auth.schemas import LoginIn, TokenOut, UsuarioOut
 
@@ -9,8 +11,8 @@ router = APIRouter(tags=["Autenticação"])
 
 
 @router.post("/auth/login", response_model=TokenOut)
-def login(dados: LoginIn):
-    return actions.login(dados.usuario, dados.senha)
+def login(dados: LoginIn, session: Session = Depends(get_session)):
+    return actions.login(session, dados.usuario, dados.senha)
 
 
 @router.get("/auth/me", response_model=UsuarioOut)

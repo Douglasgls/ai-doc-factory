@@ -119,3 +119,13 @@ def orgs():
     conn.execute("DELETE FROM prestador WHERE id = ANY(%s)", (criados["prestador"],))
     conn.execute("DELETE FROM tomador WHERE id = ANY(%s)", (criados["tomador"],))
     conn.close()
+
+
+@pytest.fixture
+def sessao():
+    """Sessão SQLAlchemy para chamar actions direto (as rotas recebem a delas por Depends(get_session)).
+    Fecha no fim do teste; quem escreve faz o commit na própria action, como na requisição."""
+    from app.database import SessionLocal
+    s = SessionLocal()
+    yield s
+    s.close()

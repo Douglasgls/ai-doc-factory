@@ -263,8 +263,24 @@ def resolver_colisoes_nomes(itens: list[tuple[int, str]]) -> dict[int, str]:
     return saida
 
 
+def _padrao_colisao(nome_base: str) -> str:
+    """Regex (Postgres `~`) dos nomes que colidem com `nome_base`: o próprio ou com sufixo _NN."""
+    stem = nome_base[:-4] if nome_base.endswith(".pdf") else nome_base
+    return f"^{re.escape(stem)}(?:_[0-9]{{2}})?\\.pdf$"
+
+
+def _nomes_finais(nome_base: str, concorrentes: list, documento_id: int) -> dict[int, str]:
+    """documento_id -> nome final. Sem concorrentes, só o nome base; com eles, numeração determinística
+    (_01, _02, ...) entre todos os documentos com a mesma referência, por ordem de id."""
+    if not concorrentes:
+        return {documento_id: nome_base}
+    todos = sorted([(cid, nome_base) for cid, _ in concorrentes] + [(documento_id, nome_base)], key=lambda x: x[0])
+    return resolver_colisoes_nomes(todos)
+
+
 def atualizar_nome_padronizado(conn, documento_id: int) -> str | None:
-    """Recalcula e persiste `documento.nome_padronizado` a partir dos campos atuais e resolve colisões."""
+    """Recalcula e persiste `documento.nome_padronizado` a partir dos campos atuais e resolve colisões.
+    Versão com conexão psycopg (worker); as rotas usam `atualizar_nome_padronizado_sessao`."""
     row = conn.execute(
         "SELECT d.tipo, d.lote_id, l.nome_arquivo, l.contrato_id, p.razao_social "
         "FROM documento d "
@@ -289,8 +305,7 @@ def atualizar_nome_padronizado(conn, documento_id: int) -> str | None:
         nome_empresa_lote=nome_empresa_lote,
         nome_original=nome_original,
     )
-    stem = nome_base[:-4] if nome_base.endswith(".pdf") else nome_base
-    padrao_colisao = f"^{re.escape(stem)}(?:_[0-9]{{2}})?\\.pdf$"
+    padrao_colisao = _padrao_colisao(nome_base)
 
     if contrato_id is not None:
         concorrentes = conn.execute(
@@ -308,20 +323,50 @@ def atualizar_nome_padronizado(conn, documento_id: int) -> str | None:
             (lote_id, documento_id, padrao_colisao),
         ).fetchall()
 
-    if not concorrentes:
-        conn.execute(
-            "UPDATE documento SET nome_padronizado = %s WHERE id = %s",
-            (nome_base, documento_id),
-        )
-        return nome_base
-
-    # Garante numeração determinística (_01, _02, ...) entre os documentos com mesma referência
-    todos = sorted([(cid, nome_base) for cid, _ in concorrentes] + [(documento_id, nome_base)], key=lambda x: x[0])
-    resolvidos = resolver_colisoes_nomes(todos)
-    for cid, nome_final in resolvidos.items():
+    finais = _nomes_finais(nome_base, concorrentes, documento_id)
+    for cid, nome_final in finais.items():
         conn.execute(
             "UPDATE documento SET nome_padronizado = %s WHERE id = %s",
             (nome_final, cid),
         )
-    return resolvidos[documento_id]
+    return finais[documento_id]
 
+
+def atualizar_nome_padronizado_sessao(session, documento_id: int) -> str | None:
+    """Mesma regra de `atualizar_nome_padronizado`, sobre uma sessão SQLAlchemy (rotas). O commit é de quem chama."""
+    from sqlalchemy import select, update
+
+    from app.models import Contrato, Documento, DocumentoCampo, Lote, Prestador
+
+    row = session.execute(
+        select(Documento.tipo, Documento.lote_id, Lote.nome_arquivo, Lote.contrato_id, Prestador.razao_social)
+        .join(Lote, Lote.id == Documento.lote_id)
+        .outerjoin(Contrato, Contrato.id == Lote.contrato_id)
+        .outerjoin(Prestador, Prestador.id == Contrato.prestador_id)
+        .where(Documento.id == documento_id)).first()
+    if row is None:
+        return None
+    tipo, lote_id, nome_original, contrato_id, nome_empresa_lote = row
+    campos = dict(session.execute(
+        select(DocumentoCampo.campo, DocumentoCampo.valor).where(DocumentoCampo.documento_id == documento_id)).all())
+    nome_base = gerar_nome_padronizado(
+        tipo,
+        campos,
+        documento_id=documento_id,
+        nome_empresa_lote=nome_empresa_lote,
+        nome_original=nome_original,
+    )
+    # `~` (regex do Postgres) não tem operador pronto no ORM: .op("~")
+    colide = Documento.nome_padronizado.op("~")(_padrao_colisao(nome_base))
+    consulta = select(Documento.id, Documento.nome_padronizado).where(Documento.id != documento_id, colide)
+    if contrato_id is not None:
+        consulta = consulta.join(Lote, Lote.id == Documento.lote_id).where(Lote.contrato_id == contrato_id)
+    else:
+        consulta = consulta.where(Documento.lote_id == lote_id)
+    concorrentes = session.execute(consulta.order_by(Documento.id)).all()
+
+    finais = _nomes_finais(nome_base, concorrentes, documento_id)
+    for cid, nome_final in finais.items():
+        session.execute(update(Documento).where(Documento.id == cid).values(nome_padronizado=nome_final)
+                        .execution_options(synchronize_session=False))
+    return finais[documento_id]

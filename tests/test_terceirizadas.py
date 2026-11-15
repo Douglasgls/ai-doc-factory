@@ -270,8 +270,8 @@ def test_membro_do_prestador_nao_convida(mundo):
     assert mundo.convidar(h, nivel="prestador", papel="membro", prestador_id=p).status_code == 403
 
 
-def test_pode_convidar_matriz_direta(mundo):
-    """A função de decisão, chamada direto (com conn), sem passar pelo HTTP."""
+def test_pode_convidar_matriz_direta(mundo, sessao):
+    """A função de decisão, chamada direto (com sessão), sem passar pelo HTTP."""
     t, p = mundo.tomador(), mundo.prestador()
     mundo.contrato(t, p)
     plat = mundo.contexto(mundo.usuario())
@@ -279,7 +279,7 @@ def test_pode_convidar_matriz_direta(mundo):
     mem_t = mundo.contexto(mundo.usuario("tomador", "membro", tomador_id=t))
     adm_p = mundo.contexto(mundo.usuario("prestador", "admin", prestador_id=p))
     mem_p = mundo.contexto(mundo.usuario("prestador", "membro", prestador_id=p))
-    c = mundo.db
+    c = sessao
     assert pode_convidar(c, plat, "plataforma", "admin", None, None)
     assert pode_convidar(c, plat, "tomador", "membro", t, None)
     assert pode_convidar(c, adm_t, "tomador", "membro", t, None)

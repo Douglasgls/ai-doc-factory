@@ -169,7 +169,7 @@ def test_saude_e_tipos():
     assert [t["slug"] for t in tipos] == list(config.TIPOS_INFO)
 
 
-def test_upload_de_lote():
+def test_upload_de_lote(sessao):
     pdf = b"%PDF-1.4 " + uuid.uuid4().hex.encode()
     r = client.post("/lotes", files={"arquivo": ("a.pdf", pdf, "application/pdf")})
     assert r.status_code == 200, r.text
@@ -180,23 +180,23 @@ def test_upload_de_lote():
         r2 = client.post("/lotes", files={"arquivo": ("a.pdf", pdf, "application/pdf")})
         assert r2.json()["existente"] is True and r2.json()["lote_id"] == lote
         assert "reprocessando" not in r2.json()  # chave condicional: ausente fora do reenvio de lote em erro
-        _confere_resposta("POST /lotes", r2, lote_actions.criar_lote(pdf, pdf, "a.pdf"), LoteCriadoOut)
+        _confere_resposta("POST /lotes", r2, lote_actions.criar_lote(sessao, pdf, pdf, "a.pdf"), LoteCriadoOut)
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
-def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch):
+def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch, sessao):
     monkeypatch.setattr(lote_actions, "enfileirar", lambda *a, **k: None)
     pdf = b"%PDF-1.4 " + uuid.uuid4().hex.encode()
-    lote = lote_actions.criar_lote(pdf, pdf, "e.pdf")["lote_id"]
+    lote = lote_actions.criar_lote(sessao, pdf, pdf, "e.pdf")["lote_id"]
 
     def em_erro():
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("UPDATE lote SET estado = 'erro' WHERE id = %s", (lote,))
     try:
         em_erro()
-        esperado = lote_actions.criar_lote(pdf, pdf, "e.pdf")  # a action reprocessa e devolve reprocessando
+        esperado = lote_actions.criar_lote(sessao, pdf, pdf, "e.pdf")  # a action reprocessa e devolve reprocessando
         assert esperado["reprocessando"] is True
         em_erro()
         r = client.post("/lotes", files={"arquivo": ("e.pdf", pdf, "application/pdf")})
@@ -208,11 +208,11 @@ def test_reenvio_de_lote_em_erro_devolve_reprocessando(monkeypatch):
             conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
-def test_lote_com_e_sem_eventos(cenario, limpar_eventos):
+def test_lote_com_e_sem_eventos(cenario, limpar_eventos, sessao):
     lote, ids = cenario
     limpar_eventos.append(lote)
     redis_cliente.delete(eventos._chave_progresso(lote), eventos._chave_historico(lote))
-    sem = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(lote))
+    sem = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
     assert sem["ultimo_evento"] is None and sem["historico_eventos"] == []
 
     eventos.publicar_evento(lote, "ocr", "Lendo OCR", r=redis_cliente, pagina_atual=1, total_paginas=3)
@@ -220,59 +220,59 @@ def test_lote_com_e_sem_eventos(cenario, limpar_eventos):
                             estado_documento="classificado", docs_pendentes=2, total_documentos=5)
     eventos.publicar_evento(lote, "concluido", "Pronto", r=redis_cliente, segmentacao_ambigua=False,
                             extra_desconhecido="preservado")  # chave fora do schema não pode sumir
-    com = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(lote))
+    com = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
     assert [e["etapa"] for e in com["historico_eventos"]] == ["ocr", "classificando", "concluido"]
     assert com["ultimo_evento"]["etapa"] == "concluido" and com["ultimo_evento"]["extra_desconhecido"] == "preservado"
     assert com["historico_eventos"][0]["pagina_atual"] == 1 and "docs_pendentes" not in com["historico_eventos"][0]
 
 
-def test_lote_busca_documentos(cenario):
+def test_lote_busca_documentos(cenario, sessao):
     lote, ids = cenario
-    corpo = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(lote))
+    corpo = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
     assert [d["id"] for d in corpo["documentos"]] == ids
     assert corpo["documentos"][-1]["confianca"] is None  # segmentado: nulos preservados
 
     achados = _confere("GET /busca", "/busca?q=schemasunico&limite=100", ResultadoBuscaOut,
-                       busca_actions.buscar("schemasunico", 100, PLATAFORMA))
+                       busca_actions.buscar(sessao, "schemasunico", 100, PLATAFORMA))
     assert {a["documento_id"] for a in achados} >= set(ids)
     assert "529.982.247-25" not in json.dumps(achados)  # anonimização preservada
     assert _confere("GET /busca", "/busca?q=palavrainexistentezzz", ResultadoBuscaOut,
-                    busca_actions.buscar("palavrainexistentezzz", 20, PLATAFORMA)) == []
+                    busca_actions.buscar(sessao, "palavrainexistentezzz", 20, PLATAFORMA)) == []
 
     doc = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[0]}", DocumentoOut,
-                   doc_actions.obter_documento(ids[0]))
+                   doc_actions.obter_documento(sessao, ids[0]))
     assert "529.982.247-25" not in doc["paginas"][0]["texto"]
     assert doc["campos"]["cpf"] != CPF and doc["pessoa"] == "Maria Silva"
     assert doc["campos"]["rg"] != "12.345.678-9" and doc["campos"]["pis"] != "123.45678.90-1"  # máscara aplicada
     sem_campos = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[4]}", DocumentoOut,
-                          doc_actions.obter_documento(ids[4]))
+                          doc_actions.obter_documento(sessao, ids[4]))
     assert sem_campos["campos"] == {} and sem_campos["pessoa"] is None and sem_campos["confianca"] is None
 
-    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(usuario=PLATAFORMA))
+    grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(sessao, usuario=PLATAFORMA))
     assert grupos["grupos"]
     _confere("GET /documentos", "/documentos?falhou=true", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, True, usuario=PLATAFORMA))
+             doc_actions.listar_documentos(sessao, None, True, usuario=PLATAFORMA))
     _confere("GET /documentos", "/documentos?falhou=false", DocumentosAgrupadosOut,
-             doc_actions.listar_documentos(None, False, usuario=PLATAFORMA))
+             doc_actions.listar_documentos(sessao, None, False, usuario=PLATAFORMA))
 
 
-def test_revisao_e_correcoes(cenario, extracoes):
+def test_revisao_e_correcoes(cenario, extracoes, sessao):
     lote, ids = cenario
-    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao(PLATAFORMA))
+    fila = _confere("GET /revisao", "/revisao", ItemFilaRevisaoOut, rev_actions.fila_revisao(sessao, PLATAFORMA))
     assert ids[3] in {i["id"] for i in fila}
 
     r = client.post(f"/documentos/{ids[3]}/revisao", json={"tipo": "atestado_medico", "revisor": "ana"})
     corpo = _confere_resposta("POST /documentos/{documento_id}/revisao", r,
-                              rev_actions.revisar_documento(ids[3], Revisao(tipo="atestado_medico", revisor="ana")),
+                              rev_actions.revisar_documento(sessao, ids[3], Revisao(tipo="atestado_medico", revisor="ana")),
                               RevisaoOut, ignorar=("revisado_em",))  # a segunda chamada regrava revisado_em
     assert set(corpo) == {"id", "estado", "tipo", "tipo_original", "revisor", "revisado_em"}
     assert corpo["tipo_original"] == "recibo_ferias" and corpo["estado"] == "revisado"
 
     r = client.patch(f"/documentos/{ids[1]}/tipo", json={"tipo": "aso", "revisor": "ana"})
-    _confere_resposta("PATCH /documentos/{documento_id}/tipo", r, doc_actions.obter_documento(ids[1]), DocumentoOut)
+    _confere_resposta("PATCH /documentos/{documento_id}/tipo", r, doc_actions.obter_documento(sessao, ids[1]), DocumentoOut)
 
     r = client.put(f"/documentos/{ids[0]}/campos", json={"campos": {"nome": "Outra Pessoa"}, "revisor": "ana"})
-    corpo = _confere_resposta("PUT /documentos/{documento_id}/campos", r, doc_actions.obter_documento(ids[0]),
+    corpo = _confere_resposta("PUT /documentos/{documento_id}/campos", r, doc_actions.obter_documento(sessao, ids[0]),
                               DocumentoOut)
     assert corpo["campos"]["nome"] == "Outra Pessoa"
 
@@ -295,10 +295,10 @@ def empresa_sem_nada_analisavel():
         conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
-def test_conformidade(cenario, empresa_sem_nada_analisavel):
+def test_conformidade(cenario, empresa_sem_nada_analisavel, sessao):
     lote, ids = cenario
     emp = _confere("GET /empresas/{cnpj:path}/conformidade", f"/empresas/{CNPJ}/conformidade", ConformidadeEmpresaOut,
-                   emp_actions.conformidade_empresa(CNPJ))
+                   emp_actions.conformidade_empresa(sessao, CNPJ))
     regras = {(d["criterio"], d["regra"]) for d in emp["geral"]["descontos"]}
     assert ("validade", "documento_vencido") in regras and ("consistencia", "campo_divergente") in regras
     assert emp["geral"]["pendencias"], "o cenário precisa exercitar as pendências"
@@ -311,30 +311,30 @@ def test_conformidade(cenario, empresa_sem_nada_analisavel):
     assert diverg["cpf"] != CPF  # CPF mascarado na resposta
 
     b = _confere("GET /empresas/{cnpj:path}/conformidade", f"/empresas/{CNPJ_B}/conformidade", ConformidadeEmpresaOut,
-                 emp_actions.conformidade_empresa(CNPJ_B))
+                 emp_actions.conformidade_empresa(sessao, CNPJ_B))
     assert b["geral"]["score"] is None and b["geral"]["provisorio"] is True
 
-    resumos = _confere("GET /empresas", "/empresas", EmpresaResumoOut, emp_actions.listar_empresas())
+    resumos = _confere("GET /empresas", "/empresas", EmpresaResumoOut, emp_actions.listar_empresas(sessao))
     assert {CNPJ, CNPJ_B} <= {e["cnpj"] for e in resumos}
 
     corpo = _confere("GET /lotes/{lote_id}/conformidade", f"/lotes/{lote}/conformidade", ConformidadeLoteOut,
-                     emp_actions.conformidade_lote(lote))
+                     emp_actions.conformidade_lote(sessao, lote))
     assert [s["documento"] for s in corpo["sem_empresa"]] == [ids[4]]
     assert corpo["empresas"][0]["documentos"] == sorted(ids[:4])
     _confere("GET /lotes/{lote_id}/conformidade", f"/lotes/{empresa_sem_nada_analisavel}/conformidade",
-             ConformidadeLoteOut, emp_actions.conformidade_lote(empresa_sem_nada_analisavel))
+             ConformidadeLoteOut, emp_actions.conformidade_lote(sessao, empresa_sem_nada_analisavel))
 
 
-def test_analise_ponto(cenario, monkeypatch):
+def test_analise_ponto(cenario, monkeypatch, sessao):
     lote, ids = cenario
     rota = "GET /documentos/{documento_id}/analise-ponto"
     url = f"/documentos/{ids[2]}/analise-ponto"
-    pendente = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    pendente = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert pendente == {"documento_id": ids[2], "estado": "pendente"}
 
     # folha só com dias úteis: o descanso semanal não é avaliado (nao_avaliada, motivo; campos do Jev nulos)
     _analisar_ponto(monkeypatch, ids[2])
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["estado"] == "concluida" and corpo["score_geral"] == pytest.approx(2 / 3)
     assert corpo["divergencias"][0]["base_legal"] and set(corpo["scores_dimensao"]) == {
         "horas_extras", "intervalos", "descanso", "registro"}
@@ -345,59 +345,59 @@ def test_analise_ponto(cenario, monkeypatch):
 
     # semana completa: descanso avaliado
     _analisar_ponto(monkeypatch, ids[2], marcacoes=SEMANA_COMPLETA)
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["contagens"]["nao_avaliadas"] == [] and corpo["scores_dimensao"]["descanso"]["score"] == 0.0
 
     # dimensão indeterminada (confiança baixa): normalizado nulo, revisão pedida
     _analisar_ponto(monkeypatch, ids[2], marcacoes=SEMANA_COMPLETA, confianca_intervalos=0.1)
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["scores_dimensao"]["intervalos"]["indeterminada"] is True
     assert corpo["scores_dimensao"]["intervalos"]["normalizado"] is None and corpo["requer_revisao"] is True
 
     # horário contratual e totais declarados lidos da folha
     _analisar_ponto(monkeypatch, ids[2], horario_contratual=[["08:00", "12:00"], ["13:00", "17:00"]],
                     totais_declarados={"total_horas_min": 2400, "horas_extras_min": 0})
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert corpo["totais"]["declarados"]["comparado"] is True and corpo["totais"]["horario_contratual"]
 
     # falha definitiva: linha em erro, sem os demais campos
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         analise._gravar(conn, ids[2], "erro", {}, erro="análise falhou após as tentativas")
-    erro = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(ids[2]))
+    erro = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
     assert erro["estado"] == "erro" and erro["erro"] and erro["score_geral"] is None
 
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto
 
 
-def test_organizacoes(orgs):
+def test_organizacoes(orgs, sessao):
     def achar(itens, id_):
         return next(i for i in itens if i["id"] == id_)
     r = client.post("/tomadores", json={"nome": "Schemas " + uuid.uuid4().hex[:8], "cnpj": "11.222.333/0001-81"})
     tomador = r.json()["id"]
     orgs.registrar("tomador", tomador)
-    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(), tomador), TomadorOut, status=201)
-    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores())
+    _confere_resposta("POST /tomadores", r, achar(org_actions.listar_tomadores(sessao), tomador), TomadorOut, status=201)
+    lista = _confere("GET /tomadores", "/tomadores", TomadorOut, org_actions.listar_tomadores(sessao))
     assert achar(lista, tomador)["cnpj"] == "11222333000181"
 
     r = client.post("/prestadores", json={"cnpj": "12345678000195", "razao_social": "Schemas " + uuid.uuid4().hex[:8]})
     prestador = r.json()["id"]
     orgs.registrar("prestador", prestador)
-    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(), prestador), PrestadorOut,
+    _confere_resposta("POST /prestadores", r, achar(org_actions.listar_prestadores(sessao), prestador), PrestadorOut,
                       status=201)
-    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores())
+    _confere("GET /prestadores", "/prestadores", PrestadorOut, org_actions.listar_prestadores(sessao))
 
     r = client.post("/contratos", json={"tomador_id": tomador, "prestador_id": prestador,
                                         "vigencia_inicio": "2026-01-01"})
     contrato = r.json()["id"]
     orgs.registrar("contrato", contrato)
-    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(usuario=PLATAFORMA), contrato), ContratoOut, status=201)
-    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(usuario=PLATAFORMA))
+    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(sessao, usuario=PLATAFORMA))
     filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
-                         org_actions.listar_contratos(tomador, prestador, usuario=PLATAFORMA))
+                         org_actions.listar_contratos(sessao, tomador, prestador, usuario=PLATAFORMA))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
 
-def test_auth_login_e_me(auth_real):
+def test_auth_login_e_me(auth_real, sessao):
     email = f"schemas-{uuid.uuid4().hex[:8]}@exemplo.invalid"
     senha = "senha-de-teste-schemas"
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
@@ -406,11 +406,11 @@ def test_auth_login_e_me(auth_real):
             "'plataforma', 'admin') RETURNING id", (email, senhas.gerar_hash(senha, n=2 ** 10, r=8, p=1))).fetchone()[0]
     try:
         r = client.post("/auth/login", json={"usuario": email, "senha": senha})
-        corpo = _confere_resposta("POST /auth/login", r, auth_actions.login(email, senha), TokenOut,
+        corpo = _confere_resposta("POST /auth/login", r, auth_actions.login(sessao, email, senha), TokenOut,
                                   ignorar=("access_token", "expira_em"))  # token e expiração mudam a cada chamada
         assert corpo["access_token"] and corpo["expira_em"]
         token = corpo["access_token"]
-        contexto = auth_actions.exigir_usuario(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
+        contexto = auth_actions.exigir_usuario(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token), sessao)
         r = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         corpo = _confere_resposta("GET /auth/me", r, {**asdict(contexto), "usuario": contexto.email}, UsuarioOut)
         assert corpo["id"] == uid and corpo["usuario"] == email and corpo["nivel"] == "plataforma"
@@ -419,7 +419,7 @@ def test_auth_login_e_me(auth_real):
             conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
 
 
-def test_convites(auth_real):
+def test_convites(auth_real, sessao):
     import time
 
     import jwt
@@ -434,12 +434,12 @@ def test_convites(auth_real):
         r = client.post("/convites", headers=h, json={"email": email, "nivel": "plataforma", "papel": "membro"})
         assert r.status_code == 201
         token = r.json()["token"]
-        listado = next(c for c in conv_actions.listar(PLATAFORMA) if c["id"] == r.json()["id"])
+        listado = next(c for c in conv_actions.listar(sessao, PLATAFORMA) if c["id"] == r.json()["id"])
         crua = {k: listado[k] for k in ("id", "email", "nivel", "papel", "expira_em")} | {"token": token}
         _confere_resposta("POST /convites", r, crua, ConviteCriadoOut, status=201)
-        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(PLATAFORMA), ConviteOut)
+        _confere_resposta("GET /convites", client.get("/convites", headers=h), conv_actions.listar(sessao, PLATAFORMA), ConviteOut)
         r = client.get(f"/convites/{token}")
-        _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(token), ConvitePublicoOut)
+        _confere_resposta("GET /convites/{token}", r, conv_actions.consultar(sessao, token), ConvitePublicoOut)
         r = client.post(f"/convites/{token}/aceitar", json={"nome": "Pessoa Schemas", "senha": "senha-de-teste-schemas"})
         contexto = auth_actions.UsuarioContexto(id=0, email=email, nome="x", nivel="plataforma", papel="membro",
                                                 tomador_id=None, prestador_id=None)
@@ -452,7 +452,7 @@ def test_convites(auth_real):
             conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
 
 
-def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch):
+def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch, sessao):
     sufixo = uuid.uuid4().hex[:8]
     email_plat, email_conv = f"schemas-plat-{sufixo}@exemplo.invalid", f"schemas-terc-{sufixo}@exemplo.invalid"
     tomador = orgs.tomador()
@@ -474,7 +474,7 @@ def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch):
         corpo = _confere_resposta("POST /terceirizadas", r, gravado[0], TerceirizadaOut, status=201)
         assert corpo["acesso"] == "convite_criado" and corpo["convite"]["token"]
         r = client.get("/usuarios", headers=h)
-        _confere_resposta("GET /usuarios", r, usu_actions.listar(auth_actions.UsuarioContexto(
+        _confere_resposta("GET /usuarios", r, usu_actions.listar(sessao, auth_actions.UsuarioContexto(
             id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
             prestador_id=None)), UsuarioListadoOut)
         assert "senha_hash" not in r.text and uid in [u["id"] for u in r.json()]

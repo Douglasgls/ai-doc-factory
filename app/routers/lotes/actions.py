@@ -9,8 +9,13 @@ from pathlib import Path
 import psycopg
 from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app import config
+from app.database import SessionLocal
 from app.escopo import exigir_contrato_de_upload
 from app.eventos import (
     canal_lote,
@@ -22,6 +27,7 @@ from app.eventos import (
     tarefas_pos_pendentes,
 )
 from app.filas import enfileirar
+from app.models import AnalisePonto, Contrato, Documento, Lote, Prestador, Tomador
 from app.routers import r
 from app.routers.auth.actions import UsuarioContexto
 
@@ -29,38 +35,38 @@ log = logging.getLogger(__name__)
 STREAM_TETO_SEGUNDOS = 900  # tempo real máximo (time.monotonic) de uma conexão SSE
 
 
-def validar_contrato(contrato_id: int | None, usuario: UsuarioContexto) -> None:
+def validar_contrato(session: Session, contrato_id: int | None, usuario: UsuarioContexto) -> None:
     """Prestador: contrato_id obrigatório (422) e contrato dele ativo (senão 404, sem revelar existência).
     Plataforma: sem contrato_id nada é validado e o lote fica sem contrato
     (lote sem contrato é só da plataforma); com ele, 404 se não existe e 409 se ele, o tomador ou o prestador
     estão inativos."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        exigir_contrato_de_upload(conn, usuario, contrato_id)
-        if contrato_id is None:
-            return
-        linha = conn.execute(
-            "SELECT c.ativo, t.ativo, p.ativo FROM contrato c "
-            "JOIN tomador t ON t.id = c.tomador_id JOIN prestador p ON p.id = c.prestador_id WHERE c.id = %s",
-            (contrato_id,)).fetchone()
+    exigir_contrato_de_upload(session, usuario, contrato_id)
+    if contrato_id is None:
+        return
+    linha = session.execute(
+        select(Contrato.ativo, Tomador.ativo, Prestador.ativo)
+        .join(Tomador, Tomador.id == Contrato.tomador_id).join(Prestador, Prestador.id == Contrato.prestador_id)
+        .where(Contrato.id == contrato_id)).first()
+    session.commit()  # a validação é uma transação própria, como antes; o upload abre outra
     if linha is None:
         raise HTTPException(404, f"contrato {contrato_id} não encontrado")
     if not all(linha):
         raise HTTPException(409, f"contrato {contrato_id} inativo (ou de tomador/prestador inativo)")
 
 
-def _reenvio(conn, sha: str, pdf: bytes, contrato_id: int | None) -> tuple[dict, bool]:
+def _reenvio(session: Session, sha: str, pdf: bytes, contrato_id: int | None) -> tuple[dict, bool]:
     """Mesmo arquivo já enviado NESTE contrato (ou, sem contrato, já enviado sem contrato): devolve o lote existente
     e diz se precisa enfileirar a segmentação. Lote em 'erro' volta para 'recebido' (reprocessa); 'ocr',
     'classificando' e 'concluido' ficam como estão. O lote nunca troca de contrato."""
-    id_, estado = conn.execute(
-        "SELECT id, estado FROM lote WHERE sha256 = %s AND contrato_id IS NOT DISTINCT FROM %s",
-        (sha, contrato_id)).fetchone()
+    id_, estado = session.execute(
+        select(Lote.id, Lote.estado).where(Lote.sha256 == sha, Lote.contrato_id.is_not_distinct_from(contrato_id))
+    ).one()
     reprocessando = False
     if estado == "erro":
         # atômico: de dois reenvios simultâneos, só um enxerga 'erro' e enfileira
-        reprocessando = conn.execute(
-            "UPDATE lote SET estado = 'recebido' WHERE id = %s AND estado = 'erro' RETURNING id",
-            (id_,)).fetchone() is not None
+        reprocessando = session.execute(
+            update(Lote).where(Lote.id == id_, Lote.estado == "erro").values(estado="recebido").returning(Lote.id)
+            .execution_options(synchronize_session=False)).first() is not None
         if reprocessando:
             estado = "recebido"
     # em 'recebido' o enfileirar original pode ter falhado; job duplicado é aceitável (handlers idempotentes)
@@ -76,27 +82,31 @@ def _reenvio(conn, sha: str, pdf: bytes, contrato_id: int | None) -> tuple[dict,
     return resposta, reenfileirar
 
 
-def criar_lote(dados: bytes, pdf: bytes, nome_arquivo: str | None, contrato_id: int | None = None) -> dict:
+def criar_lote(session: Session, dados: bytes, pdf: bytes, nome_arquivo: str | None,
+               contrato_id: int | None = None) -> dict:
     sha = hashlib.sha256(dados).hexdigest()  # dos bytes originais enviados, PDF ou imagem
     # A unicidade do arquivo é por contrato (dois índices únicos parciais): o ON CONFLICT mira o índice do caso.
-    alvo = "(contrato_id, sha256) WHERE contrato_id IS NOT NULL" if contrato_id is not None \
-        else "(sha256) WHERE contrato_id IS NULL"
+    novo = pg_insert(Lote).values(sha256=sha, nome_arquivo=nome_arquivo or "lote.pdf", contrato_id=contrato_id)
+    if contrato_id is not None:
+        novo = novo.on_conflict_do_nothing(index_elements=[Lote.contrato_id, Lote.sha256],
+                                           index_where=Lote.contrato_id.is_not(None))
+    else:
+        novo = novo.on_conflict_do_nothing(index_elements=[Lote.sha256], index_where=Lote.contrato_id.is_(None))
     try:
-        with psycopg.connect(config.DATABASE_URL) as conn:
-            row = conn.execute(
-                "INSERT INTO lote (sha256, nome_arquivo, contrato_id) VALUES (%s, %s, %s) "
-                f"ON CONFLICT {alvo} DO NOTHING RETURNING id, estado",
-                (sha, nome_arquivo or "lote.pdf", contrato_id),
-            ).fetchone()
-            if row is None:  # mesmo arquivo já enviado neste contrato
-                resposta, reenfileirar = _reenvio(conn, sha, pdf, contrato_id)
-            else:
-                pasta = Path(config.DATA_DIR) / f"lote_{row[0]}"
-                pasta.mkdir(parents=True, exist_ok=True)
-                (pasta / "original.pdf").write_bytes(pdf)
-                resposta = {"lote_id": row[0], "estado": row[1], "existente": False, "contrato_id": contrato_id}
-                reenfileirar = True
-    except psycopg.errors.ForeignKeyViolation:  # contrato apagado entre a validação e o INSERT
+        row = session.execute(novo.returning(Lote.id, Lote.estado)).first()
+        if row is None:  # mesmo arquivo já enviado neste contrato
+            resposta, reenfileirar = _reenvio(session, sha, pdf, contrato_id)
+        else:
+            pasta = Path(config.DATA_DIR) / f"lote_{row[0]}"
+            pasta.mkdir(parents=True, exist_ok=True)
+            (pasta / "original.pdf").write_bytes(pdf)
+            resposta = {"lote_id": row[0], "estado": row[1], "existente": False, "contrato_id": contrato_id}
+            reenfileirar = True
+        session.commit()
+    except IntegrityError as e:  # contrato apagado entre a validação e o INSERT
+        session.rollback()
+        if not isinstance(e.orig, psycopg.errors.ForeignKeyViolation):
+            raise
         raise HTTPException(404, f"contrato {contrato_id} não encontrado")
     if reenfileirar:  # só depois do commit, para o worker enxergar o estado novo
         limpar_cancelado(resposta["lote_id"], r)
@@ -132,17 +142,16 @@ def _serializar_pacote(pacote: dict, sort_keys: bool = False) -> str:
     )
 
 
-def obter_lote(lote_id: int) -> dict:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        lote = conn.execute(
-            "SELECT id, nome_arquivo, estado, docs_pendentes, contrato_id FROM lote WHERE id = %s", (lote_id,)
-        ).fetchone()
-        if lote is None:
-            raise HTTPException(404, "lote não encontrado")
-        docs = conn.execute(
-            "SELECT id, ordem, pagina_ini, pagina_fim, estado, tipo, confianca, segmentacao_ambigua, "
-            "probabilidades, tipo_original FROM documento WHERE lote_id = %s ORDER BY ordem", (lote_id,)
-        ).fetchall()
+def obter_lote(session: Session, lote_id: int) -> dict:
+    lote = session.execute(
+        select(Lote.id, Lote.nome_arquivo, Lote.estado, Lote.docs_pendentes, Lote.contrato_id).where(Lote.id == lote_id)
+    ).first()
+    if lote is None:
+        raise HTTPException(404, "lote não encontrado")
+    docs = session.execute(
+        select(Documento.id, Documento.ordem, Documento.pagina_ini, Documento.pagina_fim, Documento.estado,
+               Documento.tipo, Documento.confianca, Documento.segmentacao_ambigua, Documento.probabilidades,
+               Documento.tipo_original).where(Documento.lote_id == lote_id).order_by(Documento.ordem)).all()
     ultimo, historico = obter_progresso_lote(lote_id, r)
     return {
         "id": lote[0], "nome_arquivo": lote[1], "estado": lote[2], "docs_pendentes": lote[3], "contrato_id": lote[4],
@@ -165,7 +174,7 @@ def caminho_imagem_pagina(lote_id: int, numero: int) -> Path:
     return png
 
 
-def _ha_pos_processamento_pendente(conn, lote_id: int, docs_pendentes: int = 0) -> bool:
+def _ha_pos_processamento_pendente(session: Session, lote_id: int, docs_pendentes: int = 0) -> bool:
     """Verifica o estado real do processamento do lote (Redis + Postgres), identificando se ainda há
     documentos em classificação, extração de campos ou análise de folha de ponto em andamento."""
     if (docs_pendentes or 0) > 0:
@@ -176,48 +185,43 @@ def _ha_pos_processamento_pendente(conn, lote_id: int, docs_pendentes: int = 0) 
     etapa_atual = (ultimo or {}).get("etapa", "")
     if etapa_atual in ("extracao", "analise_ponto"):
         return True
-    pendente_db = conn.execute(
-        "SELECT 1 FROM documento d "
-        "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
-        "WHERE d.lote_id = %s AND ("
-        "  d.estado = 'segmentado' "
-        "  OR (d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
-        "      AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')))"
-        ") LIMIT 1",
-        (lote_id,),
-    ).fetchone()
+    pendente_db = session.execute(
+        select(1).select_from(Documento).outerjoin(AnalisePonto, AnalisePonto.documento_id == Documento.id)
+        .where(Documento.lote_id == lote_id,
+               or_(Documento.estado == "segmentado",
+                   and_(Documento.estado == "classificado", Documento.tipo == "folha_ponto",
+                        or_(AnalisePonto.estado.is_(None), AnalisePonto.estado.not_in(("concluida", "erro"))))))
+        .limit(1)).first()
     return pendente_db is not None
 
 
-def cancelar_lote(lote_id: int) -> dict:
+def cancelar_lote(session: Session, lote_id: int) -> dict:
     """Cancela o processamento de um lote em andamento (inclusive durante extração/análise pós-classificação).
     Só documentos 'segmentado' (ainda não classificados) viram 'erro'; o que já foi classificado ou revisado
     fica como está. Lote em recebido/ocr/classificando vai para 'erro'; lote 'concluido' continua 'concluido'
     e só perde o que faltava de extração/análise. 409 se não há nada a cancelar.
     Ordem de bloqueio igual à do classificador (documentos antes do lote); a flag e a limpeza das tarefas no
     Redis só acontecem depois do commit."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        previo = conn.execute("SELECT estado FROM lote WHERE id = %s", (lote_id,)).fetchone()
-        if previo is None:
-            raise HTTPException(404, "lote não encontrado")
-        if previo[0] != "concluido":
-            # 1º bloqueio: linhas de documento (como classificar_documento); um job em voo que já travou o
-            # seu documento termina antes; os demais passam a enxergar 'erro' e não fazem fan-in
-            conn.execute(
-                "UPDATE documento SET estado = 'erro' WHERE lote_id = %s AND estado = 'segmentado'",
-                (lote_id,),
-            )
-        # 2º bloqueio: o lote; serializa dois cliques e relê o estado já com os fan-ins commitados
-        lote = conn.execute(
-            "SELECT estado, docs_pendentes FROM lote WHERE id = %s FOR UPDATE", (lote_id,)
-        ).fetchone()
-        if lote is None:
-            raise HTTPException(404, "lote não encontrado")
-        estado = lote[0]
-        if estado == "concluido" and not _ha_pos_processamento_pendente(conn, lote_id, lote[1]):
-            raise HTTPException(409, "lote já concluído não pode ser cancelado")
-        if estado in ("recebido", "ocr", "classificando"):
-            conn.execute("UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+    previo = session.execute(select(Lote.estado).where(Lote.id == lote_id)).first()
+    if previo is None:
+        raise HTTPException(404, "lote não encontrado")
+    if previo[0] != "concluido":
+        # 1º bloqueio: linhas de documento (como classificar_documento); um job em voo que já travou o
+        # seu documento termina antes; os demais passam a enxergar 'erro' e não fazem fan-in
+        session.execute(update(Documento).where(Documento.lote_id == lote_id, Documento.estado == "segmentado")
+                        .values(estado="erro").execution_options(synchronize_session=False))
+    # 2º bloqueio: o lote; serializa dois cliques e relê o estado já com os fan-ins commitados
+    lote = session.execute(select(Lote.estado, Lote.docs_pendentes).where(Lote.id == lote_id)
+                           .with_for_update()).first()
+    if lote is None:
+        raise HTTPException(404, "lote não encontrado")
+    estado = lote[0]
+    if estado == "concluido" and not _ha_pos_processamento_pendente(session, lote_id, lote[1]):
+        raise HTTPException(409, "lote já concluído não pode ser cancelado")
+    if estado in ("recebido", "ocr", "classificando"):
+        session.execute(update(Lote).where(Lote.id == lote_id).values(estado="erro", docs_pendentes=0)
+                        .execution_options(synchronize_session=False))
+    session.commit()
     # commit feito: só agora o Redis. Falha aqui não pode virar 500, o banco já mudou.
     try:
         marcar_cancelado(lote_id, r)
@@ -228,32 +232,28 @@ def cancelar_lote(lote_id: int) -> dict:
         publicar_evento(lote_id, "concluido", "Extração/análise pendente cancelada pelo usuário.", r=r)
     else:
         publicar_evento(lote_id, "cancelado", "Processamento cancelado pelo usuário.", r=r)
-    return obter_lote(lote_id)
+    return obter_lote(session, lote_id)
 
 
-def reprocessar_lote(lote_id: int) -> dict:
+def reprocessar_lote(session: Session, lote_id: int) -> dict:
     """Reenfileira um lote em 'erro' a partir do original.pdf salvo em disco.
     Só aceita lotes em estado 'erro' e sem revisões humanas, preservando trabalho já concluído."""
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        lote = conn.execute("SELECT id, estado FROM lote WHERE id = %s FOR UPDATE", (lote_id,)).fetchone()
-        if lote is None:
-            raise HTTPException(404, "lote não encontrado")
-        if lote[1] != "erro":
-            raise HTTPException(409, f"lote {lote_id} em estado '{lote[1]}' não pode ser reprocessado")
-        tem_revisao = conn.execute(
-            "SELECT 1 FROM documento WHERE lote_id = %s AND estado = 'revisado' LIMIT 1",
-            (lote_id,),
-        ).fetchone()
-        if tem_revisao is not None:
-            raise HTTPException(409, f"lote {lote_id} possui documentos revisados e não pode ser reprocessado")
-        original = Path(config.DATA_DIR) / f"lote_{lote_id}" / "original.pdf"
-        if not original.is_file():
-            raise HTTPException(400, "arquivo original do lote não está disponível para reprocessamento")
-        conn.execute("DELETE FROM documento WHERE lote_id = %s", (lote_id,))
-        conn.execute(
-            "UPDATE lote SET estado = 'recebido', docs_pendentes = 0 WHERE id = %s",
-            (lote_id,),
-        )
+    lote = session.execute(select(Lote.id, Lote.estado).where(Lote.id == lote_id).with_for_update()).first()
+    if lote is None:
+        raise HTTPException(404, "lote não encontrado")
+    if lote[1] != "erro":
+        raise HTTPException(409, f"lote {lote_id} em estado '{lote[1]}' não pode ser reprocessado")
+    tem_revisao = session.execute(
+        select(1).where(Documento.lote_id == lote_id, Documento.estado == "revisado").limit(1)).first()
+    if tem_revisao is not None:
+        raise HTTPException(409, f"lote {lote_id} possui documentos revisados e não pode ser reprocessado")
+    original = Path(config.DATA_DIR) / f"lote_{lote_id}" / "original.pdf"
+    if not original.is_file():
+        raise HTTPException(400, "arquivo original do lote não está disponível para reprocessamento")
+    session.execute(delete(Documento).where(Documento.lote_id == lote_id).execution_options(synchronize_session=False))
+    session.execute(update(Lote).where(Lote.id == lote_id).values(estado="recebido", docs_pendentes=0)
+                    .execution_options(synchronize_session=False))
+    session.commit()
     limpar_cancelado(lote_id, r)
     limpar_tarefas_pos(lote_id, r)
     publicar_evento(
@@ -263,11 +263,14 @@ def reprocessar_lote(lote_id: int) -> dict:
         r=r,
     )
     enfileirar(r, config.FILA_SEGMENTAR, {"lote_id": lote_id})
-    return obter_lote(lote_id)
+    return obter_lote(session, lote_id)
 
 
 def montar_pacote_evento(lote_id: int) -> dict:
-    return jsonable_encoder(obter_lote(lote_id))
+    # Sessão própria e curta: o stream SSE roda em threads fora do ciclo da requisição (Depends(get_session))
+    # e não pode segurar uma conexão do banco enquanto espera mensagens.
+    with SessionLocal() as session:
+        return jsonable_encoder(obter_lote(session, lote_id))
 
 
 def _motivo_termino(lote_id: int, estado: str, docs_pendentes: int | None) -> str | None:
@@ -292,8 +295,8 @@ def _tick_stream(lote_id: int, reconstruir: bool) -> tuple[dict | None, str | No
     Devolve (pacote, motivo): o pacote completo só é montado se `reconstruir` ou se o stream vai encerrar;
     caso contrário é None. `motivo` é None enquanto o stream deve continuar."""
     if not reconstruir:
-        with psycopg.connect(config.DATABASE_URL) as conn:
-            row = conn.execute("SELECT estado, docs_pendentes FROM lote WHERE id = %s", (lote_id,)).fetchone()
+        with SessionLocal() as session:
+            row = session.execute(select(Lote.estado, Lote.docs_pendentes).where(Lote.id == lote_id)).first()
         if row is None:
             return montar_pacote_ausente(lote_id), "erro"
         motivo = _motivo_termino(lote_id, row[0], row[1])
