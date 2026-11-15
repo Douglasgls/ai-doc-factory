@@ -53,6 +53,9 @@ SEG_PAG_LINHAS = int(os.getenv("SEG_PAG_LINHAS", "3"))
 # Valores iniciais NÃO calibrados.
 SEG_LLM_CONTINUA = float(os.getenv("SEG_LLM_CONTINUA", "0.70"))  # >= : continua o documento
 SEG_LLM_ABRE = float(os.getenv("SEG_LLM_ABRE", "0.30"))  # <= : abre documento novo; no meio, fica ambíguo
+# Trechos enviados ao Jev (caracteres): fim da página anterior e começo da atual; e o começo (cabeçalho) da anterior.
+SEG_LLM_TRECHO = int(os.getenv("SEG_LLM_TRECHO", "500"))
+SEG_LLM_CABECALHO = int(os.getenv("SEG_LLM_CABECALHO", "300"))
 
 # LLMs. As chaves vêm só do ambiente (.env); nunca são gravadas em cache, log ou banco.
 CLASSIFICADOR = os.getenv("CLASSIFICADOR", "jev")  # "jev" (Jev + Gemini) ou "regras" (sem rede)

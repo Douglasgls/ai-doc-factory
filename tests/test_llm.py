@@ -179,11 +179,15 @@ def noul(p):
 @pytest.mark.parametrize("p,esperado", [(0.95, True), (0.70, True), (0.05, False), (0.30, False), (0.50, None)])
 def test_fronteira_limiares_em_codigo(rede, p, esperado):
     rede["jev"].append(noul(p))
-    assert segmentacao.perguntar_llm_mesmo_documento("fim", "inicio") is esperado
+    anterior = "CABECALHO " + "x" * 900 + " FIM"  # página longa: só o começo e o fim são enviados
+    assert segmentacao.perguntar_llm_mesmo_documento(anterior, "inicio" + "y" * 900) is esperado
     corpo = rede["corpos"][0]
     assert corpo["questions"]["q"]["type"] == "noul"
-    assert corpo["state"] == {"pagina_anterior": {"fim": "fim"}, "pagina_atual": {"inicio": "inicio"}}
-    assert "`pagina_atual.inicio`" in corpo["questions"]["q"]["instructions"]
+    assert corpo["state"] == {
+        "pagina_anterior": {"inicio": anterior[:config.SEG_LLM_CABECALHO], "fim": anterior[-config.SEG_LLM_TRECHO:]},
+        "pagina_atual": {"inicio": ("inicio" + "y" * 900)[:config.SEG_LLM_TRECHO]}}
+    instrucoes = corpo["questions"]["q"]["instructions"]
+    assert all(c in instrucoes for c in ("`pagina_anterior.inicio`", "`pagina_anterior.fim`", "`pagina_atual.inicio`"))
 
 
 def test_fronteira_em_modo_regras_nao_chama_a_rede(monkeypatch):
