@@ -59,7 +59,7 @@ export const EmailStatusFeedback: React.FC<{ email: string; valido: boolean; id?
       className="flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 mt-1.5"
     >
       <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-      <span>E-mail incompleto ou inválido (ex: usuario@empresa.com.br)</span>
+      <span>E-mail incompleto ou inválido</span>
     </div>
   )
 }
