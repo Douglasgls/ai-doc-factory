@@ -24,6 +24,19 @@ export function formatDataHora(iso: string | null | undefined): string {
     : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** Data e hora compactas para tabelas sem scroll (ex: 22/11/26 18:45). */
+export function formatDataHoraCurta(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const dia = String(d.getDate()).padStart(2, '0')
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const ano = String(d.getFullYear()).slice(-2)
+  const hora = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${dia}/${mes}/${ano} ${hora}:${min}`
+}
+
 /** Formata data e hora por extenso (ex: 22 de novembro de 2026, às 18:12). */
 export function formatDataHoraPorExtenso(iso: string | null | undefined): string {
   if (!iso) return '—'

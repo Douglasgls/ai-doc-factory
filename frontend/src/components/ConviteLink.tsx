@@ -41,19 +41,19 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
   }
 
   return (
-    <div className="rounded-2xl border border-emerald-500/30 dark:border-emerald-500/20 bg-[#120817] text-white p-5 space-y-4 shadow-sm animate-in fade-in duration-200">
+    <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-[#052818] via-[#062c1b] to-[#031d12] text-white p-5 space-y-4 shadow-lg shadow-emerald-950/30 animate-in fade-in duration-200">
       <div className="flex items-start gap-3.5">
-        <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+        <div className="w-9 h-9 rounded-full bg-emerald-500/25 border border-emerald-400/50 text-emerald-300 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-emerald-900/50">
           <Check className="w-5 h-5 stroke-[2.5]" />
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-[11px] font-bold tracking-wider text-emerald-400 uppercase">
+          <span className="text-[11px] font-bold tracking-wider text-emerald-300 uppercase">
             CONVITE PRONTO PARA ENVIAR
           </span>
           <h4 className="text-base sm:text-lg font-bold text-white truncate">
             {email || 'Novo convite gerado'}
           </h4>
-          <p className="text-xs text-[#b8a9c4] mt-0.5">
+          <p className="text-xs text-emerald-100/80 mt-0.5">
             Entrará como <span className="font-semibold text-white">{papel ? (PAPEL_ROTULO[papel] ?? papel) : 'Membro'}</span> e poderá aceitar o convite até <span className="font-medium text-white">{formatDataHoraPorExtenso(expiraEm)}</span>.
           </p>
         </div>
@@ -63,7 +63,7 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
         <button
           type="button"
           onClick={copiar}
-          className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#a816be] hover:bg-[#c01ad9] transition-all flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
+          className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/40 transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-950/40 active:scale-95"
         >
           {copiado ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copiado ? 'Copiado!' : 'Copiar convite'}
@@ -72,7 +72,7 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
         <button
           type="button"
           onClick={abrirWhatsApp}
-          className="px-4 py-2 rounded-xl text-xs font-semibold text-emerald-400 bg-[#1c0f24] hover:bg-[#281534] border border-[#3b2346] hover:border-emerald-500/40 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+          className="px-4 py-2 rounded-xl text-xs font-semibold text-emerald-200 bg-[#083a24] hover:bg-[#0c4a2f] border border-emerald-600/50 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
         >
           <MessageCircle className="w-3.5 h-3.5" />
           WhatsApp
@@ -81,26 +81,26 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
         <button
           type="button"
           onClick={abrirEmail}
-          className="px-4 py-2 rounded-xl text-xs font-semibold text-[#f0e6f6] bg-[#1c0f24] hover:bg-[#281534] border border-[#3b2346] hover:border-purple-400/40 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+          className="px-4 py-2 rounded-xl text-xs font-semibold text-emerald-200 bg-[#083a24] hover:bg-[#0c4a2f] border border-emerald-600/50 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
         >
           <Mail className="w-3.5 h-3.5" />
           E-mail
         </button>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-[#9b8da7] pt-1">
-        <Info className="w-3.5 h-3.5 shrink-0 text-purple-400" />
+      <div className="flex items-center gap-2 text-[11px] text-emerald-200/80 pt-1">
+        <Info className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
         <span>Envie agora. Por segurança, este link é temporário e aparece somente após a criação do convite.</span>
       </div>
 
-      <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[#0d0512] border border-[#2d1b33]">
-        <div className="font-mono text-xs text-[#a394af] truncate select-all">
+      <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[#031c11] border border-emerald-700/60">
+        <div className="font-mono text-xs text-emerald-300/90 truncate select-all">
           {linkExibido}
         </div>
         <button
           type="button"
           onClick={() => setRevelado(!revelado)}
-          className="text-xs font-medium text-[#bbaecc] hover:text-white flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+          className="text-xs font-medium text-emerald-300 hover:text-white flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
         >
           {revelado ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           <span>{revelado ? 'Ocultar link' : 'Mostrar link completo'}</span>
