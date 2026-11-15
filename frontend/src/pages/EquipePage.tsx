@@ -8,8 +8,8 @@ import {
   type UsuarioAtual,
   type UsuarioListado,
 } from '../services/api'
-import { ESTADO_CONVITE, formatDataHora, NIVEL_ROTULO, PAPEL_ROTULO } from '../utils/convites'
-import { BTN, CARD, ErroBox, INPUT, LABEL, Selo, TD, TH } from '../components/formUi'
+import { ESTADO_CONVITE, extraEmailClasses, formatDataHora, NIVEL_ROTULO, PAPEL_ROTULO, validarEmail } from '../utils/convites'
+import { BTN, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 
 interface EquipePageProps {
@@ -36,6 +36,8 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
   const [formError, setFormError] = useState<string | null>(null)
   const [criado, setCriado] = useState<ConviteCriado | null>(null)
 
+  const emailValido = validarEmail(email)
+
   const carregar = useCallback(async () => {
     try {
       const [u, c] = await Promise.all([apiService.getUsuarios(), apiService.getConvites()])
@@ -56,6 +58,10 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
 
   const convidar = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!validarEmail(email)) {
+      setFormError('Por favor, informe um endereço de e-mail válido.')
+      return
+    }
     setFormError(null)
     setCriado(null)
     setSaving(true)
@@ -85,8 +91,21 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="eq-email" className={LABEL}>E-mail</label>
-            <input id="eq-email" type="email" className={INPUT} value={email} required
-              onChange={(e) => setEmail(e.target.value)} />
+            <input
+              id="eq-email"
+              type="email"
+              className={`${INPUT} ${extraEmailClasses(email, emailValido)}`}
+              value={email}
+              required
+              aria-invalid={email.trim().length > 0 && !emailValido}
+              aria-describedby="eq-email-feedback"
+              onChange={(e) => {
+                setEmail(e.target.value)
+                if (formError) setFormError(null)
+              }}
+              placeholder="exemplo@empresa.com.br"
+            />
+            <EmailStatusFeedback email={email} valido={emailValido} id="eq-email-feedback" />
           </div>
           <div>
             <label htmlFor="eq-papel" className={LABEL}>Papel</label>
@@ -98,7 +117,11 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
           </div>
         </div>
         <ErroBox message={formError} />
-        <button type="submit" disabled={saving || !email.trim()} className={BTN}>
+        <button
+          type="submit"
+          disabled={saving || !emailValido}
+          className={BTN}
+        >
           {saving && <Loader2 className="w-4 h-4 animate-spin" />}Gerar convite
         </button>
         {criado && <ConviteLink token={criado.token} expiraEm={criado.expira_em} />}

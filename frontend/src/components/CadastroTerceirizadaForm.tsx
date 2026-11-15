@@ -2,7 +2,8 @@ import React, { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { apiService, type TerceirizadaCadastrada, type Tomador } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
-import { BTN, CARD, ErroBox, INPUT, LABEL } from './formUi'
+import { extraEmailClasses, validarEmail } from '../utils/convites'
+import { BTN, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL } from './formUi'
 import { ConviteLink } from './ConviteLink'
 
 /** Resultado do cadastro, conforme o `acesso` devolvido pela API. */
@@ -47,6 +48,8 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
   const [formError, setFormError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<TerceirizadaCadastrada | null>(null)
 
+  const emailValido = validarEmail(email)
+
   const cadastrar = async (e: React.FormEvent) => {
     e.preventDefault()
     setFormError(null)
@@ -57,6 +60,10 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
     }
     if (!isCnpjValido(cnpj)) {
       setFormError('CNPJ inválido: confira os dígitos.')
+      return
+    }
+    if (!validarEmail(email)) {
+      setFormError('Por favor, informe um endereço de e-mail válido.')
       return
     }
     setSaving(true)
@@ -106,15 +113,36 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
             onChange={(e) => setRazao(e.target.value)} />
         </div>
         <div>
-          <label htmlFor="terc-email" className={LABEL}>E-mail de quem vai administrar</label>
-          <input id="terc-email" type="email" className={INPUT} value={email} required
-            onChange={(e) => setEmail(e.target.value)} />
+          <label htmlFor="terc-email" className={LABEL}>E-mail do administrador</label>
+          <input
+            id="terc-email"
+            type="email"
+            className={`${INPUT} ${extraEmailClasses(email, emailValido)}`}
+            value={email}
+            required
+            aria-invalid={email.trim().length > 0 && !emailValido}
+            aria-describedby="terc-email-feedback"
+            onChange={(e) => {
+              setEmail(e.target.value)
+              if (formError) setFormError(null)
+            }}
+            placeholder="administrador@empresa.com.br"
+          />
+          <EmailStatusFeedback email={email} valido={emailValido} id="terc-email-feedback" />
         </div>
       </div>
       <ErroBox message={formError} />
-      <button type="submit"
-        disabled={saving || (!!tomadores && !tomadorId) || !cnpj || !razao.trim() || !email.trim()}
-        className={BTN}>
+      <button
+        type="submit"
+        disabled={
+          saving ||
+          (!!tomadores && !tomadorId) ||
+          !cnpj ||
+          !razao.trim() ||
+          !emailValido
+        }
+        className={BTN}
+      >
         {saving && <Loader2 className="w-4 h-4 animate-spin" />}Cadastrar terceirizada
       </button>
       {resultado && <ResultadoTerceirizada resultado={resultado} />}

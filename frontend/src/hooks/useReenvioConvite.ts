@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { apiService, type Contrato } from '../services/api'
+import { validarEmail } from '../utils/convites'
 
 interface LinkGerado {
   token: string
@@ -25,6 +26,10 @@ export function useReenvioConvite(aoEnviar: () => void | Promise<void>) {
   const enviar = async (e: React.FormEvent, c: Contrato) => {
     e.preventDefault()
     setErro(null)
+    if (!validarEmail(email)) {
+      setErro('Por favor, informe um endereço de e-mail válido.')
+      return
+    }
     setEnviando(true)
     try {
       const conv = await apiService.criarConvite({

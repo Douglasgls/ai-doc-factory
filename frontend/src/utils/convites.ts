@@ -24,6 +24,25 @@ export function formatDataHora(iso: string | null | undefined): string {
     : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** Regex de validação estrita de e-mail (requer usuário, domínio e TLD com pelo menos 2 letras). */
+export const REGEX_EMAIL = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*\.[a-zA-Z]{2,}$/
+
+/** Validação de formato de e-mail (alinhado com o regex e tamanho máximo do backend). */
+export function validarEmail(email: string): boolean {
+  const v = email.trim()
+  if (!v || v.length > 254) return false
+  return REGEX_EMAIL.test(v)
+}
+
+/** Classes condicionais para destaque de campo de e-mail (verde se válido, vermelho se inválido). */
+export function extraEmailClasses(email: string, valido: boolean): string {
+  const v = email.trim()
+  if (!v) return ''
+  return valido
+    ? '!border-emerald-500 dark:!border-emerald-500 focus:!ring-emerald-500'
+    : '!border-rose-500 dark:!border-rose-500 focus:!ring-rose-500'
+}
+
 export const ESTADO_CONVITE: Record<string, string> = {
   pendente: 'Pendente',
   usado: 'Usado',

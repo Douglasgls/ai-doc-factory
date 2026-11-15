@@ -1,5 +1,5 @@
 import React from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2 } from 'lucide-react'
 
 /** Classes e blocos de formulário compartilhados pelas telas de cadastro. */
 export const CARD =
@@ -35,3 +35,31 @@ const CORES = {
 export const Selo: React.FC<{ tom: keyof typeof CORES; children: React.ReactNode }> = ({ tom, children }) => (
   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${CORES[tom]}`}>{children}</span>
 )
+
+/** Componente de feedback visual imediato para status do e-mail digitado. */
+export const EmailStatusFeedback: React.FC<{ email: string; valido: boolean; id?: string }> = ({
+  email,
+  valido,
+  id,
+}) => {
+  const v = email.trim()
+  if (!v) return null
+  if (valido) {
+    return (
+      <div id={id} className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 mt-1.5">
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+        <span>E-mail válido</span>
+      </div>
+    )
+  }
+  return (
+    <div
+      id={id}
+      role="alert"
+      className="flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 mt-1.5"
+    >
+      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+      <span>E-mail incompleto ou inválido</span>
+    </div>
+  )
+}

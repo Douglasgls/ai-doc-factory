@@ -9,7 +9,7 @@ from app.routers.organizacoes import validations
 from app.routers.organizacoes.schemas import IdBanco
 
 EMAIL_MAX = 254
-_FORMATO_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_FORMATO_EMAIL = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*\.[a-zA-Z]{2,}$")
 SENHA_MIN = 8
 Nivel = Literal["plataforma", "tomador", "prestador"]  # espelha config.NIVEIS_ACESSO (CHECK do banco)
 Papel = Literal["admin", "membro"]  # espelha config.PAPEIS

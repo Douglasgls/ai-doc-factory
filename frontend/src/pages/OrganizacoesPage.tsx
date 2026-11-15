@@ -8,7 +8,8 @@ import {
   type Tomador,
 } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
-import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
+import { extraEmailClasses, validarEmail } from '../utils/convites'
+import { BTN, BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 import { CadastroTerceirizadaForm } from '../components/CadastroTerceirizadaForm'
 import {
@@ -65,6 +66,8 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   const [convSaving, setConvSaving] = useState(false)
   const [convError, setConvError] = useState<string | null>(null)
   const [convCriado, setConvCriado] = useState<ConviteCriado | null>(null)
+
+  const convEmailValido = validarEmail(convEmail)
 
   const carregar = useCallback(async () => {
     try {
@@ -123,6 +126,10 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   const convidarAdminCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!tomNovo) return
+    if (!validarEmail(convEmail)) {
+      setConvError('Por favor, informe um endereço de e-mail válido.')
+      return
+    }
     setConvError(null)
     setConvSaving(true)
     try {
@@ -226,15 +233,32 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                   {!convCriado && (
                     <div>
                       <label htmlFor="conv-adm-email" className={LABEL}>E-mail do administrador</label>
-                      <input id="conv-adm-email" type="email" className={INPUT} value={convEmail} required
-                        onChange={(e) => setConvEmail(e.target.value)} />
+                      <input
+                        id="conv-adm-email"
+                        type="email"
+                        className={`${INPUT} ${extraEmailClasses(convEmail, convEmailValido)}`}
+                        value={convEmail}
+                        required
+                        aria-invalid={convEmail.trim().length > 0 && !convEmailValido}
+                        aria-describedby="conv-adm-email-feedback"
+                        onChange={(e) => {
+                          setConvEmail(e.target.value)
+                          if (convError) setConvError(null)
+                        }}
+                        placeholder="administrador@cliente.com.br"
+                      />
+                      <EmailStatusFeedback email={convEmail} valido={convEmailValido} id="conv-adm-email-feedback" />
                     </div>
                   )}
                   <ErroBox message={convError} />
                   {convCriado ? (
                     <ConviteLink token={convCriado.token} expiraEm={convCriado.expira_em} />
                   ) : (
-                    <button type="submit" disabled={convSaving || !convEmail.trim()} className={BTN}>
+                    <button
+                      type="submit"
+                      disabled={convSaving || !convEmailValido}
+                      className={BTN}
+                    >
                       {convSaving && <Loader2 className="w-4 h-4 animate-spin" />}Convidar administrador do cliente
                     </button>
                   )}

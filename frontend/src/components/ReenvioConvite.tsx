@@ -1,9 +1,9 @@
 import React from 'react'
 import { Loader2 } from 'lucide-react'
 import { type Contrato } from '../services/api'
-import { ESTADO_ACESSO } from '../utils/convites'
+import { ESTADO_ACESSO, extraEmailClasses, validarEmail } from '../utils/convites'
 import type { ReenvioConvite } from '../hooks/useReenvioConvite'
-import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL, Selo, TD } from './formUi'
+import { BTN, BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo, TD } from './formUi'
 import { ConviteLink } from './ConviteLink'
 
 export const ConviteGeradoCard: React.FC<{ reenvio: ReenvioConvite }> = ({ reenvio }) =>
@@ -32,25 +32,48 @@ export const ReenvioLinha: React.FC<{ contrato: Contrato; reenvio: ReenvioConvit
   contrato,
   reenvio,
   colSpan,
-}) =>
-  reenvio.reenviando === contrato.prestador_id ? (
+}) => {
+  const emailValido = validarEmail(reenvio.email)
+
+  return reenvio.reenviando === contrato.prestador_id ? (
     <tr>
       <td className={TD} colSpan={colSpan}>
         <form onSubmit={(e) => void reenvio.enviar(e, contrato)} className="flex flex-wrap items-end gap-3"
           aria-label="Enviar novo convite">
           <div className="flex-1 min-w-[16rem]">
             <label htmlFor="reenvio-email" className={LABEL}>
-              E-mail de quem vai administrar {contrato.prestador_razao_social}
+              E-mail do administrador ({contrato.prestador_razao_social})
             </label>
-            <input id="reenvio-email" type="email" className={INPUT} value={reenvio.email} required
-              onChange={(e) => reenvio.setEmail(e.target.value)} />
+            <input
+              id="reenvio-email"
+              type="email"
+              className={`${INPUT} ${extraEmailClasses(reenvio.email, emailValido)}`}
+              value={reenvio.email}
+              required
+              aria-invalid={reenvio.email.trim().length > 0 && !emailValido}
+              aria-describedby="reenvio-email-feedback"
+              onChange={(e) => reenvio.setEmail(e.target.value)}
+              placeholder="administrador@empresa.com.br"
+            />
+            <EmailStatusFeedback email={reenvio.email} valido={emailValido} id="reenvio-email-feedback" />
           </div>
-          <button type="submit" disabled={reenvio.enviando || !reenvio.email.trim()} className={BTN}>
+          <button
+            type="submit"
+            disabled={reenvio.enviando || !emailValido}
+            className={BTN}
+          >
             {reenvio.enviando && <Loader2 className="w-4 h-4 animate-spin" />}Gerar link
           </button>
-          <button type="button" className={BTN_SEC} onClick={reenvio.cancelar}>Cancelar</button>
+          <button
+            type="button"
+            className={BTN_SEC}
+            onClick={reenvio.cancelar}
+          >
+            Cancelar
+          </button>
         </form>
         <div className="mt-3"><ErroBox message={reenvio.erro} /></div>
       </td>
     </tr>
   ) : null
+}
