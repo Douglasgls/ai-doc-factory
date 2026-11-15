@@ -95,8 +95,24 @@ def _cosseno(a: dict[str, float], b: dict[str, float]) -> float:
     return sum(x * b.get(tok, 0.0) for tok, x in a.items())
 
 
-def perguntar_llm_mesmo_documento(fim_anterior: str, inicio_atual: str) -> bool | None:
+def residual(texto: str, anterior: str) -> bool:
+    """Página residual: pouquíssimo texto (até SEG_RESIDUAL_MAX_ALNUM caracteres alfanuméricos) e quase todas as suas
+    palavras (>= SEG_RESIDUAL_CONTIDO) já aparecem na página anterior. É o rabo de um documento: folha só com os campos
+    de assinatura sob o cabeçalho corrido, ou a última linha de uma tabela. Um documento novo, mesmo curto, traz
+    palavras próprias (outro nome, outro título). Só palavras de 3+ letras contam; números e ruído de OCR não."""
+    if sum(c.isalnum() for c in texto) > config.SEG_RESIDUAL_MAX_ALNUM:
+        return False
+    palavras = {t for t in _tokens(texto) if len(t) >= 3 and t.isalpha()}
+    if not palavras:
+        return False
+    return len(palavras & set(_tokens(anterior))) / len(palavras) >= config.SEG_RESIDUAL_CONTIDO
+
+
+def perguntar_llm_mesmo_documento(anterior: str, atual: str) -> bool | None:
     """Faixa ambígua: 'estas duas páginas pertencem ao mesmo documento?' (Sim/Não 'noul' do Jev).
+
+    Recebe o texto inteiro das duas páginas e envia só três trechos: o começo e o fim da anterior e o começo da
+    atual (config.SEG_LLM_CABECALHO / SEG_LLM_TRECHO). O começo da anterior deixa o Jev comparar os cabeçalhos.
 
     True = continua; False = abre documento novo; None = meio da faixa ou LLM indisponível (o chamador abre
     documento novo e marca ambiguo=True). Os limiares são decididos aqui, em código (config.SEG_LLM_*).
@@ -105,8 +121,9 @@ def perguntar_llm_mesmo_documento(fim_anterior: str, inicio_atual: str) -> bool 
     if config.CLASSIFICADOR == "regras":
         return None  # modo sem rede: nenhum trecho do documento sai do sistema
     # dados pessoais não saem: só as fatias enviadas ao LLM são anonimizadas (as regras locais usam o texto original)
-    estado = {"pagina_anterior": {"fim": anonimizar_texto(fim_anterior)},
-              "pagina_atual": {"inicio": anonimizar_texto(inicio_atual)}}
+    estado = {"pagina_anterior": {"inicio": anonimizar_texto(anterior[:config.SEG_LLM_CABECALHO]),
+                                  "fim": anonimizar_texto(anterior[-config.SEG_LLM_TRECHO:])},
+              "pagina_atual": {"inicio": anonimizar_texto(atual[:config.SEG_LLM_TRECHO])}}
     try:
         p = llm.jev_sim_nao(estado, prompts.PERGUNTA_FRONTEIRA, prompts.CRITERIOS_FRONTEIRA)
     except llm.LLMErro as e:
@@ -125,7 +142,8 @@ def segmentar(textos: list[str]) -> list[Documento]:
 
     Sem paginação: dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento, mesmo com similaridade
     alta (sem perguntar ao Jev); com similaridade alta e algum CNPJ inválido (provável erro de OCR), continua.
-    Abaixo da similaridade alta, CNPJ diferente abre; similaridade baixa abre, exceto com o mesmo CNPJ, que vai
+    Abaixo da similaridade alta, CNPJ diferente abre; página residual (ver residual()) continua; similaridade
+    baixa abre, exceto com o mesmo CNPJ, que vai
     para a pergunta ao Jev junto com a faixa ambígua."""
     if not textos:
         return []
@@ -168,10 +186,12 @@ def segmentar(textos: list[str]) -> list[Documento]:
                 pass
             elif conhecidos and cnpjs[ref] != cnpjs[i]:
                 inicios.append((i, False))  # outra empresa: abre, sem perguntar
+            elif residual(texto, textos[ref]):
+                pass  # folha de assinaturas ou rabo de tabela: continua, sem perguntar
             elif sim < config.SEG_SIM_BAIXO and not (conhecidos and cnpjs[ref] == cnpjs[i]):
                 inicios.append((i, False))
             else:  # faixa ambígua, ou similaridade baixa com o MESMO CNPJ (ex.: tabela contínua)
-                mesmo = perguntar_llm_mesmo_documento(textos[ref][-500:], texto[:500])
+                mesmo = perguntar_llm_mesmo_documento(textos[ref], texto)
                 if mesmo is None:
                     inicios.append((i, True))
                 elif not mesmo:

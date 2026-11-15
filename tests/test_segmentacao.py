@@ -43,6 +43,7 @@ def test_sem_paginacao_tipos_diferentes_abrem_documento(monkeypatch):
 
 
 def test_faixa_ambigua_abre_documento_e_marca(monkeypatch):
+    monkeypatch.setattr(segmentacao.config, "SEG_RESIDUAL_MAX_ALNUM", 0)  # páginas de teste são curtas: sem regra residual
     monkeypatch.setattr(segmentacao.config, "SEG_SIM_BAIXO", 0.0)
     monkeypatch.setattr(segmentacao.config, "SEG_SIM_ALTO", 1.1)
     docs = segmentar([HOLERITE, HOLERITE + " continuação"])
@@ -50,6 +51,7 @@ def test_faixa_ambigua_abre_documento_e_marca(monkeypatch):
 
 
 def test_llm_pode_resolver_ambiguo(monkeypatch):
+    monkeypatch.setattr(segmentacao.config, "SEG_RESIDUAL_MAX_ALNUM", 0)  # páginas de teste são curtas: sem regra residual
     monkeypatch.setattr(segmentacao.config, "SEG_SIM_BAIXO", 0.0)
     monkeypatch.setattr(segmentacao.config, "SEG_SIM_ALTO", 1.1)
     monkeypatch.setattr(segmentacao, "perguntar_llm_mesmo_documento", lambda a, b: True)
@@ -243,3 +245,68 @@ def test_consecutivos_do_mesmo_tipo_com_cnpjs_diferentes_separam(monkeypatch):
     corpo = "folha de ponto marcações entrada saída horas extras"
     textos = [_cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_A, corpo), _cnpj_texto(CNPJ_B, corpo)]
     assert intervalos(segmentar(textos)) == [(1, 2), (3, 3)]
+
+
+# --- página residual: folha só de assinaturas ou rabo de tabela continua o documento ---
+def _contrato(empresa: str, cnpj: str, nome: str) -> str:
+    return (f"{empresa}\nCNPJ {cnpj}\nCONTRATO INDIVIDUAL DE TRABALHO\nPelo presente instrumento, de um lado {empresa}, "
+            f"doravante denominada EMPREGADOR, e de outro {nome}, doravante denominado EMPREGADO, têm entre si justo e "
+            "contratado o seguinte: cláusula primeira função, cláusula segunda jornada de 44 horas semanais, cláusula "
+            "terceira salário mensal. E, por estarem de acordo, as partes assinam o presente em duas vias, na presença "
+            "de duas testemunhas.")
+
+
+def _assinaturas(nome: str) -> str:
+    return f"Contrato individual de trabalho - {nome}\n\nEMPREGADOR EMPREGADO\n\nTestemunha 1 Testemunha 2\n\n3"
+
+
+def _nao_perguntar(monkeypatch):
+    monkeypatch.setattr(segmentacao, "perguntar_llm_mesmo_documento", lambda a, b: pytest.fail("não deveria perguntar"))
+
+
+def test_folha_de_assinaturas_continua_o_contrato_sem_perguntar(monkeypatch):
+    _nao_perguntar(monkeypatch)
+    monkeypatch.setattr(segmentacao.config, "SEG_SIM_ALTO", 0.99)  # a similaridade não decide: é a regra residual
+    textos = [_contrato("Acme Ltda", CNPJ_A, "Ana Silva Prado"), _assinaturas("Ana Silva Prado")]
+    assert segmentacao.residual(textos[1], textos[0])
+    assert intervalos(segmentar(textos)) == [(1, 2)]
+
+
+def test_contratos_consecutivos_com_folha_de_assinaturas_nao_se_fundem(monkeypatch):
+    # mesmo tipo, mesmo texto-padrão: cada folha de assinaturas fica com o seu contrato, e o segundo contrato abre
+    _nao_perguntar(monkeypatch)
+    textos = [_contrato("Acme Ltda", CNPJ_A, "Ana Silva Prado"), _assinaturas("Ana Silva Prado"),
+              _contrato("Beta S/A", CNPJ_B, "Bruno Souza Lima"), _assinaturas("Bruno Souza Lima")]
+    assert intervalos(segmentar(textos)) == [(1, 2), (3, 4)]
+
+
+def test_contratos_consecutivos_da_mesma_empresa_nao_se_fundem_pela_regra_residual(monkeypatch):
+    # mesma empresa e mesmo texto-padrão, funcionários diferentes: o segundo contrato é página longa, nunca residual
+    monkeypatch.setattr(segmentacao, "perguntar_llm_mesmo_documento", lambda a, b: False)  # se perguntado, o Jev separa
+    textos = [_contrato("Acme Ltda", CNPJ_A, "Ana Silva Prado"), _assinaturas("Ana Silva Prado"),
+              _contrato("Acme Ltda", CNPJ_A, "Bruno Souza Lima"), _assinaturas("Bruno Souza Lima")]
+    assert not segmentacao.residual(textos[2], textos[1])
+    assert intervalos(segmentar(textos)) == [(1, 2), (3, 4)]
+
+
+def test_documento_curto_com_palavras_proprias_nao_e_residual(monkeypatch):
+    # página curta de OUTRA pessoa ou de outro assunto não é rabo do documento anterior: segue a cascata normal
+    anterior = _contrato("Acme Ltda", CNPJ_A, "Ana Silva Prado")
+    outro_curto = "DECLARAÇÃO\nBruno Souza Lima recebeu o vale transporte de março.\nAssinatura"
+    assert not segmentacao.residual(outro_curto, anterior)
+    assert not segmentacao.residual(_assinaturas("Bruno Souza Lima"), "ATESTADO MÉDICO paciente consulta CID repouso CRM")
+    assert not segmentacao.residual("12/03/2025 08:00 12:00 13:00 17:00", anterior)  # só números: nada para comparar
+    assert not segmentacao.residual(anterior, anterior)  # página longa nunca é residual
+    _forcar_baixa_similaridade(monkeypatch)
+    _nao_perguntar(monkeypatch)
+    assert intervalos(segmentar([anterior, outro_curto])) == [(1, 1), (2, 2)]
+
+
+def test_residual_nao_vence_cnpj_diferente_nem_pagina_1_de_n(monkeypatch):
+    _nao_perguntar(monkeypatch)
+    monkeypatch.setattr(segmentacao.config, "SEG_SIM_ALTO", 0.99)
+    anterior = _contrato("Acme Ltda", CNPJ_A, "Ana Silva Prado")
+    outra_empresa = f"CNPJ {CNPJ_B}\nContrato individual de trabalho\nEMPREGADOR EMPREGADO"
+    assert intervalos(segmentar([anterior, outra_empresa])) == [(1, 1), (2, 2)]
+    nova_paginada = "Contrato individual de trabalho\nEMPREGADOR EMPREGADO\nPágina 1 de 1"
+    assert intervalos(segmentar([anterior, nova_paginada])) == [(1, 1), (2, 2)]
