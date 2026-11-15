@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Eye, Loader2, Mail, Send, ShieldCheck, User, Users, X } from 'lucide-react'
+import { ChevronRight, Eye, FileText, Loader2, Mail, Send, ShieldCheck, User, Users, X } from 'lucide-react'
 import {
   apiService,
   type ConviteCriado,
@@ -96,11 +96,15 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
   return (
     <div className="space-y-6">
       {/* Navegação / Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-[#877991] dark:text-[#95849f]">
-        <button onClick={onBack} className="hover:text-[#2d0a33] dark:hover:text-white transition-colors cursor-pointer">
-          Documentos
+      <nav className="flex items-center gap-2 text-xs sm:text-sm text-[#877991] dark:text-[#95849f]">
+        <button
+          onClick={onBack}
+          className="hover:text-[#2d0a33] dark:hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>Documentos</span>
         </button>
-        <span>&gt;</span>
+        <ChevronRight className="w-3.5 h-3.5 opacity-60" />
         <span className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">Equipe</span>
       </nav>
 

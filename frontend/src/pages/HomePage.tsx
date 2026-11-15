@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, FileText } from 'lucide-react'
 import ConformidadeEmpresaModal from '../components/ConformidadeEmpresaModal'
 import { formatarCnpjVisual } from '../components/conformidadeEmpresa'
 import { ManualReviewBanner } from '../components/ManualReviewBanner'
@@ -40,13 +40,18 @@ const HomePage: React.FC<HomePageProps> = ({
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-200">
       {/* Page Title & Subtitle */}
-      <section className="space-y-1">
-        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#2d0a33] dark:text-[#fdfcfe]">
-          Documentos
-        </h1>
-        <p className="text-sm sm:text-base text-[#6f6379] dark:text-[#9f91a6]">
-          Documentos processados pela IA, organizados por tipo documental.
-        </p>
+      <section className="flex items-start sm:items-center gap-3.5">
+        <div className="w-11 h-11 rounded-2xl bg-purple-100 dark:bg-purple-950/60 text-[#9333ea] dark:text-[#f38df9] flex items-center justify-center shrink-0 border border-purple-200/60 dark:border-purple-800/40 shadow-xs mt-0.5 sm:mt-0">
+          <FileText className="w-5 h-5" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#2d0a33] dark:text-[#fdfcfe]">
+            Documentos
+          </h1>
+          <p className="text-sm sm:text-base text-[#6f6379] dark:text-[#9f91a6]">
+            Documentos processados pela IA, organizados por tipo documental.
+          </p>
+        </div>
       </section>
 
       {/* Manual Review Attention Banner */}
