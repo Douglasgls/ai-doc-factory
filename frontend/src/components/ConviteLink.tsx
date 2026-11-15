@@ -88,22 +88,25 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
         </button>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-emerald-200/80 pt-1">
-        <Info className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-        <span>Envie agora. Por segurança, este link é temporário e aparece somente após a criação do convite.</span>
+      <div className="flex items-center gap-2 text-[11px] pt-1">
+        <Info className="w-3.5 h-3.5 shrink-0 text-white" />
+        <p>
+          <span className="font-semibold text-white">Envie agora.</span>
+          <span className="text-white/70"> Por segurança, este link é temporário e aparece somente após a criação do convite.</span>
+        </p>
       </div>
 
       <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[#031c11] border border-emerald-700/60">
-        <div className="font-mono text-xs text-emerald-300/90 truncate select-all">
+        <div className="font-mono text-xs text-white truncate select-all">
           {linkExibido}
         </div>
         <button
           type="button"
           onClick={() => setRevelado(!revelado)}
-          className="text-xs font-medium text-emerald-300 hover:text-white flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+          className="text-xs font-medium text-white hover:text-white/80 flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
         >
-          {revelado ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          <span>{revelado ? 'Ocultar link' : 'Mostrar link completo'}</span>
+          {revelado ? <EyeOff className="w-3.5 h-3.5 text-white" /> : <Eye className="w-3.5 h-3.5 text-white" />}
+          <span>{revelado ? 'Ocultar link' : 'Mostrar link'}</span>
         </button>
       </div>
     </div>
