@@ -157,7 +157,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
                   setEmail(e.target.value)
                   if (formError) setFormError(null)
                 }}
-                placeholder="douglaspaz955@gmail.com"
+                placeholder="colaborador@empresa.com.br"
               />
             </div>
             <div className="mt-1.5 min-h-[18px]">

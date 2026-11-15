@@ -63,7 +63,7 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
         <button
           type="button"
           onClick={copiar}
-          className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/40 transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-950/40 active:scale-95"
+          className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#a816be] hover:bg-[#c01ad9] transition-all flex items-center gap-2 cursor-pointer shadow-md active:scale-95"
         >
           {copiado ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copiado ? 'Copiado!' : 'Copiar convite'}
@@ -72,18 +72,18 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
         <button
           type="button"
           onClick={abrirWhatsApp}
-          className="px-4 py-2 rounded-xl text-xs font-semibold text-emerald-200 bg-[#083a24] hover:bg-[#0c4a2f] border border-emerald-600/50 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+          className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#15803d] hover:bg-[#16a34a] border border-[#22c55e]/30 transition-all flex items-center gap-2 cursor-pointer active:scale-95 shadow-sm"
         >
-          <MessageCircle className="w-3.5 h-3.5" />
+          <MessageCircle className="w-3.5 h-3.5 text-white" />
           WhatsApp
         </button>
 
         <button
           type="button"
           onClick={abrirEmail}
-          className="px-4 py-2 rounded-xl text-xs font-semibold text-emerald-200 bg-[#083a24] hover:bg-[#0c4a2f] border border-emerald-600/50 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+          className="px-4 py-2 rounded-xl text-xs font-semibold text-emerald-100 bg-[#083a24] hover:bg-[#0c4a2f] border border-emerald-600/50 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
         >
-          <Mail className="w-3.5 h-3.5" />
+          <Mail className="w-3.5 h-3.5 text-emerald-100" />
           E-mail
         </button>
       </div>
