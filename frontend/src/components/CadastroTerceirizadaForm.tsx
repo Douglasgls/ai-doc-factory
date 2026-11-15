@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { apiService, type TerceirizadaCadastrada, type Tomador } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
+import { validarEmail } from '../utils/convites'
 import { BTN, CARD, ErroBox, INPUT, LABEL } from './formUi'
 import { ConviteLink } from './ConviteLink'
 
@@ -43,12 +44,17 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
   const [cnpj, setCnpj] = useState('')
   const [razao, setRazao] = useState('')
   const [email, setEmail] = useState('')
+  const [emailTocado, setEmailTocado] = useState(false)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<TerceirizadaCadastrada | null>(null)
 
+  const emailValido = validarEmail(email)
+  const mostrarErroEmail = emailTocado && email.trim().length > 0 && !emailValido
+
   const cadastrar = async (e: React.FormEvent) => {
     e.preventDefault()
+    setEmailTocado(true)
     setFormError(null)
     setResultado(null)
     if (tomadores && !tomadorId) {
@@ -57,6 +63,10 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
     }
     if (!isCnpjValido(cnpj)) {
       setFormError('CNPJ inválido: confira os dígitos.')
+      return
+    }
+    if (!validarEmail(email)) {
+      setFormError('Por favor, informe um endereço de e-mail válido.')
       return
     }
     setSaving(true)
@@ -71,6 +81,7 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
       setCnpj('')
       setRazao('')
       setEmail('')
+      setEmailTocado(false)
       await onCadastrada()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Erro ao cadastrar terceirizada')
@@ -106,15 +117,42 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
             onChange={(e) => setRazao(e.target.value)} />
         </div>
         <div>
-          <label htmlFor="terc-email" className={LABEL}>E-mail de quem vai administrar</label>
-          <input id="terc-email" type="email" className={INPUT} value={email} required
-            onChange={(e) => setEmail(e.target.value)} />
+          <label htmlFor="terc-email" className={LABEL}>E-mail do administrador</label>
+          <input
+            id="terc-email"
+            type="email"
+            className={`${INPUT} ${mostrarErroEmail ? '!border-rose-400 dark:!border-rose-600 focus:!ring-rose-500' : ''}`}
+            value={email}
+            required
+            aria-invalid={mostrarErroEmail ? 'true' : 'false'}
+            aria-describedby={mostrarErroEmail ? 'terc-email-erro' : undefined}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              if (formError) setFormError(null)
+            }}
+            onBlur={() => setEmailTocado(true)}
+            placeholder="administrador@empresa.com.br"
+          />
+          {mostrarErroEmail && (
+            <p id="terc-email-erro" className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1">
+              Por favor, insira um e-mail válido (ex: usuario@dominio.com).
+            </p>
+          )}
         </div>
       </div>
       <ErroBox message={formError} />
-      <button type="submit"
-        disabled={saving || (!!tomadores && !tomadorId) || !cnpj || !razao.trim() || !email.trim()}
-        className={BTN}>
+      <button
+        type="submit"
+        disabled={
+          saving ||
+          (!!tomadores && !tomadorId) ||
+          !cnpj ||
+          !razao.trim() ||
+          !email.trim() ||
+          (emailTocado && !emailValido)
+        }
+        className={BTN}
+      >
         {saving && <Loader2 className="w-4 h-4 animate-spin" />}Cadastrar terceirizada
       </button>
       {resultado && <ResultadoTerceirizada resultado={resultado} />}
