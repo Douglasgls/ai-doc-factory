@@ -255,7 +255,7 @@ Definidas no `.env` (modelo em `.env.example`), repassadas aos containers pelo `
 | `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env`. Sem ele, o login responde 503 |
 | `AUTH_EXPIRA_MIN` | `480` | Validade do token, em minutos |
 
-Também podem ser ajustadas por ambiente (valores em `app/config.py`, não listadas no `.env.example` nem repassadas pelo `docker-compose.yml` atual, então exigem editá-lo): `SEG_SIM_BAIXO`, `SEG_SIM_ALTO`, `SEG_LLM_CONTINUA`, `SEG_LLM_ABRE`, `LLM_TIMEOUT`, `LLM_TENTATIVAS`, `LLM_ESPERA`. As respostas dos LLMs são cacheadas em disco (volume `cache_llm`).
+Também podem ser ajustadas por ambiente (valores em `app/config.py`, não listadas no `.env.example` nem repassadas pelo `docker-compose.yml` atual, então exigem editá-lo): `SEG_SIM_BAIXO`, `SEG_SIM_ALTO`, `SEG_LLM_CONTINUA`, `SEG_LLM_ABRE`, `SEG_LLM_TRECHO`, `SEG_LLM_CABECALHO`, `SEG_RESIDUAL_MAX_ALNUM`, `SEG_RESIDUAL_CONTIDO`, `LLM_TIMEOUT`, `LLM_TENTATIVAS`, `LLM_ESPERA`. As respostas dos LLMs são cacheadas em disco (volume `cache_llm`).
 
 ## Estado atual
 
@@ -338,6 +338,8 @@ python scripts/relatorio_cobertura.py anotacoes.csv --api http://localhost:8000 
 python scripts/baseline_tfidf.py treinar anotacoes_treino.csv --lote L0001:1 ... --modelo modelo.joblib
 python scripts/baseline_tfidf.py avaliar anotacoes_teste.csv --lote L0001:1 ... --modelo modelo.joblib
 ```
+
+Para iterar na segmentação sem API nem banco, `scripts/avaliar_segmentacao_offline.py textos_ocr.json anotacoes.csv [--diagnostico]` roda `app.segmentacao.segmentar` direto sobre o OCR já extraído (`{lote: [texto por página]}`) e imprime as mesmas métricas; com `--diagnostico`, lista cada fronteira errada com paginação, CNPJ, similaridade e a resposta do Jev. Precisa das dependências do projeto (rode dentro do container) e, fora do modo `CLASSIFICADOR=regras`, chama o Jev com cache.
 
 O token vale `AUTH_EXPIRA_MIN` minutos. Sem ele, os scripts param com a mensagem "401 da API". Os IDs `L0001...` se repetem entre os conjuntos e o ID da API é outro, por isso o mapa `--lote ID_CSV:ID_API`.
 

@@ -39,6 +39,7 @@ def lote():
 def lote_ambiguo(monkeypatch):
     monkeypatch.setattr(segmentacao.config, "SEG_SIM_BAIXO", 0.0)
     monkeypatch.setattr(segmentacao.config, "SEG_SIM_ALTO", 1.1)  # tudo cai na faixa ambígua
+    monkeypatch.setattr(segmentacao.config, "SEG_RESIDUAL_MAX_ALNUM", 0)  # páginas de teste são curtas: sem regra residual
     id_ = _criar_lote([HOLERITE, HOLERITE + " continuação"])
     yield id_
     _apagar_lote(id_)

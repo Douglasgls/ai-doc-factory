@@ -45,6 +45,13 @@ SEG_SIM_ALTO = float(os.getenv("SEG_SIM_ALTO", "0.60"))
 # verso com só um carimbo ("PROTOCOLADO" = 11). Valor tirado do lote de ajuste L0001: NÃO calibrado.
 SEG_BRANCO_MAX_ALNUM = int(os.getenv("SEG_BRANCO_MAX_ALNUM", "12"))
 
+# Página residual (folha só de assinaturas, última linha de tabela): até SEG_RESIDUAL_MAX_ALNUM caracteres alfanuméricos
+# (cerca de três linhas curtas) e pelo menos SEG_RESIDUAL_CONTIDO das suas palavras já presentes na página anterior.
+# Continua o documento sem perguntar ao Jev. Nos conjuntos de ajuste não há documento inteiro tão curto: NÃO validado
+# em documento real.
+SEG_RESIDUAL_MAX_ALNUM = int(os.getenv("SEG_RESIDUAL_MAX_ALNUM", "150"))
+SEG_RESIDUAL_CONTIDO = float(os.getenv("SEG_RESIDUAL_CONTIDO", "0.60"))
+
 # "Página k de N" só vale nas primeiras e últimas SEG_PAG_LINHAS linhas não vazias da página (cabeçalho/rodapé);
 # frase no corpo é ignorada. Valor inicial NÃO calibrado.
 SEG_PAG_LINHAS = int(os.getenv("SEG_PAG_LINHAS", "3"))

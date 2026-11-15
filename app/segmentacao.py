@@ -95,6 +95,19 @@ def _cosseno(a: dict[str, float], b: dict[str, float]) -> float:
     return sum(x * b.get(tok, 0.0) for tok, x in a.items())
 
 
+def residual(texto: str, anterior: str) -> bool:
+    """Página residual: pouquíssimo texto (até SEG_RESIDUAL_MAX_ALNUM caracteres alfanuméricos) e quase todas as suas
+    palavras (>= SEG_RESIDUAL_CONTIDO) já aparecem na página anterior. É o rabo de um documento: folha só com os campos
+    de assinatura sob o cabeçalho corrido, ou a última linha de uma tabela. Um documento novo, mesmo curto, traz
+    palavras próprias (outro nome, outro título). Só palavras de 3+ letras contam; números e ruído de OCR não."""
+    if sum(c.isalnum() for c in texto) > config.SEG_RESIDUAL_MAX_ALNUM:
+        return False
+    palavras = {t for t in _tokens(texto) if len(t) >= 3 and t.isalpha()}
+    if not palavras:
+        return False
+    return len(palavras & set(_tokens(anterior))) / len(palavras) >= config.SEG_RESIDUAL_CONTIDO
+
+
 def perguntar_llm_mesmo_documento(anterior: str, atual: str) -> bool | None:
     """Faixa ambígua: 'estas duas páginas pertencem ao mesmo documento?' (Sim/Não 'noul' do Jev).
 
@@ -129,7 +142,8 @@ def segmentar(textos: list[str]) -> list[Documento]:
 
     Sem paginação: dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento, mesmo com similaridade
     alta (sem perguntar ao Jev); com similaridade alta e algum CNPJ inválido (provável erro de OCR), continua.
-    Abaixo da similaridade alta, CNPJ diferente abre; similaridade baixa abre, exceto com o mesmo CNPJ, que vai
+    Abaixo da similaridade alta, CNPJ diferente abre; página residual (ver residual()) continua; similaridade
+    baixa abre, exceto com o mesmo CNPJ, que vai
     para a pergunta ao Jev junto com a faixa ambígua."""
     if not textos:
         return []
@@ -172,6 +186,8 @@ def segmentar(textos: list[str]) -> list[Documento]:
                 pass
             elif conhecidos and cnpjs[ref] != cnpjs[i]:
                 inicios.append((i, False))  # outra empresa: abre, sem perguntar
+            elif residual(texto, textos[ref]):
+                pass  # folha de assinaturas ou rabo de tabela: continua, sem perguntar
             elif sim < config.SEG_SIM_BAIXO and not (conhecidos and cnpjs[ref] == cnpjs[i]):
                 inicios.append((i, False))
             else:  # faixa ambígua, ou similaridade baixa com o MESMO CNPJ (ex.: tabela contínua)
