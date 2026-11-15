@@ -8,8 +8,8 @@ import {
   type Tomador,
 } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
-import { validarEmail } from '../utils/convites'
-import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
+import { extraEmailClasses, validarEmail } from '../utils/convites'
+import { BTN, BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 import { CadastroTerceirizadaForm } from '../components/CadastroTerceirizadaForm'
 import {
@@ -63,13 +63,11 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   // Logo após criar um tomador: convite do primeiro administrador do cliente
   const [tomNovo, setTomNovo] = useState<Tomador | null>(null)
   const [convEmail, setConvEmail] = useState('')
-  const [convEmailTocado, setConvEmailTocado] = useState(false)
   const [convSaving, setConvSaving] = useState(false)
   const [convError, setConvError] = useState<string | null>(null)
   const [convCriado, setConvCriado] = useState<ConviteCriado | null>(null)
 
   const convEmailValido = validarEmail(convEmail)
-  const mostrarErroConvEmail = convEmailTocado && convEmail.trim().length > 0 && !convEmailValido
 
   const carregar = useCallback(async () => {
     try {
@@ -128,7 +126,6 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
   const convidarAdminCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!tomNovo) return
-    setConvEmailTocado(true)
     if (!validarEmail(convEmail)) {
       setConvError('Por favor, informe um endereço de e-mail válido.')
       return
@@ -145,7 +142,6 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
         })
       )
       setConvEmail('')
-      setConvEmailTocado(false)
     } catch (err) {
       setConvError(err instanceof Error ? err.message : 'Erro ao criar convite')
     } finally {
@@ -240,23 +236,18 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                       <input
                         id="conv-adm-email"
                         type="email"
-                        className={`${INPUT} ${mostrarErroConvEmail ? '!border-rose-400 dark:!border-rose-600 focus:!ring-rose-500' : ''}`}
+                        className={`${INPUT} ${extraEmailClasses(convEmail, convEmailValido)}`}
                         value={convEmail}
                         required
-                        aria-invalid={mostrarErroConvEmail ? 'true' : 'false'}
-                        aria-describedby={mostrarErroConvEmail ? 'conv-adm-email-erro' : undefined}
+                        aria-invalid={convEmail.trim().length > 0 && !convEmailValido}
+                        aria-describedby="conv-adm-email-feedback"
                         onChange={(e) => {
                           setConvEmail(e.target.value)
                           if (convError) setConvError(null)
                         }}
-                        onBlur={() => setConvEmailTocado(true)}
                         placeholder="administrador@cliente.com.br"
                       />
-                      {mostrarErroConvEmail && (
-                        <p id="conv-adm-email-erro" className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1">
-                          Por favor, insira um e-mail válido (ex: usuario@dominio.com).
-                        </p>
-                      )}
+                      <EmailStatusFeedback email={convEmail} valido={convEmailValido} id="conv-adm-email-feedback" />
                     </div>
                   )}
                   <ErroBox message={convError} />
@@ -265,7 +256,7 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                   ) : (
                     <button
                       type="submit"
-                      disabled={convSaving || !convEmail.trim() || (convEmailTocado && !convEmailValido)}
+                      disabled={convSaving || !convEmailValido}
                       className={BTN}
                     >
                       {convSaving && <Loader2 className="w-4 h-4 animate-spin" />}Convidar administrador do cliente

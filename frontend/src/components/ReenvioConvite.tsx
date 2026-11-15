@@ -1,9 +1,9 @@
 import React from 'react'
 import { Loader2 } from 'lucide-react'
 import { type Contrato } from '../services/api'
-import { ESTADO_ACESSO, validarEmail } from '../utils/convites'
+import { ESTADO_ACESSO, extraEmailClasses, validarEmail } from '../utils/convites'
 import type { ReenvioConvite } from '../hooks/useReenvioConvite'
-import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL, Selo, TD } from './formUi'
+import { BTN, BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo, TD } from './formUi'
 import { ConviteLink } from './ConviteLink'
 
 export const ConviteGeradoCard: React.FC<{ reenvio: ReenvioConvite }> = ({ reenvio }) =>
@@ -33,9 +33,7 @@ export const ReenvioLinha: React.FC<{ contrato: Contrato; reenvio: ReenvioConvit
   reenvio,
   colSpan,
 }) => {
-  const [tocado, setTocado] = React.useState(false)
   const emailValido = validarEmail(reenvio.email)
-  const mostrarErro = tocado && reenvio.email.trim().length > 0 && !emailValido
 
   return reenvio.reenviando === contrato.prestador_id ? (
     <tr>
@@ -49,23 +47,19 @@ export const ReenvioLinha: React.FC<{ contrato: Contrato; reenvio: ReenvioConvit
             <input
               id="reenvio-email"
               type="email"
-              className={`${INPUT} ${mostrarErro ? '!border-rose-400 dark:!border-rose-600 focus:!ring-rose-500' : ''}`}
+              className={`${INPUT} ${extraEmailClasses(reenvio.email, emailValido)}`}
               value={reenvio.email}
               required
-              aria-invalid={mostrarErro ? 'true' : 'false'}
+              aria-invalid={reenvio.email.trim().length > 0 && !emailValido}
+              aria-describedby="reenvio-email-feedback"
               onChange={(e) => reenvio.setEmail(e.target.value)}
-              onBlur={() => setTocado(true)}
               placeholder="administrador@empresa.com.br"
             />
-            {mostrarErro && (
-              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1">
-                Por favor, insira um e-mail válido (ex: usuario@dominio.com).
-              </p>
-            )}
+            <EmailStatusFeedback email={reenvio.email} valido={emailValido} id="reenvio-email-feedback" />
           </div>
           <button
             type="submit"
-            disabled={reenvio.enviando || !reenvio.email.trim() || (tocado && !emailValido)}
+            disabled={reenvio.enviando || !emailValido}
             className={BTN}
           >
             {reenvio.enviando && <Loader2 className="w-4 h-4 animate-spin" />}Gerar link
@@ -73,10 +67,7 @@ export const ReenvioLinha: React.FC<{ contrato: Contrato; reenvio: ReenvioConvit
           <button
             type="button"
             className={BTN_SEC}
-            onClick={() => {
-              setTocado(false)
-              reenvio.cancelar()
-            }}
+            onClick={reenvio.cancelar}
           >
             Cancelar
           </button>

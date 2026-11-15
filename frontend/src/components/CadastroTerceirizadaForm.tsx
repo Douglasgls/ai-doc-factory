@@ -2,8 +2,8 @@ import React, { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { apiService, type TerceirizadaCadastrada, type Tomador } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
-import { validarEmail } from '../utils/convites'
-import { BTN, CARD, ErroBox, INPUT, LABEL } from './formUi'
+import { extraEmailClasses, validarEmail } from '../utils/convites'
+import { BTN, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL } from './formUi'
 import { ConviteLink } from './ConviteLink'
 
 /** Resultado do cadastro, conforme o `acesso` devolvido pela API. */
@@ -44,17 +44,14 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
   const [cnpj, setCnpj] = useState('')
   const [razao, setRazao] = useState('')
   const [email, setEmail] = useState('')
-  const [emailTocado, setEmailTocado] = useState(false)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<TerceirizadaCadastrada | null>(null)
 
   const emailValido = validarEmail(email)
-  const mostrarErroEmail = emailTocado && email.trim().length > 0 && !emailValido
 
   const cadastrar = async (e: React.FormEvent) => {
     e.preventDefault()
-    setEmailTocado(true)
     setFormError(null)
     setResultado(null)
     if (tomadores && !tomadorId) {
@@ -81,7 +78,6 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
       setCnpj('')
       setRazao('')
       setEmail('')
-      setEmailTocado(false)
       await onCadastrada()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Erro ao cadastrar terceirizada')
@@ -121,23 +117,18 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
           <input
             id="terc-email"
             type="email"
-            className={`${INPUT} ${mostrarErroEmail ? '!border-rose-400 dark:!border-rose-600 focus:!ring-rose-500' : ''}`}
+            className={`${INPUT} ${extraEmailClasses(email, emailValido)}`}
             value={email}
             required
-            aria-invalid={mostrarErroEmail ? 'true' : 'false'}
-            aria-describedby={mostrarErroEmail ? 'terc-email-erro' : undefined}
+            aria-invalid={email.trim().length > 0 && !emailValido}
+            aria-describedby="terc-email-feedback"
             onChange={(e) => {
               setEmail(e.target.value)
               if (formError) setFormError(null)
             }}
-            onBlur={() => setEmailTocado(true)}
             placeholder="administrador@empresa.com.br"
           />
-          {mostrarErroEmail && (
-            <p id="terc-email-erro" className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1">
-              Por favor, insira um e-mail válido (ex: usuario@dominio.com).
-            </p>
-          )}
+          <EmailStatusFeedback email={email} valido={emailValido} id="terc-email-feedback" />
         </div>
       </div>
       <ErroBox message={formError} />
@@ -148,8 +139,7 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
           (!!tomadores && !tomadorId) ||
           !cnpj ||
           !razao.trim() ||
-          !email.trim() ||
-          (emailTocado && !emailValido)
+          !emailValido
         }
         className={BTN}
       >
