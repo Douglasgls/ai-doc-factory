@@ -128,7 +128,7 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `372 passed, 1 skipped, 1 warning in 9.37s`, no commit `645f3f4`, em 2026-11-11, com `CLASSIFICADOR=regras`. Essa execução foi **fora do Docker**, com Postgres e Redis locais e Python 3.13 (o container usa Python 3.12), com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `809 passed, 1 skipped, 1 warning in 85.19s`, no commit `12852b9`, em 2026-11-15, com `CLASSIFICADOR=regras`, na imagem do `api` (Python 3.12) com Postgres 16 e Redis 7 descartáveis, com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
@@ -323,6 +323,8 @@ Todos os números abaixo vieram dos scripts de `scripts/`, rodados contra o sist
 | ajuste | 101 | 5 | 30 | escolha dos limiares |
 | treino | 202 | 20 | 159 | só o baseline TF-IDF |
 | teste | 303 | 10 | 76 | medição final, enviado e medido uma única vez, depois de congelar código, prompts e limiares |
+| ajuste2 | 505 | 15 | 116 | análise de erros e ajuste da segmentação (PR #82) |
+| teste2 | 909 | 10 | 82 | medição final da segmentação atual, gerado e medido uma única vez depois do merge do PR #82 |
 
 ### Como reproduzir os scripts
 
@@ -347,9 +349,24 @@ O token vale `AUTH_EXPIRA_MIN` minutos. Sem ele, os scripts param com a mensagem
 
 Regra definida antes de olhar o teste: a maior cobertura automática com precisão automática de pelo menos 0,95 no conjunto de ajuste; em empate, manter o valor atual. No ajuste (31 documentos previstos), a curva ficou em 93,5% automático e precisão 1,000 de `0,50` a `0,90`, e caiu para 90,3% em `0,95`. A curva não justifica mudança, então ficaram **`CONF_AUTO=0.85` e `CONF_MIN=0.50`**. Com cerca de 30 documentos e precisão 1,000 em todo o platô, isso não prova que 0,85 é ótimo, só que não há evidência para mudar.
 
-### Segmentação (Goal 1), conjunto de teste
+### Segmentação (Goal 1)
 
 Métricas por documento. Precisão e recall são das fronteiras (início de documento); "exatos" exige início e fim corretos.
+
+**Versão atual (depois do PR #82)**, medida com `scripts/avaliar_segmentacao.py` contra o sistema completo em Docker (`CLASSIFICADOR=jev`, pergunta de fronteira `jev-fronteira-v3`):
+
+| | Ajuste (5 lotes) | Ajuste2 (15 lotes) | Teste2 (10 lotes) |
+|---|---|---|---|
+| Documentos reais / previstos | 30 / 31 | 116 / 117 | 82 / 83 |
+| Precisão das fronteiras | 0,962 | 0,990 | 0,986 |
+| Recall das fronteiras | 1,000 | 1,000 | 1,000 |
+| Documentos exatos | 29/30 (0,967) | 115/116 (0,991) | 81/82 (0,988) |
+
+Antes do PR #82, nos mesmos conjuntos de ajuste, eram 28/30 e 110/116 exatos. Todos os erros eram cortes a mais, e todos passavam pela pergunta ao Jev. Eram de dois tipos: folha só de assinaturas no fim do contrato (4) e continuação da tabela da folha de pagamento com a paginação perdida no OCR (4). O PR mudou a pergunta (agora também recebe o cabeçalho da página anterior) e criou a regra de página residual (`SEG_RESIDUAL_*`). O erro que sobra no teste2 é um corte a mais no lote L0010. No teste2 a classificação acertou os 82 documentos (acurácia e F1 macro 1,000).
+
+Ressalvas: o gerador nunca coloca dois documentos consecutivos da mesma empresa, que é o caso comum num lote real de uma só prestadora, e nos conjuntos de ajuste nenhuma fronteira real chegou a passar pela pergunta ao Jev. A regra de página residual pode fundir um documento real muito curto que repita as palavras da página anterior; os limites dela não foram validados em documento real.
+
+**Medição anterior (histórico)**, conjunto `teste` (seed 303), com a versão de antes das mudanças de CNPJ, paginação e do PR #82:
 
 | | Ajuste (5 lotes) | Teste (10 lotes) |
 |---|---|---|
@@ -360,7 +377,7 @@ Métricas por documento. Precisão e recall são das fronteiras (início de docu
 
 No teste, os lotes L0001 (2/4 exatos), L0006 (5/10) e L0008 (4/11) concentram os erros; os outros sete lotes têm 4/5 ou mais. O mesmo `L0001` de 4 documentos reais virou 7 previstos.
 
-**Mudança posterior à medição final.** Depois da medição final, a regra do CNPJ na segmentação mudou: sem paginação, dois CNPJs válidos pelos dígitos verificadores e diferentes abrem documento mesmo com similaridade alta (antes a similaridade alta decidia "continua" antes de olhar o CNPJ). As regras de paginação também mudaram depois da medição: "Página k de N" (k>1) só continua o documento quando é coerente com a última página paginada dele (mesmo N e k maior; caso contrário abre documento novo e marca ambíguo), e a paginação só é lida nas primeiras e últimas linhas da página (`SEG_PAG_LINHAS`), não em frases do corpo. Os números do conjunto de teste acima valem para a versão anterior e precisam ser medidos de novo em lotes novos. No conjunto de **ajuste** (não é métrica final), a mesma medição foi repetida com a regra nova: antes, 30 reais / 31 previstos, precisão 0,923, recall 0,960, exatos 26/30; depois, 30 reais / 32 previstos, precisão 0,926, recall 1,000, exatos 28/30.
+**Mudança posterior à medição final.** Depois da medição final, a regra do CNPJ na segmentação mudou: sem paginação, dois CNPJs válidos pelos dígitos verificadores e diferentes abrem documento mesmo com similaridade alta (antes a similaridade alta decidia "continua" antes de olhar o CNPJ). As regras de paginação também mudaram depois da medição: "Página k de N" (k>1) só continua o documento quando é coerente com a última página paginada dele (mesmo N e k maior; caso contrário abre documento novo e marca ambíguo), e a paginação só é lida nas primeiras e últimas linhas da página (`SEG_PAG_LINHAS`), não em frases do corpo. Os números do conjunto de teste acima valem para a versão anterior; a versão atual foi medida no teste2 (tabela acima). No conjunto de **ajuste** (não é métrica final), a mesma medição foi repetida com a regra nova: antes, 30 reais / 31 previstos, precisão 0,923, recall 0,960, exatos 26/30; depois, 30 reais / 32 previstos, precisão 0,926, recall 1,000, exatos 28/30.
 
 ### Classificação (Goal 3), conjunto de teste
 
