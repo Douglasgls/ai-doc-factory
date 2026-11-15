@@ -24,6 +24,13 @@ export function formatDataHora(iso: string | null | undefined): string {
     : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** Validação de formato de e-mail (alinhado com o regex e tamanho máximo do backend). */
+export function validarEmail(email: string): boolean {
+  const v = email.trim()
+  if (!v || v.length > 254) return false
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)
+}
+
 export const ESTADO_CONVITE: Record<string, string> = {
   pendente: 'Pendente',
   usado: 'Usado',

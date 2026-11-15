@@ -8,7 +8,7 @@ import {
   type UsuarioAtual,
   type UsuarioListado,
 } from '../services/api'
-import { ESTADO_CONVITE, formatDataHora, NIVEL_ROTULO, PAPEL_ROTULO } from '../utils/convites'
+import { ESTADO_CONVITE, formatDataHora, NIVEL_ROTULO, PAPEL_ROTULO, validarEmail } from '../utils/convites'
 import { BTN, CARD, ErroBox, INPUT, LABEL, Selo, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 
@@ -31,10 +31,14 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [email, setEmail] = useState('')
+  const [emailTocado, setEmailTocado] = useState(false)
   const [papel, setPapel] = useState<'admin' | 'membro'>('membro')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [criado, setCriado] = useState<ConviteCriado | null>(null)
+
+  const emailValido = validarEmail(email)
+  const mostrarErroEmail = emailTocado && email.trim().length > 0 && !emailValido
 
   const carregar = useCallback(async () => {
     try {
@@ -56,12 +60,18 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
 
   const convidar = async (e: React.FormEvent) => {
     e.preventDefault()
+    setEmailTocado(true)
+    if (!validarEmail(email)) {
+      setFormError('Por favor, informe um endereço de e-mail válido.')
+      return
+    }
     setFormError(null)
     setCriado(null)
     setSaving(true)
     try {
       setCriado(await apiService.criarConvite(conviteParaColega(usuario, email.trim(), papel)))
       setEmail('')
+      setEmailTocado(false)
       await carregar()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Erro ao criar convite')
@@ -85,8 +95,26 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="eq-email" className={LABEL}>E-mail</label>
-            <input id="eq-email" type="email" className={INPUT} value={email} required
-              onChange={(e) => setEmail(e.target.value)} />
+            <input
+              id="eq-email"
+              type="email"
+              className={`${INPUT} ${mostrarErroEmail ? '!border-rose-400 dark:!border-rose-600 focus:!ring-rose-500' : ''}`}
+              value={email}
+              required
+              aria-invalid={mostrarErroEmail ? 'true' : 'false'}
+              aria-describedby={mostrarErroEmail ? 'eq-email-erro' : undefined}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                if (formError) setFormError(null)
+              }}
+              onBlur={() => setEmailTocado(true)}
+              placeholder="exemplo@empresa.com.br"
+            />
+            {mostrarErroEmail && (
+              <p id="eq-email-erro" className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1">
+                Por favor, insira um e-mail válido (ex: usuario@dominio.com).
+              </p>
+            )}
           </div>
           <div>
             <label htmlFor="eq-papel" className={LABEL}>Papel</label>
@@ -98,7 +126,11 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
           </div>
         </div>
         <ErroBox message={formError} />
-        <button type="submit" disabled={saving || !email.trim()} className={BTN}>
+        <button
+          type="submit"
+          disabled={saving || !email.trim() || (emailTocado && !emailValido)}
+          className={BTN}
+        >
           {saving && <Loader2 className="w-4 h-4 animate-spin" />}Gerar convite
         </button>
         {criado && <ConviteLink token={criado.token} expiraEm={criado.expira_em} />}
