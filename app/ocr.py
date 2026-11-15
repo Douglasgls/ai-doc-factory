@@ -1,5 +1,6 @@
 """Handler de segmentar_lote: rasteriza o PDF, roda Tesseract por página e grava o texto."""
 import logging
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,13 +17,16 @@ from app.segmentacao import segmentar
 log = logging.getLogger(__name__)
 DPI = 150
 PARALELISMO = 4
+# Uma thread OpenMP por processo do Tesseract: o paralelismo fica no pool acima (e nas réplicas do worker).
+# Sem isso cada tesseract abre uma thread por núcleo e réplicas x pool x núcleos disputam a CPU.
+_ENV_TESSERACT = {**os.environ, "OMP_THREAD_LIMIT": "1"}
 
 
 def ocr_imagem(png: Path) -> str:
     """Tesseract em português. Página em branco devolve texto vazio."""
     saida = subprocess.run(
         ["tesseract", str(png), "stdout", "-l", "por"],
-        check=True, capture_output=True, text=True, encoding="utf-8",
+        check=True, capture_output=True, text=True, encoding="utf-8", env=_ENV_TESSERACT,
     ).stdout
     return saida.replace("\x00", "").strip()  # Postgres não aceita NUL em TEXT
 
