@@ -24,6 +24,44 @@ export function formatDataHora(iso: string | null | undefined): string {
     : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** Data e hora compactas para tabelas sem scroll (ex: 22/11/26 18:45). */
+export function formatDataHoraCurta(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const dia = String(d.getDate()).padStart(2, '0')
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const ano = String(d.getFullYear()).slice(-2)
+  const hora = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${dia}/${mes}/${ano} ${hora}:${min}`
+}
+
+/** Formata data e hora por extenso (ex: 22 de novembro de 2026, às 18:12). */
+export function formatDataHoraPorExtenso(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const dia = d.getDate()
+  const meses = [
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+    'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+  ]
+  const mes = meses[d.getMonth()]
+  const ano = d.getFullYear()
+  const hora = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${dia} de ${mes} de ${ano}, às ${hora}:${min}`
+}
+
+/** Iniciais do nome para avatar (ex: "Administrador" -> "AD", "Douglas Paz" -> "DP"). */
+export function extrairIniciais(nome: string): string {
+  const partes = nome.trim().split(/\s+/).filter(Boolean)
+  if (partes.length === 0) return '?'
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase()
+  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase()
+}
+
 /** Regex de validação estrita de e-mail (requer usuário, domínio e TLD com pelo menos 2 letras). */
 export const REGEX_EMAIL = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*\.[a-zA-Z]{2,}$/
 

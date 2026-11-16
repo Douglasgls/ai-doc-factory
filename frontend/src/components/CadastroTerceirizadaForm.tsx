@@ -13,7 +13,12 @@ export const ResultadoTerceirizada: React.FC<{ resultado: TerceirizadaCadastrada
       {resultado.prestador.razao_social} ({formatCnpj(resultado.prestador.cnpj)})
     </p>
     {resultado.acesso === 'convite_criado' && resultado.convite && (
-      <ConviteLink token={resultado.convite.token} expiraEm={resultado.convite.expira_em} />
+      <ConviteLink
+        token={resultado.convite.token}
+        expiraEm={resultado.convite.expira_em}
+        email={resultado.convite.email}
+        papel="admin"
+      />
     )}
     {resultado.acesso === 'convite_pendente' && (
       <p className="text-sm text-[#6e6378] dark:text-[#a093a8]">

@@ -252,7 +252,12 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                   )}
                   <ErroBox message={convError} />
                   {convCriado ? (
-                    <ConviteLink token={convCriado.token} expiraEm={convCriado.expira_em} />
+                    <ConviteLink
+                      token={convCriado.token}
+                      expiraEm={convCriado.expira_em}
+                      email={convCriado.email}
+                      papel={convCriado.papel}
+                    />
                   ) : (
                     <button
                       type="submit"
