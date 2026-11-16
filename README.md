@@ -249,7 +249,7 @@ Definidas no `.env` (modelo em `.env.example`), repassadas aos containers pelo `
 | `OPENROUTER_API_KEY` | vazio | Chave do OpenRouter (Jev). Só no `.env` |
 | `JEV_MODEL` | vazio | Modelo do Jev. Testado com `typesafe/jev-1.13` |
 | `GEMINI_API_KEY` | vazio | Chave do Google AI Studio. Só no `.env` |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo da segunda opinião |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Modelo da segunda opinião |
 | `AUTH_USUARIO` | vazio | Identificador (e-mail) do primeiro administrador, criado por `python -m app.bootstrap_admin` se não existir |
 | `AUTH_SENHA` | vazio | Senha inicial desse administrador. Só no `.env`. Trocá-la depois não muda a senha de um usuário já criado |
 | `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env`. Sem ele, o login responde 503 |

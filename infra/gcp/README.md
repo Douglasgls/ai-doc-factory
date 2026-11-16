@@ -494,8 +494,8 @@ CONF_MIN=0.50
 # OPENROUTER_API_KEY=
 # JEV_MODEL=
 # GEMINI_API_KEY=
-# GEMINI_MODEL=gemini-3.5-flash
-# GEMINI_ANALISE_MODEL=gemini-3.5-flash
+# GEMINI_MODEL=gemini-3.8-flash
+# GEMINI_ANALISE_MODEL=gemini-3.8-flash
 EOF
 
 gcloud secrets versions add "$(terraform output -raw secret_id)" --data-file="$ENV_FILE"
