@@ -73,9 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Left: Logo & Navigation Tabs */}
         <div className="flex items-center gap-6 sm:gap-8">
           {/* Marca EviDocs */}
-          <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}
-                title="Documentos"
-                aria-label="Documentos">
+          <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
             <EviDocsBrand sizeClass="text-xl sm:text-2xl" />
           </div>
 
@@ -84,6 +82,8 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('documentos')}
+              title="Documentos"
+              aria-label="Documentos"
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                 activeTab === 'documentos'
                   ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
