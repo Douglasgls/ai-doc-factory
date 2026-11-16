@@ -76,6 +76,7 @@ class ContratoOut(BaseModel):
     vigencia_inicio: date | None
     vigencia_fim: date | None
     criado_em: DataHora
+    perfil_jornada: str  # perfil de jornada usado na análise de ponto dos lotes do contrato
     tomador_nome: str
     tomador_ativo: bool
     prestador_razao_social: str

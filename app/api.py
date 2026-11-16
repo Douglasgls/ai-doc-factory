@@ -17,6 +17,7 @@ from app.routers.empresas.routers import router as empresas
 from app.routers.lotes.routers import router as lotes
 from app.routers.organizacoes.routers import router as organizacoes
 from app.routers.organizacoes.routers import router_leitura as contratos_leitura
+from app.routers.perfis_jornada.routers import router as perfis_jornada
 from app.routers.revisao.routers import router as revisao
 from app.routers.saude.routers import router as saude
 from app.routers.terceirizadas.routers import router as terceirizadas
@@ -50,7 +51,8 @@ app.add_middleware(
 #   - tipos: qualquer usuário logado;
 #   - POST /terceirizadas (admin do tomador ou plataforma), GET /usuarios e GET /convites (admin da organização):
 #     autenticadas, decididas na action; fora de acesso_a_dados de propósito (o admin do tomador escreve aqui);
-#   - empresas (conformidade) e criação de tomador/prestador/contrato: só plataforma.
+#   - empresas (conformidade), criação de tomador/prestador/contrato e perfis de jornada (cadastro e associação
+#     ao contrato): só plataforma.
 # Router novo SEM dependência fica aberto: a varredura de tests/test_autenticacao.py e tests/test_isolamento.py cobra isso.
 app.include_router(saude)
 app.include_router(auth)
@@ -61,5 +63,5 @@ for router in (lotes, busca, documentos, revisao, contratos_leitura):
 app.include_router(tipos, dependencies=[Depends(exigir_usuario)])
 for router in (terceirizadas, usuarios):  # a action decide por nível e papel (admin do tomador / admin da organização)
     app.include_router(router, dependencies=[Depends(exigir_usuario)])
-for router in (empresas, organizacoes):
+for router in (empresas, organizacoes, perfis_jornada):
     app.include_router(router, dependencies=[Depends(exigir_plataforma)])

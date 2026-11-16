@@ -83,6 +83,15 @@ def test_upgrade_head_cria_tabelas_e_downgrade_base_remove(banco_descartavel):
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('pagina_texto_fts_idx', 'empresa_nome_uniq')"
         ).fetchone()[0] == 1  # empresa_nome_uniq saiu com a tabela
     _alembic(url, "upgrade", "head")  # idempotente: já está no head
+    with psycopg.connect(url) as conn:  # 0007: contrato aponta para um perfil; a análise grava o nome
+        assert conn.execute("SELECT column_default FROM information_schema.columns WHERE table_name = 'contrato' "
+                            "AND column_name = 'perfil_jornada'").fetchone()[0].startswith("'clt_padrao'")
+        assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE table_name = 'analise_ponto' "
+                            "AND column_name = 'perfil_nome'").fetchone()[0] == 1
+    _alembic(url, "downgrade", "0006_perfil_jornada_vigencia")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE (table_name, column_name) IN "
+                            "(('contrato', 'perfil_jornada'), ('analise_ponto', 'perfil_nome'))").fetchone()[0] == 0
     _alembic(url, "downgrade", "0005_convite")  # 0006: volta o perfil sem vigência, com os 16 parâmetros originais
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT count(*), count(DISTINCT parametro) FROM perfil_jornada").fetchone() == (16, 16)

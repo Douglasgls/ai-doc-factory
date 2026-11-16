@@ -397,7 +397,9 @@ def test_varredura_toda_rota_exige_token():
 # filtradas pelo escopo (a matriz completa e o isolamento estão em tests/test_isolamento.py).
 SO_PLATAFORMA = {("GET", "/empresas"), ("GET", "/empresas/{cnpj:path}/conformidade"),
                  ("GET", "/lotes/{lote_id}/conformidade"), ("POST", "/tomadores"), ("GET", "/tomadores"),
-                 ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos")}
+                 ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos"),
+                 ("GET", "/perfis-jornada"), ("GET", "/perfis-jornada/{perfil}"), ("PUT", "/perfis-jornada/{perfil}"),
+                 ("PUT", "/contratos/{contrato_id}/perfil-jornada")}
 # POST /convites, GET /convites, GET /usuarios e POST /terceirizadas: autenticadas, e o 403 por nível e papel vem da
 # action (escopo.pode_convidar; tests/test_convites.py e tests/test_terceirizadas.py).
 
