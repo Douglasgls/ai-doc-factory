@@ -73,7 +73,9 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Left: Logo & Navigation Tabs */}
         <div className="flex items-center gap-6 sm:gap-8">
           {/* Marca EviDocs */}
-          <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
+          <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}
+                title="Documentos"
+                aria-label="Documentos">
             <EviDocsBrand sizeClass="text-xl sm:text-2xl" />
           </div>
 
@@ -89,13 +91,15 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>Documentos</span>
+              <span className="hidden lg:inline">Documentos</span>
             </button>
 
             {showOrganizacoes && (
               <button
                 type="button"
                 onClick={() => onSelectTab('organizacoes')}
+                title="Organizações"
+                aria-label="Organizações"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'organizacoes'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -103,15 +107,16 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                <span>Organizações</span>
+                <span className="hidden lg:inline">Organizações</span>
               </button>
             )}
 
             {showPerfis && (
               <button
                 type="button"
-                title="Perfis de jornada"
                 onClick={() => onSelectTab('perfis')}
+                title="Perfis de jornada"
+                aria-label="Perfis de jornada"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'perfis'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -119,7 +124,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Clock className="w-4 h-4" />
-                <span>Jornada</span>
+                <span className="hidden lg:inline">Jornada</span>
               </button>
             )}
 
@@ -127,6 +132,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('terceirizadas')}
+                title="Terceirizadas"
+                aria-label="Terceirizadas"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'terceirizadas'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -134,7 +141,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Briefcase className="w-4 h-4" />
-                <span>Terceirizadas</span>
+                <span className="hidden lg:inline">Terceirizadas</span>
               </button>
             )}
 
@@ -142,6 +149,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('equipe')}
+                title="Equipe"
+                aria-label="Equipe"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'equipe'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -149,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Users className="w-4 h-4" />
-                <span>Equipe</span>
+                <span className="hidden lg:inline">Equipe</span>
               </button>
             )}
 
@@ -184,7 +193,7 @@ export const Header: React.FC<HeaderProps> = ({
               placeholder="Buscar em todos os documentos"
               value={globalSearch}
               onChange={(e) => onGlobalSearchChange(e.target.value)}
-              className="w-44 lg:w-72 pl-10 pr-4 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#8f8298] dark:placeholder-[#776881] focus:outline-none focus:ring-1 focus:ring-[#9333ea] dark:focus:ring-[#c026d3] transition-all"
+              className="w-64 lg:w-72 pl-10 pr-4 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#8f8298] dark:placeholder-[#776881] focus:outline-none focus:ring-1 focus:ring-[#9333ea] dark:focus:ring-[#c026d3] transition-all"
             />
           </div>
           */}
