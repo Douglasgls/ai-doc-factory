@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: production
-      url: ${{ secrets.APP_URL }}
+      url: ${{ vars.APP_URL }}
     steps:
       - uses: google-github-actions/auth@v2
         with:
