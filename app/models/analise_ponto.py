@@ -16,6 +16,7 @@ class AnalisePonto(Base):
     )
     estado: Mapped[str] = mapped_column(Text)
     erro: Mapped[str | None] = mapped_column(Text)
+    perfil_nome: Mapped[str | None] = mapped_column(Text)  # NULL nas análises anteriores ao perfil por contrato
     perfil: Mapped[dict | None] = mapped_column(JSONB)
     marcacoes: Mapped[dict | None] = mapped_column(JSONB)
     intervalo_pre_assinalado: Mapped[bool | None] = mapped_column(Boolean)

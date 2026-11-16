@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Text,
+                        UniqueConstraint, text)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -21,6 +22,8 @@ class Contrato(Base):
     vigencia_inicio: Mapped[date | None] = mapped_column(Date)
     vigencia_fim: Mapped[date | None] = mapped_column(Date)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    # nome do perfil em perfil_jornada (sem FK: o perfil é um conjunto de linhas); usado na análise de ponto
+    perfil_jornada: Mapped[str] = mapped_column(Text, server_default="clt_padrao")
 
     tomador: Mapped["Tomador"] = relationship(back_populates="contratos")
     prestador: Mapped["Prestador"] = relationship(back_populates="contratos")

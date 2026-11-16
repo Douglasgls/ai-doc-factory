@@ -247,7 +247,8 @@ class AnalisePontoOut(BaseModel):
     documento_id: int
     estado: str  # pendente | concluida | erro
     erro: str | None = None
-    perfil: dict[str, ParametroPerfilOut] | None = None
+    perfil_nome: str | None = None  # perfil do contrato do lote; ausente em análises antigas (clt_padrao)
+    perfil: dict[str, ParametroPerfilOut] | None = None  # perfil efetivo usado (próprios + herdados)
     marcacoes: list[dict[str, Any]] | None = None  # como extraídas pelo Gemini: {data, pares: [[entrada, saida]...]}
     intervalo_pre_assinalado: bool | None = None
     totais: TotaisPontoOut | None = None

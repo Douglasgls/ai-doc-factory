@@ -157,15 +157,15 @@ def _imagens(lote_id: int, ini: int, fim: int) -> list[bytes]:
 
 
 _UPSERT = """
-INSERT INTO analise_ponto (documento_id, estado, erro, perfil, marcacoes, intervalo_pre_assinalado, totais,
+INSERT INTO analise_ponto (documento_id, estado, erro, perfil_nome, perfil, marcacoes, intervalo_pre_assinalado, totais,
     divergencias, diferencas_gemini, ponto_britanico, analise, contagens, scores_dimensao, score_geral,
     requer_revisao, modelo_gemini, modelo_jev, versao_prompt_gemini, versao_prompt_jev, custo, atualizado_em)
-VALUES (%(documento_id)s, %(estado)s, %(erro)s, %(perfil)s, %(marcacoes)s, %(intervalo_pre_assinalado)s, %(totais)s,
+VALUES (%(documento_id)s, %(estado)s, %(erro)s, %(perfil_nome)s, %(perfil)s, %(marcacoes)s, %(intervalo_pre_assinalado)s, %(totais)s,
     %(divergencias)s, %(diferencas_gemini)s, %(ponto_britanico)s, %(analise)s, %(contagens)s, %(scores_dimensao)s,
     %(score_geral)s, %(requer_revisao)s, %(modelo_gemini)s, %(modelo_jev)s, %(versao_prompt_gemini)s,
     %(versao_prompt_jev)s, %(custo)s, now())
 ON CONFLICT (documento_id) DO UPDATE SET
-    estado = EXCLUDED.estado, erro = EXCLUDED.erro, perfil = EXCLUDED.perfil, marcacoes = EXCLUDED.marcacoes,
+    estado = EXCLUDED.estado, erro = EXCLUDED.erro, perfil_nome = EXCLUDED.perfil_nome, perfil = EXCLUDED.perfil, marcacoes = EXCLUDED.marcacoes,
     intervalo_pre_assinalado = EXCLUDED.intervalo_pre_assinalado, totais = EXCLUDED.totais,
     divergencias = EXCLUDED.divergencias, diferencas_gemini = EXCLUDED.diferencas_gemini,
     ponto_britanico = EXCLUDED.ponto_britanico, analise = EXCLUDED.analise, contagens = EXCLUDED.contagens,
@@ -179,7 +179,7 @@ _CAMPOS_JSON = ("perfil", "marcacoes", "totais", "divergencias", "diferencas_gem
 
 
 def _gravar(conn, documento_id: int, estado: str, dados: dict, erro: str | None = None) -> None:
-    linha = {c: None for c in ("perfil", "marcacoes", "intervalo_pre_assinalado", "totais", "divergencias",
+    linha = {c: None for c in ("perfil_nome", "perfil", "marcacoes", "intervalo_pre_assinalado", "totais", "divergencias",
                                "diferencas_gemini", "ponto_britanico", "analise", "contagens", "scores_dimensao",
                                "score_geral", "modelo_gemini", "modelo_jev", "custo")}
     linha.update(dados)
@@ -231,7 +231,9 @@ def analisar_documento(payload: dict) -> None:
             return
         textos = [t or "" for (t,) in conn.execute(
             "SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
-        perfil = ponto.carregar_perfil(conn)
+        # perfil do contrato do lote (lote sem contrato: o padrão), já com a herança do padrão
+        perfil_nome = ponto.perfil_do_documento(conn, doc_id)
+        perfil = ponto.carregar_perfil(conn, perfil_nome)
     lote_id = doc[2]
     publicar_evento(
         lote_id,
@@ -243,7 +245,8 @@ def analisar_documento(payload: dict) -> None:
     if lote_cancelado(lote_id):
         concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
         return
-    resultado["perfil"] = perfil
+    resultado["perfil"] = perfil  # o perfil efetivamente usado, inteiro
+    resultado["perfil_nome"] = perfil_nome
     with psycopg.connect(config.DATABASE_URL) as conn:
         if lote_cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"analise:{doc_id}")

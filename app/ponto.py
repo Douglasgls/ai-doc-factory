@@ -64,6 +64,7 @@ TIPOS_DIVERGENCIA = (
 )
 
 BASE_LEGAL_REGISTRO = "CLT art. 74; Portaria MTP 671/2021"
+PERFIL_PADRAO = "clt_padrao"  # perfil de referência; os demais herdam dele o que não redefinem
 
 
 def montar_perfil(linhas):
@@ -86,14 +87,37 @@ def montar_perfil(linhas):
     return perfil
 
 
-def carregar_perfil(conn, perfil="clt_padrao"):
-    """Lê o perfil da tabela perfil_jornada (conn psycopg). Devolve o formato de `montar_perfil`."""
+def herdar(linhas_padrao, linhas_proprias):
+    """Perfil efetivo: os parâmetros do perfil próprio mais os do padrão que ele não redefine.
+
+    A herança é POR PARÂMETRO: se o perfil próprio tem alguma linha do parâmetro, vale a linha do tempo dele inteira
+    (valor de base e vigências) e as linhas do padrão para esse parâmetro são ignoradas, inclusive as vigências.
+    É assim que um contrato com a administração pública (EC 141/2026, art. 9º) mantém 44h: uma única linha de base
+    de jornada_semanal_min no perfil do contrato.
+    """
+    proprios = {l[0] for l in linhas_proprias}
+    return montar_perfil([l for l in linhas_padrao if l[0] not in proprios] + list(linhas_proprias))
+
+
+def carregar_perfil(conn, perfil=PERFIL_PADRAO):
+    """Lê o perfil efetivo da tabela perfil_jornada (conn psycopg), já com a herança de PERFIL_PADRAO.
+    Devolve o formato de `montar_perfil`. ValueError se o perfil não tem nenhuma linha."""
     rows = conn.execute(
-        "SELECT parametro, valor, base_legal, vigente_desde FROM perfil_jornada WHERE perfil = %s", (perfil,)
-    ).fetchall()
-    if not rows:
+        "SELECT perfil, parametro, valor, base_legal, vigente_desde FROM perfil_jornada WHERE perfil = ANY(%s)",
+        ([PERFIL_PADRAO, perfil],)).fetchall()
+    padrao = [r[1:] for r in rows if r[0] == PERFIL_PADRAO]
+    proprias = padrao if perfil == PERFIL_PADRAO else [r[1:] for r in rows if r[0] == perfil]
+    if not proprias:
         raise ValueError(f"perfil '{perfil}' não encontrado")
-    return montar_perfil(rows)
+    return herdar(padrao, proprias)
+
+
+def perfil_do_documento(conn, documento_id):
+    """Nome do perfil de jornada do contrato do lote do documento; lote sem contrato usa PERFIL_PADRAO."""
+    row = conn.execute(
+        "SELECT c.perfil_jornada FROM documento d JOIN lote l ON l.id = d.lote_id "
+        "LEFT JOIN contrato c ON c.id = l.contrato_id WHERE d.id = %s", (documento_id,)).fetchone()
+    return (row[0] if row else None) or PERFIL_PADRAO
 
 
 def vigente(perfil, parametro, dia):

@@ -20,7 +20,7 @@ from app.routers.auth.actions import UsuarioContexto
 from app.routers.documentos.schemas import AtualizacaoCampos
 from app.routers.revisao.schemas import Revisao
 
-_COLUNAS_ANALISE = ("estado", "erro", "perfil", "marcacoes", "intervalo_pre_assinalado", "totais", "divergencias",
+_COLUNAS_ANALISE = ("estado", "erro", "perfil_nome", "perfil", "marcacoes", "intervalo_pre_assinalado", "totais", "divergencias",
                     "diferencas_gemini", "ponto_britanico", "analise", "contagens", "scores_dimensao", "score_geral",
                     "requer_revisao", "modelo_gemini", "modelo_jev", "versao_prompt_gemini", "versao_prompt_jev",
                     "custo", "atualizado_em")
