@@ -52,7 +52,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
           </div>
           <div>
             <h1 className="text-lg sm:text-[21px] font-bold text-white tracking-tight leading-snug">
-              Boas-vindas de volta
+              Vamos começar!
             </h1>
             <p className="text-xs text-[#9c8aa9] mt-0.5 leading-relaxed">
               Entre para acessar os documentos da sua organização.
@@ -127,11 +127,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
                 className="sr-only"
               />
               <span
-                className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
-                  manterConectado
-                    ? 'bg-[#a816be] border-[#c026d3] text-white'
-                    : 'bg-[#16091f] border-[#3d224f] text-transparent'
-                }`}
+                className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${manterConectado
+                  ? 'bg-[#a816be] border-[#c026d3] text-white'
+                  : 'bg-[#16091f] border-[#3d224f] text-transparent'
+                  }`}
               >
                 <Check className="w-3 h-3 stroke-[3]" />
               </span>
