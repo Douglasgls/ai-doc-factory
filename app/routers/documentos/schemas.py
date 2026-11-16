@@ -81,9 +81,16 @@ class DocumentosAgrupadosOut(BaseModel):
 # Devolvida com response_model_exclude_unset=True: documento ainda sem linha em analise_ponto
 # responde só {documento_id, estado: "pendente"}.
 
-class ParametroPerfilOut(BaseModel):
+class VigenciaParametroOut(BaseModel):
+    desde: str  # AAAA-MM-DD: o valor vale a partir desta data
     valor: float
     base_legal: str
+
+
+class ParametroPerfilOut(BaseModel):
+    valor: float  # valor de base (antes da primeira vigência)
+    base_legal: str
+    vigencias: list[VigenciaParametroOut] | None = None  # ausente em análises anteriores à vigência por data
 
 
 class DivergenciaPontoOut(BaseModel):
@@ -129,6 +136,8 @@ class ResumoTotaisPontoOut(BaseModel):
     extras_bruto_min: float
     noturno_real_min: float
     noturno_computado_min: float
+    prorrogacao_noturna_min: float | None = None  # CLT art. 73, § 5º; ausente em análises antigas
+    prorrogacao_noturna_computada_min: float | None = None
     dias_validos: int
     dias_invalidos: int
 
@@ -151,6 +160,8 @@ class TotaisPontoOut(BaseModel):
     intervalo_pre_assinalado: bool
     intervalos_nao_verificados: list[Any]
     semanas_avaliadas_descanso: int
+    # por semana: inicio, regra_vigente_em (domingo), jornada_computada_min, limite_semanal_min, dias_informados
+    semanas: list[dict[str, Any]] | None = None
     tolerancia_por_marcacao: ToleranciaPorMarcacaoOut
     horario_contratual: list[Any]
     declarados: TotaisDeclaradosOut
@@ -184,7 +195,8 @@ class ContagemHorasExtrasOut(BaseModel):
     dias_acima_do_limite_diario: int | None = None
     fracao_dos_dias_acima_do_limite: float | None = None
     maior_excesso_diario_min: float | None = None
-    semanas_acima_de_44h: int | None = None
+    semanas_acima_de_44h: int | None = None  # nome antigo (análises anteriores à vigência por data)
+    semanas_acima_do_limite_semanal: int | None = None
     total_horas_extras_min: float | None = None
 
 
@@ -204,7 +216,8 @@ class ContagemIntervalosOut(BaseModel):
 class ContagemDescansoOut(BaseModel):
     model_config = ConfigDict(extra="allow")
     semanas_completas_avaliadas: int | None = None
-    semanas_sem_descanso_de_24h: int | None = None
+    semanas_sem_descanso_de_24h: int | None = None  # nome antigo
+    semanas_sem_descanso_semanal: int | None = None
     maior_falta_de_descanso_min: float | None = None
 
 

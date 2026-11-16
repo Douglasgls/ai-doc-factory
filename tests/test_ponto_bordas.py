@@ -21,7 +21,8 @@ def test_dois_pares_com_o_segundo_depois_da_meia_noite():
     d = r["dias"][0]
     assert r["divergencias"] == []
     assert (d["data"], d["trabalhado_min"], d["intervalo_min"]) == ("2025-11-03", 420, 60)
-    assert d["noturno_real_min"] == 360  # 22h-2h e 3h-5h; das 5h às 6h é diurno (CLT art. 73, § 2º)
+    assert d["noturno_real_min"] == 360  # 22h-2h e 3h-5h: o horário noturno acaba às 5h (CLT art. 73, § 2º)
+    assert d["prorrogacao_noturna_min"] == 60  # das 5h às 6h: prorrogação da jornada noturna (art. 73, § 5º)
 
 
 def test_saida_depois_da_meia_noite_sem_o_marcador_e_invalida_e_nao_vira_jornada():
@@ -67,8 +68,11 @@ def test_jornada_diurna_nao_muda_com_a_hora_noturna():
 
 
 @pytest.mark.parametrize("saida,div", [
-    ("07:00+1", []),                                                   # 480 noturnos + 120 diurnos: 2h extras exatas
-    ("07:01+1", [("horas_extras_acima_limite", "2025-11-03", 1)]),     # CLT art. 59, caput
+    # Jornada integralmente noturna (22h-5h = 480 computados): o que passa das 5h é prorrogação e também conta com a
+    # hora de 52min30s (CLT art. 73, § 5º). 105 min reais = 120 computados: 2h extras exatas.
+    ("06:45+1", []),
+    ("06:46+1", [("horas_extras_acima_limite", "2025-11-03", 1.14)]),  # CLT art. 59, caput
+    ("07:00+1", [("horas_extras_acima_limite", "2025-11-03", 17.14)]),
 ])
 def test_limite_de_duas_horas_extras_com_hora_noturna(saida, div):
     assert tipos(_noite("2025-11-03", "22:00", saida)) == div

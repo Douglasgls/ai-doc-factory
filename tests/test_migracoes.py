@@ -71,11 +71,31 @@ def test_upgrade_head_cria_tabelas_e_downgrade_base_remove(banco_descartavel):
     assert {"lote_contrato_sha256_uniq", "lote_sem_contrato_sha256_uniq"} <= _indices_lote(url)
     assert "lote_sha256_key" not in _indices_lote(url)
     with psycopg.connect(url) as conn:
-        assert conn.execute("SELECT count(*) FROM perfil_jornada WHERE perfil = 'clt_padrao'").fetchone()[0] == 16
+        # 17 parâmetros de base (0001 + repouso_semanal_dias) e 3 vigências da EC 141/2026 (migração 0006)
+        assert conn.execute("SELECT count(*) FROM perfil_jornada WHERE perfil = 'clt_padrao' AND vigente_desde IS NULL"
+                            ).fetchone()[0] == 17
+        assert conn.execute(
+            "SELECT parametro, vigente_desde::text, valor::int FROM perfil_jornada WHERE vigente_desde IS NOT NULL "
+            "ORDER BY parametro, vigente_desde").fetchall() == [
+            ('jornada_semanal_min', '2026-12-16', 2520), ('jornada_semanal_min', '2027-12-16', 2400),
+            ('repouso_semanal_dias', '2026-12-16', 2)]
         assert conn.execute(
             "SELECT count(*) FROM pg_indexes WHERE indexname IN ('pagina_texto_fts_idx', 'empresa_nome_uniq')"
         ).fetchone()[0] == 1  # empresa_nome_uniq saiu com a tabela
     _alembic(url, "upgrade", "head")  # idempotente: já está no head
+    _alembic(url, "downgrade", "0005_convite")  # 0006: volta o perfil sem vigência, com os 16 parâmetros originais
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*), count(DISTINCT parametro) FROM perfil_jornada").fetchone() == (16, 16)
+        assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE table_name = 'perfil_jornada' "
+                            "AND column_name = 'vigente_desde'").fetchone()[0] == 0
+        with pytest.raises(psycopg.errors.UniqueViolation):  # a unicidade antiga voltou
+            conn.execute("INSERT INTO perfil_jornada (perfil, parametro, valor, unidade, base_legal) "
+                         "VALUES ('clt_padrao', 'jornada_diaria_min', 1, 'min', 'x')")
+    _alembic(url, "upgrade", "head")
+    with psycopg.connect(url) as conn:
+        with pytest.raises(psycopg.errors.UniqueViolation):  # uma única linha de base por parâmetro (NULLs iguais)
+            conn.execute("INSERT INTO perfil_jornada (perfil, parametro, valor, unidade, base_legal) "
+                         "VALUES ('clt_padrao', 'jornada_diaria_min', 1, 'min', 'x')")
     _alembic(url, "downgrade", "0004_lote_contrato")  # 0005 só cria `convite`
     assert _tabelas(url) == TABELAS_0004
     _alembic(url, "upgrade", "head")

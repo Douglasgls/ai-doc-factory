@@ -94,8 +94,12 @@ CRITERIOS_FRONTEIRA = {
 
 # --- Análise de folha de ponto (Goal 6) ---
 # Mudou qualquer texto abaixo, suba a versão: ela é gravada em analise_ponto.
-VERSAO_PROMPT_PONTO_GEMINI = "gemini-ponto-v2"
-VERSAO_PROMPT_PONTO_JEV = "jev-ponto-v4"
+# gemini-ponto-v3: o perfil passou a trazer `vigencias` (valor por data) e o prompt explica como ler.
+# jev-ponto-v5: o limite semanal e o repouso semanal mudam por data (EC 141/2026); as perguntas deixaram de citar
+# "44 horas" e "24 horas" e as contagens viraram `semanas_acima_do_limite_semanal` e `semanas_sem_descanso_semanal`.
+# NÃO conferido com chamada real ao Gemini nem ao Jev (só com mock).
+VERSAO_PROMPT_PONTO_GEMINI = "gemini-ponto-v3"
+VERSAO_PROMPT_PONTO_JEV = "jev-ponto-v5"
 
 
 def prompt_gemini_ponto(texto: str, perfil_json: str, tipos: tuple) -> str:
@@ -119,7 +123,10 @@ def prompt_gemini_ponto(texto: str, perfil_json: str, tipos: tuple) -> str:
         "NÃO calcule.\n"
         "- analise: no máximo 3 frases sobre a folha.\n"
         "Não invente horários. Não inclua nome, CPF nem outros dados pessoais na resposta.\n\n"
-        f"Perfil de jornada (minutos; valor e base legal):\n{perfil_json}\n\n"
+        "Perfil de jornada (minutos; valor e base legal). Quando o parâmetro traz `vigencias`, `valor` vale até a "
+        "véspera da primeira data `desde` e cada item vale a partir da sua data `desde`: use o valor vigente na data "
+        "do dia e, para a semana (segunda a domingo), o vigente no domingo.\n"
+        f"{perfil_json}\n\n"
         f"Texto de OCR:\n<<<\n{texto}\n>>>"
     )
 
@@ -133,12 +140,13 @@ PERGUNTAS_PONTO = {
         "type": "score",
         "instructions": (
             "Considerando só `contagens.horas_extras` (contagens já calculadas), qual situação de horas extras "
-            "descreve a folha?" + AVISO_ANALISE),
+            "descreve a folha? `semanas_acima_do_limite_semanal` conta as semanas em que a jornada passou da duração "
+            "semanal normal em vigor na época." + AVISO_ANALISE),
         "criteria": [
-            "Nenhum dia acima do limite diário de horas extras e nenhuma semana acima de 44 horas",
-            "Poucos dias isolados acima do limite diário, com excesso pequeno, e nenhuma semana acima de 44 horas",
-            "Vários dias acima do limite diário ou semanas acima de 44 horas, mas não na maior parte do período",
-            "Dias acima do limite diário na maior parte do período, com excessos grandes ou várias semanas acima de 44 horas",
+            "Nenhum dia acima do limite diário de horas extras e nenhuma semana acima do limite semanal",
+            "Poucos dias isolados acima do limite diário, com excesso pequeno, e nenhuma semana acima do limite semanal",
+            "Vários dias acima do limite diário ou semanas acima do limite semanal, mas não na maior parte do período",
+            "Dias acima do limite diário na maior parte do período, com excessos grandes ou várias semanas acima do limite semanal",
         ],
     },
     "intervalos": {
@@ -156,15 +164,16 @@ PERGUNTAS_PONTO = {
     "descanso": {
         "type": "score",
         "instructions": (
-            "Considerando só `contagens.descanso` (contagens já calculadas), qual situação do descanso semanal de "
-            "24 horas descreve a folha? Compare `semanas_sem_descanso_de_24h` com `semanas_completas_avaliadas` (sempre 1 ou mais)."
+            "Considerando só `contagens.descanso` (contagens já calculadas), qual situação do descanso semanal "
+            "descreve a folha? `semanas_sem_descanso_semanal` conta as semanas sem o descanso semanal exigido na "
+            "época. Compare `semanas_sem_descanso_semanal` com `semanas_completas_avaliadas` (sempre 1 ou mais)."
             + AVISO_ANALISE),
         # (sem descanso, avaliadas) -> nível: (0,n)->0; (1,1)->1; (1,4)->1; (2,4)->2; (3,4)->2; (2,2)->3; (4,4)->3
         "criteria": [
-            "Nenhuma semana completa avaliada está sem descanso de 24 horas",
-            "Exatamente uma semana completa avaliada está sem descanso de 24 horas, inclusive quando só uma semana foi avaliada",
-            "Mais de uma semana completa avaliada está sem descanso de 24 horas, mas não todas",
-            "Todas as semanas completas avaliadas estão sem descanso de 24 horas, e são duas ou mais",
+            "Nenhuma semana completa avaliada está sem o descanso semanal exigido",
+            "Exatamente uma semana completa avaliada está sem o descanso semanal exigido, inclusive quando só uma semana foi avaliada",
+            "Mais de uma semana completa avaliada está sem o descanso semanal exigido, mas não todas",
+            "Todas as semanas completas avaliadas estão sem o descanso semanal exigido, e são duas ou mais",
         ],
     },
     "registro": {
