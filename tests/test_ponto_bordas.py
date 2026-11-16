@@ -21,7 +21,8 @@ def test_dois_pares_com_o_segundo_depois_da_meia_noite():
     d = r["dias"][0]
     assert r["divergencias"] == []
     assert (d["data"], d["trabalhado_min"], d["intervalo_min"]) == ("2025-11-03", 420, 60)
-    assert d["noturno_real_min"] == 360  # 22h-2h e 3h-5h; das 5h às 6h é diurno (CLT art. 73, § 2º)
+    assert d["noturno_real_min"] == 360  # 22h-2h e 3h-5h: o horário noturno acaba às 5h (CLT art. 73, § 2º)
+    assert d["prorrogacao_noturna_min"] == 60  # das 5h às 6h: prorrogação da jornada noturna (art. 73, § 5º)
 
 
 def test_saida_depois_da_meia_noite_sem_o_marcador_e_invalida_e_nao_vira_jornada():

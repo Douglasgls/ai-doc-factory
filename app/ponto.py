@@ -197,17 +197,18 @@ def _prorrogacao_noturna(pares, p):
     """Minutos reais de prorrogação do trabalho noturno depois do fim do horário noturno (CLT art. 73, § 5º).
 
     O texto do § 5º é só: "Às prorrogações do trabalho noturno aplica-se o disposto neste capítulo" (conferido em
-    15/11/2026 no texto compilado do Planalto). Ele não define "prorrogação". CONDIÇÃO USADA (decisão de projeto, a
-    leitura mais estrita: jornada cumprida integralmente no horário noturno e emendada depois das 5h), as três juntas:
-      1. nenhum minuto do dia foi trabalhado antes do início do horário noturno (a jornada não é mista no começo;
-         horário misto segue o § 4º);
-      2. o trabalho dentro do horário noturno, já com a hora reduzida, completa a jornada diária normal
-         (jornada_diaria_min), admitida a tolerância diária (tolerancia_dia_min). Das 22h às 5h são 7h de relógio,
-         que em horas de 52min30s dão exatamente 8h;
-      3. o par de marcações que contém o fim do horário noturno continua depois dele, sem interrupção: os minutos
-         desse par depois das 5h são a prorrogação e contam como noturnos (hora de 52min30s).
-    Trabalho retomado depois de um intervalo posterior às 5h NÃO entra. Jornada noturna com intervalo dentro do
-    horário noturno (ex.: 22h-2h e 3h-7h) NÃO satisfaz a condição 2 e fica sem prorrogação: é um mínimo, não um teto.
+    15/11/2026 no texto compilado do Planalto). Ele não define "prorrogação". CONDIÇÃO USADA (decisão do responsável
+    pelo projeto em 16/11/2026), as duas juntas:
+      1. a jornada começou no horário noturno: a primeira marcação do dia cai entre 22h e 5h e nenhum minuto foi
+         trabalhado antes das 22h. Jornada mista que começa antes (ex.: 19h-7h) NÃO conta: segue o § 4º, só as
+         horas dentro do horário noturno são noturnas;
+      2. a parte depois das 5h é emenda da mesma jornada: o par de marcações que contém as 5h continua depois delas,
+         sem interrupção. Os minutos desse par depois das 5h são a prorrogação e contam como noturnos (hora de
+         52min30s).
+    O intervalo DENTRO do horário noturno não descaracteriza a jornada noturna: 22h-2h e 3h-7h tem 2h de prorrogação.
+    Trabalho retomado depois de um intervalo que termina após as 5h (ex.: 22h-5h e 6h-8h) NÃO entra: não é emenda.
+    Não há exigência de duração mínima do trabalho noturno: uma jornada que começa de madrugada (ex.: 4h-12h) também
+    satisfaz a condição 1 e tem as horas depois das 5h contadas como prorrogação.
     """
     if not pares:
         return 0.0
@@ -215,12 +216,8 @@ def _prorrogacao_noturna(pares, p):
     for inicio_dia in (base - timedelta(days=1), base):  # janela que começou na véspera e a que começa no dia
         ini = inicio_dia + timedelta(minutes=p["noturno_inicio_min"])
         fim = inicio_dia + timedelta(days=1, minutes=p["noturno_fim_min"])
-        if pares[0][0] < ini or pares[0][0] >= fim:
-            continue
-        noturno = sum(max(0.0, _minutos(min(s, fim) - max(e, ini))) for e, s in pares)
-        if noturno / p["hora_noturna_min"] * 60 < p["jornada_diaria_min"] - p["tolerancia_dia_min"]:
-            continue
-        return sum(_minutos(s - fim) for e, s in pares if e < fim < s)
+        if ini <= pares[0][0] < fim:
+            return sum(_minutos(s - fim) for e, s in pares if e < fim < s)
     return 0.0
 
 
@@ -228,9 +225,9 @@ def _dias_de_repouso(seg, spans):
     """Dias de calendário da semana (segunda a domingo) sem nenhum minuto de trabalho.
 
     CF art. 7º, XV (redação da EC 141/2026): "repouso semanal remunerado de 2 (dois) dias, um dos quais
-    preferencialmente aos domingos". AMBÍGUO: o texto não diz se os dias são consecutivos, não define "dia" e não
-    fixa a janela. Leitura mais literal adotada: "semanal" = dentro da semana de segunda a domingo; "dia" = dia de
-    calendário (0h às 24h) sem trabalho; os 2 dias NÃO precisam ser consecutivos. Um dia em que termina a jornada
+    preferencialmente aos domingos". O texto não diz se os dias são consecutivos, não define "dia" e não fixa a
+    janela. Leitura adotada (decisão do responsável pelo projeto em 16/11/2026): "semanal" = dentro da semana de
+    segunda a domingo; "dia" = dia de calendário (0h às 24h) sem trabalho; os 2 dias PODEM ser separados. Um dia em que termina a jornada
     noturna da véspera tem trabalho e não conta. O domingo não é verificado. O regime compensatório por convenção
     ou acordo coletivo (art. 7º, § 2º, da CF) não é tratado: fica para o perfil próprio do contrato.
     """
