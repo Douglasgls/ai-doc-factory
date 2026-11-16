@@ -69,14 +69,14 @@ CLASSIFICADOR = os.getenv("CLASSIFICADOR", "jev")  # "jev" (Jev + Gemini) ou "re
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 JEV_MODEL = os.getenv("JEV_MODEL", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 CACHE_DIR = os.getenv("CACHE_DIR", "/cache")
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "60"))
 LLM_TENTATIVAS = int(os.getenv("LLM_TENTATIVAS", "4"))
 LLM_ESPERA = float(os.getenv("LLM_ESPERA", "1.5"))  # segundos; dobra a cada nova tentativa
 
 # Análise de folha de ponto (Goal 6). O modelo realmente servido é lido de modelVersion e gravado em analise_ponto.
-GEMINI_ANALISE_MODEL = os.getenv("GEMINI_ANALISE_MODEL", "gemini-3.5-flash")
+GEMINI_ANALISE_MODEL = os.getenv("GEMINI_ANALISE_MODEL", "gemini-3.8-flash")
 PONTO_MAX_PAGINAS = int(os.getenv("PONTO_MAX_PAGINAS", "6"))  # páginas (imagens) enviadas ao Gemini
 PONTO_TEXTO_MAX = int(os.getenv("PONTO_TEXTO_MAX", "20000"))  # caracteres de OCR enviados
 
