@@ -124,6 +124,7 @@ class TotaisDeclaradosOut(BaseModel):
 
 class ResumoTotaisPontoOut(BaseModel):
     trabalhado_min: float
+    jornada_computada_min: float | None = None  # com a hora noturna reduzida; ausente em análises antigas
     extras_min: float
     extras_bruto_min: float
     noturno_real_min: float

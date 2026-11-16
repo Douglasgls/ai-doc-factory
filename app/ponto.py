@@ -10,6 +10,24 @@ ou um datetime ISO completo. Dia sem pares é folga. "HH:MM" de saída menor ou 
 interpretado como virada de dia: vira marcacao_invalida (ambíguo); a virada precisa vir como "+1".
 
 Perfil: dict {parametro: {"valor": número, "base_legal": texto}}, como devolvido por carregar_perfil.
+
+Base legal conferida em 15/11/2026 no texto compilado do Planalto (CF e CLT) e na Portaria MTP 671/2021
+compilada em 21/07/2026 (gov.br/trabalho-e-emprego). Regra por regra:
+- 8h diárias: CLT art. 58, caput; CF art. 7º, XIII.
+- 44h semanais: NÃO está na CLT; vinha da CF art. 7º, XIII. A EC 141, de 16/10/2026, mudou o inciso para 40h,
+  com redução progressiva (art. 6º: 42h dois meses após a publicação, 40h um ano depois) e repouso semanal de
+  2 dias (art. 7º, XV, em vigor dois meses após a publicação; a CLT art. 67 segue com 24h). O perfil clt_padrao
+  NÃO tem vigência por data: os valores 2640 min e 1440 min valem para folhas de períodos anteriores a essa
+  transição. PENDENTE de decisão: como aplicar a EC 141 (datas, contratos com a administração pública, art. 9º).
+- Tolerância: CLT art. 58, § 1º (variações de até 5 min, limite de 10 min diários).
+- Até 2h extras por dia: CLT art. 59, caput. Adicional de 50%: CF art. 7º, XVI; CLT art. 59, § 1º (não usado
+  nas contas: o código não calcula valores em dinheiro; idem o adicional noturno de 20%, CLT art. 73, caput).
+- Interjornada de 11h consecutivas: CLT art. 66. Descanso semanal de 24h consecutivas: CLT art. 67.
+- Intrajornada: CLT art. 71, caput (mais de 6h: um intervalo de no mínimo 1h) e § 1º (mais de 4h até 6h: 15 min).
+- Noturno: CLT art. 73, § 2º (22h às 5h), § 1º (hora de 52min30s) e § 4º (horário misto: só as horas noturnas).
+- Registro: CLT art. 74, § 2º (anotação de entrada e saída; pré-assinalação do repouso permitida);
+  Portaria MTP 671/2021, art. 74 (registro fiel; vedada marcação automática com horário predeterminado),
+  art. 84 (conteúdo mínimo do espelho) e art. 93 (registro manual: vedada a mera assinalação do horário contratual).
 """
 from collections import Counter
 from statistics import median
@@ -134,7 +152,7 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
     das marcações; habilita a conferência da tolerância de 5 min por marcação. Sem ele, só vale o teto diário.
 
     intervalo_pre_assinalado: a CLT art. 74, § 2º, permite a pré-assinalação do período de repouso
-    (redação dada pela Lei 13.874/2019, conferida pelo resumo do texto do Planalto). Quando verdadeiro,
+    (redação dada pela Lei 13.874/2019; conferido no texto compilado do Planalto). Quando verdadeiro,
     um dia com um único par de marcações NÃO gera intervalo_intrajornada_insuficiente, porque o intervalo
     não foi registrado e não dá para verificá-lo; esses dias saem em "intervalos_nao_verificados".
 
@@ -142,8 +160,15 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
     previsto de cada dia com o MESMO número de marcações (previstos explícito por data tem prioridade). Nos demais
     dias vale só o teto diário; o resultado registra isso em "tolerancia_por_marcacao".
 
+    Hora noturna reduzida (CLT art. 73, § 1º; a Portaria MTP 671/2021, art. 84, VI, manda a duração da jornada
+    considerar o horário noturno reduzido): cada 52min30s trabalhados entre 22h e 5h contam como 60 min. As horas
+    extras do dia e o total da semana usam essa jornada computada (jornada_computada_min); trabalhado_min segue
+    sendo o tempo de relógio. Em jornada mista só a parte noturna é reduzida (art. 73, § 4º). O intervalo
+    intrajornada continua medido em tempo de relógio. A prorrogação após as 5h (art. 73, § 5º) NÃO é tratada.
+
     totais_declarados (opcional): {"total_horas_min": n|None, "horas_extras_min": n|None} como declarado na folha.
-    total_horas: compara com o trabalhado recalculado. horas_extras: o declarado não gera divergência quando bate
+    total_horas: compara com o trabalhado recalculado em tempo de relógio OU com a jornada computada (com a hora
+    noturna reduzida); só diverge se não bater com nenhum dos dois. horas_extras: o declarado não gera divergência quando bate
     (dentro de CONFIG_PONTO["total_declarado_tolerancia_min"]) com o recalculado SEM tolerância (extras_bruto_min)
     OU COM a tolerância do art. 58, § 1º (extras_min_com_tolerancia), pois a folha pode ter aplicado qualquer
     dos dois critérios. Se não bate com nenhum, gera total_declarado_divergente com a menor diferença entre os dois
@@ -188,12 +213,20 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
             continue
 
         trabalhado = sum(_minutos(s - e) for e, s in pares)
-        intervalo = sum(_minutos(e2 - s1) for (_, s1), (e2, _) in zip(pares, pares[1:]))
-        bruto = trabalhado - p["jornada_diaria_min"]
+        gaps = [_minutos(e2 - s1) for (_, s1), (e2, _) in zip(pares, pares[1:])]
+        intervalo, maior_intervalo = sum(gaps), max(gaps, default=0.0)
+        # Hora noturna reduzida (CLT art. 73, § 1º): cada hora_noturna_min (52,5) reais entre 22h e 5h conta 60 min.
+        noturno = _noturno_real(pares, p["noturno_inicio_min"], p["noturno_fim_min"])
+        noturno_computado = round(noturno / p["hora_noturna_min"] * 60, 2)
+        computada = round(trabalhado - noturno + noturno_computado, 2)  # jornada mista: só a parte noturna reduz
+        bruto = computada - p["jornada_diaria_min"]
 
-        # Tolerância (CLT art. 58, § 1º). INTERPRETAÇÃO A CONFERIR: o excesso diário até tolerancia_dia_min
-        # (e, se houver horários previstos, cada marcação dentro de tolerancia_marcacao_min) não conta;
-        # ultrapassado o limite, conta o excesso INTEIRO, não só o que passa de 10 min.
+        # Tolerância (CLT art. 58, § 1º: "variações de horário no registro de ponto não excedentes de cinco
+        # minutos, observado o limite máximo de dez minutos diários"). O excesso diário até tolerancia_dia_min
+        # (e, se houver horários previstos, cada marcação dentro de tolerancia_marcacao_min) não conta.
+        # INTERPRETAÇÃO (não está na lei; é a da Súmula 366 do TST, a confirmar): ultrapassado o limite, conta
+        # o excesso INTEIRO, não só o que passa de 10 min. O limite diário é aplicado ao excesso líquido do dia,
+        # não à soma das variações de cada marcação (também a confirmar).
         # Sem horários previstos não dá para medir a variação por marcação, então só o teto diário é aplicado.
         dentro = 0 < bruto <= p["tolerancia_dia_min"]
         prev = previstos.get(dia.isoformat()) or contrato
@@ -211,19 +244,19 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
             dentro = alvo is None or all(abs(_minutos(m - a)) <= p["tolerancia_marcacao_min"] for m, a in zip(flat, alvo))
         extras = 0.0 if (bruto <= 0 or dentro) else bruto
 
-        noturno = _noturno_real(pares, p["noturno_inicio_min"], p["noturno_fim_min"])
         dias[dia] = {
-            "data": dia.isoformat(), "pares": pares, "trabalhado_min": trabalhado, "extras_min": extras,
-            "extras_bruto_min": max(0.0, bruto),
-            "intervalo_min": intervalo, "noturno_real_min": noturno,
-            # hora noturna reduzida: cada 52min30s reais contam como 60 min
-            "noturno_computado_min": round(noturno / p["hora_noturna_min"] * 60, 2),
+            "data": dia.isoformat(), "pares": pares, "trabalhado_min": trabalhado,
+            "jornada_computada_min": computada, "extras_min": extras, "extras_bruto_min": max(0.0, bruto),
+            "intervalo_min": intervalo, "maior_intervalo_min": maior_intervalo,
+            "noturno_real_min": noturno, "noturno_computado_min": noturno_computado,
         }
 
         if extras > p["extras_max_dia_min"]:
-            div("horas_extras_acima_limite", dia, extras - p["extras_max_dia_min"], base["extras_max_dia_min"],
+            div("horas_extras_acima_limite", dia, round(extras - p["extras_max_dia_min"], 2), base["extras_max_dia_min"],
                 f"{extras:g} min extras no dia")
-        # Intrajornada (CLT art. 71): "jornada" = minutos efetivamente trabalhados.
+        # Intrajornada (CLT art. 71): "jornada" = minutos efetivamente trabalhados, em tempo de relógio.
+        # O caput exige "um intervalo" de no mínimo 1h; o fracionamento só é admitido no § 5º (transporte
+        # coletivo, por convenção). Por isso vale o MAIOR intervalo do dia, não a soma dos intervalos.
         if trabalhado > p["intervalo_longo_acima_min"]:
             exigido = p["intervalo_longo_min"]
             ref = base["intervalo_longo_min"]
@@ -234,22 +267,26 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
             exigido = 0
         if exigido and intervalo_pre_assinalado and len(pares) == 1:
             nao_verificados.append(dia.isoformat())
-        elif exigido and intervalo < exigido:
-            div("intervalo_intrajornada_insuficiente", dia, exigido - intervalo, ref,
-                f"intervalo de {intervalo:g} min, exigido {exigido:g}")
+        elif exigido and maior_intervalo < exigido:
+            div("intervalo_intrajornada_insuficiente", dia, exigido - maior_intervalo, ref,
+                f"maior intervalo de {maior_intervalo:g} min, exigido {exigido:g}")
 
-    # Semana = segunda a domingo (ISO). Passar de 44h numa semana parcial já é conclusivo (dias
-    # ausentes só somariam). Dias com marcação inválida ficam fora da soma, então é um mínimo.
+    # Semana = segunda a domingo (ISO). Passar da duração semanal numa semana parcial já é conclusivo (dias
+    # ausentes só somariam). Dias com marcação inválida ficam fora da soma, então é um mínimo. A jornada que
+    # atravessa a meia-noite conta inteira no dia (e na semana) em que começou. A soma usa a jornada computada
+    # (hora noturna reduzida). É a duração NORMAL da semana (CF art. 7º, XIII): passar dela indica hora extra
+    # semanal, que sozinha não é ilícita.
     semanas = {}
     for dia, d in dias.items():
         semanas.setdefault(dia - timedelta(days=dia.weekday()), []).append(d)
     for seg, ds in sorted(semanas.items()):
-        total = sum(d["trabalhado_min"] for d in ds)
+        total = round(sum(d["jornada_computada_min"] for d in ds), 2)
         if total > p["jornada_semanal_min"]:
-            div("semana_acima_limite", seg, total - p["jornada_semanal_min"], base["jornada_semanal_min"],
+            div("semana_acima_limite", seg, round(total - p["jornada_semanal_min"], 2), base["jornada_semanal_min"],
                 f"semana iniciada em {seg.isoformat()}: {total:g} min")
 
-    # Interjornada (CLT art. 66): só entre dias consecutivos, ambos com marcações válidas e com trabalho.
+    # Interjornada (CLT art. 66): só entre dias consecutivos (inclusive na virada de mês ou de ano), ambos com
+    # marcações válidas e com trabalho. Com um dia faltando na folha entre os dois, não conclui.
     for dia in sorted(dias):
         prox = dias.get(dia + timedelta(days=1))
         d = dias[dia]
@@ -286,6 +323,7 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
     extras_bruto = sum(d["extras_bruto_min"] for d in lista)
     extras_tol = sum(d["extras_min"] for d in lista)
     trabalhado_total = sum(d["trabalhado_min"] for d in lista)
+    computada_total = round(sum(d["jornada_computada_min"] for d in lista), 2)
     decl = totais_declarados if isinstance(totais_declarados, dict) else {}
     invalidos = sum(1 for x in divs if x["tipo"] == "marcacao_invalida")
     declarados = {"total_horas_min": None, "horas_extras_min": None, "comparado": False,
@@ -306,15 +344,19 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
                 div("total_declarado_divergente", None, menor, BASE_LEGAL_REGISTRO,
                     f"{campo}: declarado {v:g} min, recalculado {extras_bruto:g} min sem tolerância "
                     f"e {extras_tol:g} min com tolerância", campo=campo)
-        elif abs(v - calculado) > tol_decl:
-            div("total_declarado_divergente", None, abs(v - calculado), BASE_LEGAL_REGISTRO,
-                f"{campo}: declarado {v:g} min, recalculado {calculado:g} min", campo=campo)
+        elif min(abs(v - calculado), abs(v - computada_total)) > tol_decl:
+            # a folha pode declarar o total em tempo de relógio ou com a hora noturna reduzida
+            noturna = "" if computada_total == calculado else f" ({computada_total:g} min com a hora noturna reduzida)"
+            div("total_declarado_divergente", None, min(abs(v - calculado), abs(v - computada_total)),
+                BASE_LEGAL_REGISTRO, f"{campo}: declarado {v:g} min, recalculado {calculado:g} min{noturna}",
+                campo=campo)
     if declarados["horas_extras_min"] is not None and not invalidos:
         declarados["extras_declarado_igual_ao_bruto"] = abs(declarados["horas_extras_min"] - extras_bruto) <= tol_decl
         declarados["extras_declarado_igual_ao_com_tolerancia"] = (
             abs(declarados["horas_extras_min"] - extras_tol) <= tol_decl)
     totais = {
         "trabalhado_min": trabalhado_total,
+        "jornada_computada_min": computada_total,
         "extras_min": extras_tol,
         "extras_bruto_min": extras_bruto,
         "noturno_real_min": sum(d["noturno_real_min"] for d in lista),
@@ -339,8 +381,10 @@ def detectar_ponto_britanico(marcacoes, variacao_max_min=None, min_dias=None, fr
     """SINAL DE RISCO, não prova de fraude nem conclusão jurídica.
 
     Horários de entrada e saída praticamente idênticos todos os dias são indício de registro não
-    fidedigno (Súmula 338 do TST trata de registros uniformes, "ponto britânico"; CONFERIR O TEXTO
-    OFICIAL do item III antes de citar). Para cada posição de marcação calcula-se a mediana do minuto-do-dia;
+    fidedigno. Base normativa conferida: a Portaria MTP 671/2021 veda, no registro manual, "a mera assinalação
+    do horário contratual" (art. 93) e, no eletrônico, a marcação automática com horários predeterminados
+    (art. 74, II). A Súmula 338, III, do TST (registros uniformes) é jurisprudência e NÃO foi conferida em
+    fonte oficial: não citar no resultado. Para cada posição de marcação calcula-se a mediana do minuto-do-dia;
     um dia é "uniforme" se TODAS as suas marcações ficam a até variacao_max_min da mediana da posição.
     Há sinal quando a fração de dias uniformes é >= fracao_min (assim um dia atípico não esconde um mês
     uniforme). Só considera dias válidos com trabalho e o número de marcações mais comum; com menos
