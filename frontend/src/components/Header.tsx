@@ -1,6 +1,7 @@
 import React from 'react'
 import { Briefcase, Building2, FileText, LogOut, Moon, Sun, Users } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
+import { EviDocsBrand } from './EviDocsBrand'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
 // import { Search } from 'lucide-react'
 
@@ -70,9 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-6 sm:gap-8">
           {/* Marca EviDocs */}
           <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
-            <span className="font-extrabold text-xl tracking-tight text-[#2d0a33] dark:text-white">
-              EviDocs
-            </span>
+            <EviDocsBrand sizeClass="text-xl sm:text-2xl" />
           </div>
 
           {/* Navigation Tabs */}

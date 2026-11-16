@@ -1,0 +1,269 @@
+import React from 'react'
+
+interface EviDocsBrandProps {
+  className?: string
+  sizeClass?: string
+}
+
+const BRAND_ANIMATION_CSS = `
+.brand {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  user-select: none;
+  font-family: inherit;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+}
+
+.brand-aura,
+.brand-sweep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.brand-aura {
+  z-index: 0;
+  background-image: linear-gradient(
+    90deg,
+    #ff79e7 0%,
+    #bd79ff 28%,
+    #7c8cff 58%,
+    #5ddfff 78%,
+    #ff79e7 100%
+  );
+  background-size: 240% 100%;
+  background-position: 0% 50%;
+  filter: blur(5px);
+  opacity: 0.42;
+  animation: eviDocsAura 4.8s cubic-bezier(0.55, 0, 0.2, 1) infinite;
+}
+
+.brand-sweep {
+  z-index: 2;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 38%,
+    rgba(189, 121, 255, 0.65) 44%,
+    #ffffff 50%,
+    rgba(93, 223, 255, 0.75) 56%,
+    transparent 62%,
+    transparent 100%
+  );
+  background-size: 260% 100%;
+  background-position: 100% 50%;
+  opacity: 0;
+  mix-blend-mode: screen;
+  animation: eviDocsSweep 4.8s cubic-bezier(0.55, 0, 0.2, 1) infinite;
+}
+
+.brand-evi,
+.brand-docs {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.brand-evi {
+  background-image: linear-gradient(
+    90deg,
+    #ff79e7 0%,
+    #e279ff 35%,
+    #bd79ff 68%,
+    #8b84ff 100%
+  );
+  background-size: 200% 100%;
+  background-position: 0% 50%;
+  animation: eviDocsEvi 4.8s cubic-bezier(0.55, 0, 0.2, 1) infinite;
+}
+
+.brand-docs {
+  background-image: linear-gradient(
+    90deg,
+    #7c8cff 0%,
+    #6ea4ff 35%,
+    #8d79ff 65%,
+    #5ddfff 100%
+  );
+  background-size: 200% 100%;
+  background-position: 0% 50%;
+  animation: eviDocsDocs 4.8s cubic-bezier(0.55, 0, 0.2, 1) infinite;
+}
+
+@keyframes eviDocsAura {
+  0%, 20% {
+    background-position: 0% 50%;
+    opacity: 0.42;
+    filter: blur(5px);
+  }
+  35% {
+    background-position: 45% 50%;
+    opacity: 0.48;
+    filter: blur(5px);
+  }
+  50%, 72% {
+    background-position: 85% 50%;
+    opacity: 0.42;
+    filter: blur(5px);
+  }
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.42;
+    filter: blur(5px);
+  }
+}
+
+@keyframes eviDocsSweep {
+  0%, 19% {
+    background-position: 100% 50%;
+    opacity: 0;
+  }
+  23% {
+    opacity: 0.95;
+  }
+  36% {
+    background-position: 50% 50%;
+    opacity: 1;
+  }
+  48% {
+    opacity: 0.9;
+  }
+  52%, 100% {
+    background-position: 0% 50%;
+    opacity: 0;
+  }
+}
+
+@keyframes eviDocsEvi {
+  0%, 20% {
+    background-position: 0% 50%;
+    -webkit-text-stroke: 0.55px rgba(255, 195, 245, 0.65);
+    filter: brightness(1.12) saturate(1.15) drop-shadow(0 0 8px rgba(255, 121, 231, 0.45));
+    opacity: 1;
+  }
+  35% {
+    background-position: 55% 50%;
+    -webkit-text-stroke: 0.5px rgba(189, 121, 255, 0.4);
+    filter: brightness(0.92) saturate(0.9) drop-shadow(0 0 4px rgba(189, 121, 255, 0.2));
+    opacity: 0.85;
+  }
+  50%, 72% {
+    background-position: 100% 50%;
+    -webkit-text-stroke: 0.45px rgba(189, 121, 255, 0.2);
+    filter: brightness(0.72) saturate(0.68) drop-shadow(0 0 0px rgba(255, 121, 231, 0));
+    opacity: 0.72;
+  }
+  100% {
+    background-position: 0% 50%;
+    -webkit-text-stroke: 0.55px rgba(255, 195, 245, 0.65);
+    filter: brightness(1.12) saturate(1.15) drop-shadow(0 0 8px rgba(255, 121, 231, 0.45));
+    opacity: 1;
+  }
+}
+
+@keyframes eviDocsDocs {
+  0%, 20% {
+    background-position: 0% 50%;
+    -webkit-text-stroke: 0.45px rgba(124, 140, 255, 0.22);
+    filter: brightness(0.76) saturate(0.72) drop-shadow(0 0 0px rgba(93, 223, 255, 0));
+    opacity: 0.76;
+  }
+  35% {
+    background-position: 50% 50%;
+    -webkit-text-stroke: 0.5px rgba(124, 180, 255, 0.45);
+    filter: brightness(0.96) saturate(0.95) drop-shadow(0 0 5px rgba(124, 140, 255, 0.25));
+    opacity: 0.9;
+  }
+  50%, 72% {
+    background-position: 100% 50%;
+    -webkit-text-stroke: 0.55px rgba(175, 242, 255, 0.7);
+    filter: brightness(1.15) saturate(1.2) drop-shadow(0 0 9px rgba(93, 223, 255, 0.5));
+    opacity: 1;
+  }
+  100% {
+    background-position: 0% 50%;
+    -webkit-text-stroke: 0.45px rgba(124, 140, 255, 0.22);
+    filter: brightness(0.76) saturate(0.72) drop-shadow(0 0 0px rgba(93, 223, 255, 0));
+    opacity: 0.76;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-aura,
+  .brand-evi,
+  .brand-docs {
+    animation: none !important;
+  }
+
+  .brand-sweep {
+    display: none !important;
+  }
+
+  .brand-evi {
+    background-image: linear-gradient(90deg, #ff79e7 0%, #bd79ff 100%) !important;
+    background-size: 100% 100% !important;
+    opacity: 1 !important;
+    filter: none !important;
+  }
+
+  .brand-docs {
+    background-image: linear-gradient(90deg, #7c8cff 0%, #5ddfff 100%) !important;
+    background-size: 100% 100% !important;
+    opacity: 1 !important;
+    filter: none !important;
+  }
+
+  .brand-aura {
+    opacity: 0.35 !important;
+    filter: blur(5px) !important;
+  }
+}
+`
+
+export const EviDocsBrand: React.FC<EviDocsBrandProps> = ({
+  className = '',
+  sizeClass = 'text-[34px] sm:text-[38px]',
+}) => {
+  return (
+    <>
+      <style>{BRAND_ANIMATION_CSS}</style>
+      <div
+        className={`brand relative inline-flex items-baseline font-extrabold tracking-tight select-none ${sizeClass} ${className}`}
+        aria-label="EviDocs"
+      >
+        <span
+          className="brand-aura absolute inset-0 pointer-events-none select-none"
+          aria-hidden="true"
+        >
+          EviDocs
+        </span>
+        <span
+          className="brand-sweep absolute inset-0 pointer-events-none select-none"
+          aria-hidden="true"
+        >
+          EviDocs
+        </span>
+
+        <span className="brand-evi relative z-[1]">Evi</span>
+        <span className="brand-docs relative z-[1]">Docs</span>
+      </div>
+    </>
+  )
+}
+
+export default EviDocsBrand
