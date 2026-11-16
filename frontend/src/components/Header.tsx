@@ -110,6 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
             {showPerfis && (
               <button
                 type="button"
+                title="Perfis de jornada"
                 onClick={() => onSelectTab('perfis')}
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'perfis'
@@ -118,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Clock className="w-4 h-4" />
-                <span>Perfis de jornada</span>
+                <span>Jornada</span>
               </button>
             )}
 
@@ -183,7 +184,7 @@ export const Header: React.FC<HeaderProps> = ({
               placeholder="Buscar em todos os documentos"
               value={globalSearch}
               onChange={(e) => onGlobalSearchChange(e.target.value)}
-              className="w-64 lg:w-72 pl-10 pr-4 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#8f8298] dark:placeholder-[#776881] focus:outline-none focus:ring-1 focus:ring-[#9333ea] dark:focus:ring-[#c026d3] transition-all"
+              className="w-44 lg:w-72 pl-10 pr-4 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#8f8298] dark:placeholder-[#776881] focus:outline-none focus:ring-1 focus:ring-[#9333ea] dark:focus:ring-[#c026d3] transition-all"
             />
           </div>
           */}
