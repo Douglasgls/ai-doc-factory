@@ -41,7 +41,8 @@ compilada em 21/07/2026 (gov.br/trabalho-e-emprego). Regra por regra:
   § 5º (prorrogação do trabalho noturno; ver `_prorrogacao_noturna`).
 - Registro: CLT art. 74, § 2º (anotação de entrada e saída; pré-assinalação do repouso permitida);
   Portaria MTP 671/2021, art. 74 (registro fiel; vedada marcação automática com horário predeterminado),
-  art. 84 (conteúdo mínimo do espelho) e art. 93 (registro manual: vedada a mera assinalação do horário contratual).
+  art. 84 (conteúdo mínimo do espelho; ver CAMPOS_ESPELHO e `conferir_espelho`) e art. 93 (registro manual: vedada
+  a mera assinalação do horário contratual).
 """
 from collections import Counter
 from statistics import median
@@ -61,9 +62,36 @@ CONFIG_PONTO = {
 TIPOS_DIVERGENCIA = (
     "horas_extras_acima_limite", "semana_acima_limite", "intervalo_intrajornada_insuficiente",
     "interjornada_insuficiente", "descanso_semanal_ausente", "marcacao_invalida", "total_declarado_divergente",
+    "espelho_incompleto",
 )
 
 BASE_LEGAL_REGISTRO = "CLT art. 74; Portaria MTP 671/2021"
+
+# Portaria MTP 671/2021, art. 84 (texto compilado em 21/07/2026, gov.br/trabalho-e-emprego; conferido em 15/11/2026):
+# "O relatório Espelho de Ponto Eletrônico gerado pelo programa de tratamento de registro de ponto deve conter, no
+# mínimo, as seguintes informações: I - identificação do empregador contendo nome, CNPJ/CPF e CEI/CAEPF/CNO, caso
+# exista; II - identificação do trabalhador contendo nome, CPF, data de admissão e cargo/função; III - data de
+# emissão e período do relatório Espelho de Ponto Eletrônico; IV - horário e jornada contratual do empregado;
+# V - marcações efetuadas no REP e marcações tratadas (incluídas, desconsideradas e pré-assinaladas) no Programa de
+# Tratamento de Registro de Ponto; e VI - duração das jornadas realizadas (considerando o horário noturno reduzido,
+# se for o caso)."
+# Só o que o artigo lista. CEI/CAEPF/CNO fica de fora por ser "caso exista". campo -> (inciso, o que o Gemini procura).
+BASE_LEGAL_ESPELHO = "Portaria MTP 671/2021, art. 84"
+CAMPOS_ESPELHO = {
+    "empregador_nome": ("I", "nome do empregador"),
+    "empregador_cnpj_cpf": ("I", "CNPJ ou CPF do empregador"),
+    "trabalhador_nome": ("II", "nome do trabalhador"),
+    "trabalhador_cpf": ("II", "CPF do trabalhador"),
+    "trabalhador_data_admissao": ("II", "data de admissão do trabalhador"),
+    "trabalhador_cargo_funcao": ("II", "cargo ou função do trabalhador"),
+    "data_emissao": ("III", "data de emissão do relatório"),
+    "periodo": ("III", "período a que o relatório se refere"),
+    "horario_jornada_contratual": ("IV", "horário e jornada contratual do empregado"),
+    "marcacoes": ("V", "marcações de ponto (entradas e saídas registradas)"),
+    "duracao_jornadas": ("VI", "duração das jornadas realizadas (horas trabalhadas por dia ou no período)"),
+}
+# O art. 84 trata do "Espelho de Ponto Eletrônico": folha manual ou cartão mecânico ficam fora dele.
+TIPOS_REGISTRO = ("espelho_eletronico", "registro_manual_ou_mecanico", "indeterminado")
 PERFIL_PADRAO = "clt_padrao"  # perfil de referência; os demais herdam dele o que não redefinem
 
 
@@ -217,6 +245,32 @@ def _noturno_real(pares, ini_min, fim_min):
     return total
 
 
+def conferir_espelho(tipo_registro, campos):
+    """Decide, em código, se o espelho está incompleto (Portaria MTP 671/2021, art. 84). O LLM só diz o que viu.
+
+    tipo_registro: um de TIPOS_REGISTRO. campos: {campo de CAMPOS_ESPELHO: True (aparece) | False (não aparece) |
+    None (ilegível, cortado ou não informado)}. Devolve {tipo_registro, situacao, campos_ausentes, campos_nao_lidos}:
+    - "nao_aplicavel": não é espelho eletrônico (o art. 84 não alcança o registro manual ou mecânico);
+    - "nao_verificado": tipo de registro indeterminado, ou nenhum campo ausente mas algum não lido;
+    - "incompleto": espelho eletrônico com pelo menos um campo explicitamente ausente (gera a divergência);
+    - "completo": espelho eletrônico com todos os campos presentes.
+    Campo não lido (None) nunca conta como ausente.
+    """
+    campos = campos if isinstance(campos, dict) else {}
+    tipo = tipo_registro if tipo_registro in TIPOS_REGISTRO else "indeterminado"
+    ausentes = [c for c in CAMPOS_ESPELHO if campos.get(c) is False]
+    nao_lidos = [c for c in CAMPOS_ESPELHO if campos.get(c) is not True and campos.get(c) is not False]
+    if tipo == "registro_manual_ou_mecanico":
+        situacao = "nao_aplicavel"
+    elif tipo == "indeterminado":
+        situacao = "nao_verificado"
+    elif ausentes:
+        situacao = "incompleto"
+    else:
+        situacao = "nao_verificado" if nao_lidos else "completo"
+    return {"tipo_registro": tipo, "situacao": situacao, "campos_ausentes": ausentes, "campos_nao_lidos": nao_lidos}
+
+
 def _prorrogacao_noturna(pares, p):
     """Minutos reais de prorrogação do trabalho noturno depois do fim do horário noturno (CLT art. 73, § 5º).
 
@@ -280,7 +334,7 @@ def _dias_de_repouso(seg, spans):
 # ---------------------------------------------------------------- apuração
 
 def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=False, horario_contratual=None,
-                 totais_declarados=None):
+                 totais_declarados=None, espelho=None):
     """Apura minutos e divergências. Devolve {"dias": [...], "totais": {...}, "divergencias": [...]}.
 
     previstos (opcional): {"2025-11-03": ["08:00", "12:00", ...]} com os horários contratuais, na ordem
@@ -301,6 +355,10 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
     sendo o tempo de relógio. Em jornada mista só a parte noturna é reduzida (art. 73, § 4º). O intervalo
     intrajornada continua medido em tempo de relógio. A prorrogação após as 5h (art. 73, § 5º) também conta
     com a hora reduzida, nas condições de `_prorrogacao_noturna` (prorrogacao_noturna_min, fora de noturno_real_min).
+
+    espelho (opcional): {"tipo_registro", "campos"} como extraído da folha. `conferir_espelho` decide; se o espelho
+    eletrônico não traz algum campo do art. 84 da Portaria MTP 671/2021, sai UMA divergência espelho_incompleto (sem
+    data nem minutos) com a lista em "campos_ausentes". O resultado vai em "espelho" (None se não informado).
 
     Os valores do perfil são os vigentes em cada data (ver o topo do módulo): o dia pela sua data e a semana pelo
     seu último dia. O resultado traz "semanas", com o limite aplicado a cada uma e a data de referência.
@@ -478,6 +536,14 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
             div("descanso_semanal_ausente", seg, exigido - melhor, ref_legal,
                 f"maior descanso contínuo na semana: {melhor:g} min")
 
+    conferencia = None
+    if isinstance(espelho, dict):
+        conferencia = conferir_espelho(espelho.get("tipo_registro"), espelho.get("campos"))
+        if conferencia["situacao"] == "incompleto":
+            div("espelho_incompleto", None, None, BASE_LEGAL_ESPELHO, "campos ausentes no espelho: " + ", ".join(
+                f"{c} (inciso {CAMPOS_ESPELHO[c][0]})" for c in conferencia["campos_ausentes"]))
+            divs[-1]["campos_ausentes"] = conferencia["campos_ausentes"]
+
     lista = [dias[k] for k in sorted(dias)]
     for d in lista:
         d.pop("pares")
@@ -530,7 +596,7 @@ def apurar_folha(marcacoes, perfil, previstos=None, intervalo_pre_assinalado=Fal
     return {"dias": lista, "totais": totais, "divergencias": divs,
             "intervalo_pre_assinalado": bool(intervalo_pre_assinalado),
             "intervalos_nao_verificados": nao_verificados, "semanas_avaliadas_descanso": avaliadas,
-            "semanas": resumo_semanas,
+            "semanas": resumo_semanas, "espelho": conferencia,
             "tolerancia_por_marcacao": {
                 "aplicada": dias_com_previsto > 0, "dias_com_horario_previsto": dias_com_previsto,
                 "dias_sem_horario_previsto": dias_sem_previsto,

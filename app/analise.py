@@ -41,9 +41,13 @@ SCHEMA_GEMINI = {
             "total_horas_min": {"type": "NUMBER", "nullable": True},
             "horas_extras_min": {"type": "NUMBER", "nullable": True},
         }},
+        # Portaria MTP 671/2021, art. 84: o Gemini só diz se cada informação aparece; quem decide é o código.
+        "tipo_registro": {"type": "STRING", "enum": list(ponto.TIPOS_REGISTRO)},
+        "campos_espelho": {"type": "OBJECT", "properties": {
+            c: {"type": "BOOLEAN", "nullable": True} for c in ponto.CAMPOS_ESPELHO}},
     },
     "required": ["marcacoes", "intervalo_pre_assinalado", "divergencias", "analise", "horario_contratual",
-                 "totais_declarados"],
+                 "totais_declarados", "tipo_registro", "campos_espelho"],
 }
 
 
@@ -80,14 +84,20 @@ def _validar_extracao(dado) -> dict:
     decl = dado.get("totais_declarados") if isinstance(dado.get("totais_declarados"), dict) else {}
     declarados = {k: decl.get(k) if isinstance(decl.get(k), (int, float)) and not isinstance(decl.get(k), bool) else None
                   for k in ("total_horas_min", "horas_extras_min")}
+    # espelho: fora do formato vira "indeterminado"/None (não verificado), nunca "ausente"
+    tipo_registro = dado.get("tipo_registro") if dado.get("tipo_registro") in ponto.TIPOS_REGISTRO else "indeterminado"
+    campos = dado.get("campos_espelho") if isinstance(dado.get("campos_espelho"), dict) else {}
+    espelho = {"tipo_registro": tipo_registro,
+               "campos": {c: campos.get(c) if isinstance(campos.get(c), bool) else None for c in ponto.CAMPOS_ESPELHO}}
     return {"marcacoes": dado["marcacoes"], "intervalo_pre_assinalado": dado.get("intervalo_pre_assinalado") is True,
             "divergencias": divs, "analise": str(dado.get("analise") or "")[:2000],
-            "horario_contratual": contrato, "totais_declarados": declarados}
+            "horario_contratual": contrato, "totais_declarados": declarados, "espelho": espelho}
 
 
 def extrair_com_gemini(texto: str, imagens: list[bytes], perfil: dict) -> tuple[dict, str, dict]:
     prompt = prompts.prompt_gemini_ponto(anonimizar_texto(texto[:config.PONTO_TEXTO_MAX]), json.dumps(perfil, ensure_ascii=False),
-                                         ponto.TIPOS_DIVERGENCIA)
+                                         ponto.TIPOS_DIVERGENCIA,
+                                         {c: descricao for c, (_, descricao) in ponto.CAMPOS_ESPELHO.items()})
     resp = llm.gemini_gerar(prompt, SCHEMA_GEMINI, imagens=imagens, modelo=config.GEMINI_ANALISE_MODEL)
     dado = _validar_extracao(llm.texto_gemini(resp))
     return dado, resp.get("modelVersion") or config.GEMINI_ANALISE_MODEL, llm._uso(resp)
@@ -123,7 +133,7 @@ def analisar(texto: str, imagens: list[bytes], perfil: dict) -> dict:
     dado, modelo_gemini, uso_gemini = extrair_com_gemini(texto, imagens, perfil)
     apuracao = ponto.apurar_folha(dado["marcacoes"], perfil, intervalo_pre_assinalado=dado["intervalo_pre_assinalado"],
                                   horario_contratual=dado["horario_contratual"],
-                                  totais_declarados=dado["totais_declarados"])
+                                  totais_declarados=dado["totais_declarados"], espelho=dado.get("espelho"))
     britanico = ponto.detectar_ponto_britanico(dado["marcacoes"])
     comparacao = ponto.comparar_com_gemini(apuracao, dado["divergencias"])  # vale o código
     contagens = ponto.resumir_contagens(apuracao, britanico)
