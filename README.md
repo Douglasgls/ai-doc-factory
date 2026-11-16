@@ -128,7 +128,7 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `809 passed, 1 skipped, 1 warning in 85.19s`, no commit `12852b9`, em 2026-11-15, com `CLASSIFICADOR=regras`, na imagem do `api` (Python 3.12) com Postgres 16 e Redis 7 descartáveis, com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `942 passed, 1 skipped, 1 warning in 89.10s`, no commit `4f661bb`, em 2026-11-16, com `CLASSIFICADOR=regras`, na imagem do `api` (Python 3.12) com Postgres 16 e Redis 7 descartáveis, com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
