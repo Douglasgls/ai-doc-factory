@@ -57,7 +57,7 @@ def test_cria_consulta_e_lista_perfil_com_heranca(nome):
         ("extras_max_dia_min", 90, None, "min"), ("extras_max_dia_min", 60, "2027-01-01", "min"),
         ("jornada_semanal_min", 2640, None, "min")]
     efetivo = corpo["efetivo"]
-    assert efetivo["jornada_semanal_min"] == {"valor": 2640, "base_legal": "ACT de teste, cláusula 1ª", "vigencias": None}
+    assert efetivo["jornada_semanal_min"] == {"valor": 2640, "base_legal": "ACT de teste, cláusula 1ª"}  # sem vigências
     assert efetivo["extras_max_dia_min"]["vigencias"] == [
         {"desde": "2027-01-01", "valor": 60, "base_legal": "ACT de teste, cláusula 1ª"}]
     padrao = client.get(f"/perfis-jornada/{PERFIL_PADRAO}").json()

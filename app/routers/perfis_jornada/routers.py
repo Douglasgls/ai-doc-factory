@@ -14,13 +14,14 @@ def listar_perfis(session: Session = Depends(get_session)):
     return actions.listar_perfis(session)
 
 
-@router.get("/perfis-jornada/{perfil}", response_model=PerfilOut)
+# exclude_unset: parâmetro sem vigências sai sem a chave `vigencias`, como em GET /documentos/{id}/analise-ponto
+@router.get("/perfis-jornada/{perfil}", response_model=PerfilOut, response_model_exclude_unset=True)
 def obter_perfil(perfil: NomePerfil, session: Session = Depends(get_session)):
     """`proprios`: o que o perfil guarda. `efetivo`: o que a análise usa (próprios + herdados de `clt_padrao`)."""
     return actions.obter_perfil(session, perfil)
 
 
-@router.put("/perfis-jornada/{perfil}", response_model=PerfilOut)
+@router.put("/perfis-jornada/{perfil}", response_model=PerfilOut, response_model_exclude_unset=True)
 def gravar_perfil(perfil: NomePerfil, corpo: PerfilEntrada, session: Session = Depends(get_session)):
     """Cria o perfil ou substitui todos os seus parâmetros próprios. Informe só o que difere de `clt_padrao`."""
     return actions.gravar_perfil(session, perfil, corpo)

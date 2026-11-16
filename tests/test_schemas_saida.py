@@ -35,6 +35,8 @@ from app.routers.lotes import actions as lote_actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
 from app.routers.organizacoes import actions as org_actions
 from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
+from app.routers.perfis_jornada import actions as perfil_actions
+from app.routers.perfis_jornada.schemas import PerfilOut, PerfilResumoOut
 from app.routers.revisao import actions as rev_actions
 from app.routers.revisao.schemas import ItemFilaRevisaoOut, Revisao, RevisaoOut
 from app.routers.terceirizadas import actions as terc_actions
@@ -396,6 +398,25 @@ def test_organizacoes(orgs, sessao):
                          org_actions.listar_contratos(sessao, tomador, prestador, usuario=PLATAFORMA))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
+    # perfis de jornada e a associação ao contrato
+    perfil = "teste_" + uuid.uuid4().hex[:12]
+    try:
+        r = client.put(f"/perfis-jornada/{perfil}", json={"parametros": [
+            {"parametro": "extras_max_dia_min", "valor": 90, "base_legal": "ACT de teste"},
+            {"parametro": "extras_max_dia_min", "valor": 60, "base_legal": "ACT de teste", "vigente_desde": "2027-01-01"}]})
+        _confere_resposta("PUT /perfis-jornada/{perfil}", r, perfil_actions.obter_perfil(sessao, perfil), PerfilOut)
+        _confere("GET /perfis-jornada/{perfil}", f"/perfis-jornada/{perfil}", PerfilOut,
+                 perfil_actions.obter_perfil(sessao, perfil))
+        _confere("GET /perfis-jornada/{perfil}", "/perfis-jornada/clt_padrao", PerfilOut,
+                 perfil_actions.obter_perfil(sessao, "clt_padrao"))
+        r = client.put(f"/contratos/{contrato}/perfil-jornada", json={"perfil": perfil})
+        _confere_resposta("PUT /contratos/{contrato_id}/perfil-jornada", r,
+                          achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut)
+        assert r.json()["perfil_jornada"] == perfil
+        _confere("GET /perfis-jornada", "/perfis-jornada", PerfilResumoOut, perfil_actions.listar_perfis(sessao))
+    finally:
+        orgs.db.execute("DELETE FROM perfil_jornada WHERE perfil = %s", (perfil,))
+
 
 def test_auth_login_e_me(auth_real, sessao):
     email = f"schemas-{uuid.uuid4().hex[:8]}@exemplo.invalid"
@@ -489,7 +510,8 @@ def test_openapi_expoe_os_modelos():
     for nome in ("SaudeOut", "TipoOut", "ResultadoBuscaOut", "LoteCriadoOut", "LoteOut", "ConformidadeEmpresaOut",
                  "ConformidadeLoteOut", "EmpresaResumoOut", "DocumentoOut", "DocumentosAgrupadosOut",
                  "AnalisePontoOut", "ItemFilaRevisaoOut", "RevisaoOut", "TokenOut", "UsuarioOut",
-                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut", "UsuarioListadoOut", "TerceirizadaOut"):
+                 "EventoProgressoOut", "ContagensPontoOut", "TomadorOut", "PrestadorOut", "ContratoOut", "UsuarioListadoOut", "TerceirizadaOut",
+                 "PerfilOut", "PerfilResumoOut"):
         assert nome in esquemas, nome
 
 
@@ -519,6 +541,10 @@ COMPARACOES = {
     "GET /prestadores": ["test_organizacoes"],
     "POST /contratos": ["test_organizacoes"],
     "GET /contratos": ["test_organizacoes"],
+    "GET /perfis-jornada": ["test_organizacoes"],
+    "GET /perfis-jornada/{perfil}": ["test_organizacoes"],
+    "PUT /perfis-jornada/{perfil}": ["test_organizacoes"],
+    "PUT /contratos/{contrato_id}/perfil-jornada": ["test_organizacoes"],
     "GET /usuarios": ["test_terceirizadas_e_usuarios"],
     "POST /terceirizadas": ["test_terceirizadas_e_usuarios"],
     "POST /auth/login": ["test_auth_login_e_me"],
