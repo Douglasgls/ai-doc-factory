@@ -197,28 +197,41 @@ def _prorrogacao_noturna(pares, p):
     """Minutos reais de prorrogação do trabalho noturno depois do fim do horário noturno (CLT art. 73, § 5º).
 
     O texto do § 5º é só: "Às prorrogações do trabalho noturno aplica-se o disposto neste capítulo" (conferido em
-    15/11/2026 no texto compilado do Planalto). Ele não define "prorrogação". CONDIÇÃO USADA (decisão do responsável
-    pelo projeto em 16/11/2026), as duas juntas:
-      1. a jornada começou no horário noturno: a primeira marcação do dia cai entre 22h e 5h e nenhum minuto foi
-         trabalhado antes das 22h. Jornada mista que começa antes (ex.: 19h-7h) NÃO conta: segue o § 4º, só as
-         horas dentro do horário noturno são noturnas;
-      2. a parte depois das 5h é emenda da mesma jornada: o par de marcações que contém as 5h continua depois delas,
-         sem interrupção. Os minutos desse par depois das 5h são a prorrogação e contam como noturnos (hora de
-         52min30s).
-    O intervalo DENTRO do horário noturno não descaracteriza a jornada noturna: 22h-2h e 3h-7h tem 2h de prorrogação.
-    Trabalho retomado depois de um intervalo que termina após as 5h (ex.: 22h-5h e 6h-8h) NÃO entra: não é emenda.
-    Não há exigência de duração mínima do trabalho noturno: uma jornada que começa de madrugada (ex.: 4h-12h) também
-    satisfaz a condição 1 e tem as horas depois das 5h contadas como prorrogação.
+    15/11/2026 no texto compilado do Planalto). Ele não define "prorrogação". CRITÉRIO USADO (decisão do responsável
+    pelo projeto em 16/11/2026): a parte depois das 5h só conta como noturna se a jornada COBRIU TODO o horário
+    noturno, das 22h às 5h, admitidos intervalos. A referência de entendimento é a Súmula 60, II, e a OJ 388 da
+    SDI-1 do TST (jornada que compreende a totalidade do período noturno), que são JURISPRUDÊNCIA e NÃO foram
+    conferidas em fonte oficial: não citar no resultado. Em código, as três condições juntas:
+      1. o empregado já estava trabalhando quando o horário noturno começou: existe um par de marcações que começa
+         até as 22h e segue depois delas. A entrada pode atrasar até tolerancia_marcacao_min (5 min, CLT art. 58,
+         § 1º): 22h05 conta, 22h06 não. Começar ANTES das 22h não impede (19h-7h, a escala 12x36, conta; as horas
+         entre 19h e 22h continuam diurnas, § 4º). Começar depois (23h-7h, 0h-7h, 4h-12h) NÃO conta;
+      2. a jornada é uma só até depois das 5h: entre os pares só há intervalos menores que o descanso mínimo entre
+         jornadas (interjornada_min, 11h, CLT art. 66). Um intervalo desse tamanho ou maior abre NOVA jornada e o
+         que vem depois não entra;
+      3. há trabalho depois das 5h nessa mesma jornada: todos os minutos trabalhados depois das 5h são a
+         prorrogação e contam como noturnos (hora de 52min30s).
+    Retomada depois de um intervalo que termina após as 5h (ex.: 22h-5h e 6h-8h): é EMENDA da mesma jornada, não
+    nova jornada, porque o intervalo é menor que o descanso entre jornadas; as 2h contam. O mesmo vale para o
+    intervalo que atravessa as 5h (22h-4h30 e 5h30-7h).
+    Limitação: o código não mede QUANTO da noite foi trabalhado depois das 22h; uma jornada com um intervalo muito
+    longo dentro da noite (menor que 11h) ainda satisfaz as condições.
     """
     if not pares:
         return 0.0
     base = datetime.combine(pares[0][0].date(), time())
-    for inicio_dia in (base - timedelta(days=1), base):  # janela que começou na véspera e a que começa no dia
-        ini = inicio_dia + timedelta(minutes=p["noturno_inicio_min"])
-        fim = inicio_dia + timedelta(days=1, minutes=p["noturno_fim_min"])
-        if ini <= pares[0][0] < fim:
-            return sum(_minutos(s - fim) for e, s in pares if e < fim < s)
-    return 0.0
+    ini = base + timedelta(minutes=p["noturno_inicio_min"])
+    fim = base + timedelta(days=1, minutes=p["noturno_fim_min"])
+    limite_entrada = ini + timedelta(minutes=p["tolerancia_marcacao_min"])
+    if not any(e <= limite_entrada < s for e, s in pares):
+        return 0.0  # não estava trabalhando no começo do horário noturno
+    total, anterior = 0.0, None
+    for e, s in pares:
+        if anterior is not None and _minutos(e - anterior) >= p["interjornada_min"]:
+            break  # nova jornada
+        total += max(0.0, _minutos(s - max(e, fim)))
+        anterior = s
+    return total
 
 
 def _dias_de_repouso(seg, spans):

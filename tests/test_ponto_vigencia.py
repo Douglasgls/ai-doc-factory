@@ -165,29 +165,43 @@ def test_prorrogacao_gera_hora_extra_acima_do_limite():
 
 
 def test_intervalo_dentro_do_horario_noturno_nao_descaracteriza_a_jornada_noturna():
-    d = _noite(("22:00", "02:00+1"), ("03:00+1", "07:00+1"))  # decisão de 16/11/2026: as 2h depois das 5h contam
+    d = _noite(("22:00", "02:00+1"), ("03:00+1", "07:00+1"))  # cobriu das 22h às 5h, com intervalo: as 2h contam
     assert d["noturno_real_min"] == 360 and d["noturno_computado_min"] == pytest.approx(411.43)
     assert d["prorrogacao_noturna_min"] == 120 and d["prorrogacao_noturna_computada_min"] == pytest.approx(137.14)
     assert d["trabalhado_min"] == 480 and d["jornada_computada_min"] == pytest.approx(548.57)
     assert d["extras_min"] == pytest.approx(68.57) and d["maior_intervalo_min"] == 60
 
 
-def test_prorrogacao_exige_comeco_no_horario_noturno_sem_duracao_minima():
-    assert _noite(("22:00", "06:00+1"))["prorrogacao_noturna_min"] == 60
-    assert _noite(("23:30", "06:00+1"))["prorrogacao_noturna_min"] == 60   # começa dentro do horário noturno
-    assert _noite(("21:59", "06:00+1"))["prorrogacao_noturna_min"] == 0    # 1 min antes das 22h: mista (§ 4º)
-    assert _noite(("00:00", "07:00"))["prorrogacao_noturna_min"] == 120    # começou de madrugada, dentro do horário noturno
-    assert _noite(("04:00", "12:00"))["prorrogacao_noturna_min"] == 420    # consequência da condição: sem mínimo noturno
-    assert _noite(("05:00", "13:00"))["prorrogacao_noturna_min"] == 0      # às 5h já não é horário noturno
+def test_jornada_mista_que_cobre_toda_a_noite_conta_so_a_parte_depois_das_5h():
+    d = _noite(("19:00", "07:00+1"))  # 12x36: 19h-22h diurno, 22h-5h noturno, 5h-7h prorrogação
+    assert d["trabalhado_min"] == 720 and d["noturno_real_min"] == 420 and d["noturno_computado_min"] == 480
+    assert d["prorrogacao_noturna_min"] == 120 and d["prorrogacao_noturna_computada_min"] == pytest.approx(137.14)
+    assert d["jornada_computada_min"] == pytest.approx(180 + 480 + 137.14)  # as 3h entre 19h e 22h não são reduzidas
+
+
+def test_retomada_depois_de_intervalo_apos_as_5h_e_emenda_da_mesma_jornada():
+    """Decisão documentada em `_prorrogacao_noturna`: intervalo menor que o descanso entre jornadas (11h) não abre
+    nova jornada."""
+    assert _noite(("22:00", "05:00+1"), ("06:00+1", "08:00+1"))["prorrogacao_noturna_min"] == 120
+    assert _noite(("22:00", "04:30+1"), ("05:30+1", "07:00+1"))["prorrogacao_noturna_min"] == 90
+    # 11h ou mais de intervalo: nova jornada, não entra
+    assert _noite(("22:00", "05:00+1"), ("16:00+1", "18:00+1"))["prorrogacao_noturna_min"] == 0
+    assert _noite(("22:00", "05:00+1"), ("15:59+1", "18:00+1"))["prorrogacao_noturna_min"] == 121
+
+
+def test_entrada_ate_as_22h_com_a_tolerancia_por_marcacao():
+    assert _noite(("22:05", "06:00+1"))["prorrogacao_noturna_min"] == 60   # 5 min: dentro da tolerância
+    assert _noite(("22:06", "06:00+1"))["prorrogacao_noturna_min"] == 0
+    assert _noite(("21:00", "06:00+1"))["prorrogacao_noturna_min"] == 60
 
 
 @pytest.mark.parametrize("pares", [
     [("22:00", "05:00+1")],                          # termina às 5h: não há prorrogação
-    [("20:00", "07:00+1")],                          # jornada mista (começa antes das 22h): § 4º
-    [("19:00", "07:00+1")],
-    [("18:00", "21:00"), ("22:00", "07:00+1")],      # houve trabalho antes das 22h no mesmo dia
-    [("22:00", "05:00+1"), ("06:00+1", "08:00+1")],  # retomada depois de intervalo: não é emenda
-    [("22:00", "04:30+1"), ("05:30+1", "07:00+1")],  # o intervalo atravessa as 5h: nenhuma marcação contém as 5h
+    [("23:00", "07:00+1")],                          # começou depois das 22h: não cobriu todo o horário noturno
+    [("00:00", "07:00")],
+    [("04:00", "12:00")],                            # madrugada + dia: não é jornada noturna
+    [("18:00", "20:00"), ("23:00", "07:00+1")],      # não estava trabalhando às 22h
+    [("05:00", "13:00")],
     [("08:00", "12:00"), ("13:00", "17:00")],
 ])
 def test_sem_prorrogacao_fora_da_condicao(pares):
