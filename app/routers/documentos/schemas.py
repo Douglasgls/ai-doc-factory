@@ -101,6 +101,7 @@ class DivergenciaPontoOut(BaseModel):
     base_legal: str | None = None
     detalhe: str | None = None
     campo: str | None = None  # só nas divergências de total declarado
+    campos_ausentes: list[str] | None = None  # só em espelho_incompleto
 
 
 class DiferencaGeminiOut(BaseModel):
@@ -162,6 +163,9 @@ class TotaisPontoOut(BaseModel):
     semanas_avaliadas_descanso: int
     # por semana: inicio, regra_vigente_em (domingo), jornada_computada_min, limite_semanal_min, dias_informados
     semanas: list[dict[str, Any]] | None = None
+    # Portaria MTP 671/2021, art. 84: tipo_registro, situacao (completo | incompleto | nao_aplicavel |
+    # nao_verificado), campos_ausentes e campos_nao_lidos; ausente em análises antigas
+    espelho: dict[str, Any] | None = None
     tolerancia_por_marcacao: ToleranciaPorMarcacaoOut
     horario_contratual: list[Any]
     declarados: TotaisDeclaradosOut
