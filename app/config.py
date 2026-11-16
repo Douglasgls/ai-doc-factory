@@ -38,6 +38,7 @@ MAX_TENTATIVAS = 3
 
 # Segmentação: similaridade TF-IDF (cosseno) entre páginas consecutivas.
 # Abaixo de SEG_SIM_BAIXO abre documento; a partir de SEG_SIM_ALTO continua; entre os dois é ambíguo.
+# Antes da similaridade vêm as regras de CNPJ, CPF e total geral (app/segmentacao.py), que abrem mesmo com similaridade alta.
 # Valores iniciais NÃO calibrados com dados do gerador: ajustar depois com scripts/avaliar_segmentacao.py.
 SEG_SIM_BAIXO = float(os.getenv("SEG_SIM_BAIXO", "0.15"))
 SEG_SIM_ALTO = float(os.getenv("SEG_SIM_ALTO", "0.60"))
@@ -52,6 +53,10 @@ SEG_BRANCO_MAX_ALNUM = int(os.getenv("SEG_BRANCO_MAX_ALNUM", "12"))
 SEG_RESIDUAL_MAX_ALNUM = int(os.getenv("SEG_RESIDUAL_MAX_ALNUM", "150"))
 SEG_RESIDUAL_CONTIDO = float(os.getenv("SEG_RESIDUAL_CONTIDO", "0.60"))
 
+# Linha que encerra uma tabela (folha de pagamento, relação de empregados): a página seguinte com conteúdo próprio abre
+# documento, mesmo com o mesmo cabeçalho e a mesma empresa. Expressão regular, sem diferenciar maiúsculas.
+SEG_FECHO_REGEX = os.getenv("SEG_FECHO_REGEX", r"\btota(?:l|is)\s+gera(?:l|is)\b")
+
 # "Página k de N" só vale nas primeiras e últimas SEG_PAG_LINHAS linhas não vazias da página (cabeçalho/rodapé);
 # frase no corpo é ignorada. Valor inicial NÃO calibrado.
 SEG_PAG_LINHAS = int(os.getenv("SEG_PAG_LINHAS", "3"))
@@ -60,6 +65,8 @@ SEG_PAG_LINHAS = int(os.getenv("SEG_PAG_LINHAS", "3"))
 # Valores iniciais NÃO calibrados.
 SEG_LLM_CONTINUA = float(os.getenv("SEG_LLM_CONTINUA", "0.70"))  # >= : continua o documento
 SEG_LLM_ABRE = float(os.getenv("SEG_LLM_ABRE", "0.30"))  # <= : abre documento novo; no meio, fica ambíguo
+# Na continuação esperada (página anunciada por "Página k de N" ou página com a linha de total geral) o Jev só veta:
+# abre com P <= SEG_LLM_ABRE; acima disso continua, e abaixo de SEG_LLM_CONTINUA o documento sai marcado como ambíguo.
 # Trechos enviados ao Jev (caracteres): fim da página anterior e começo da atual; e o começo (cabeçalho) da anterior.
 SEG_LLM_TRECHO = int(os.getenv("SEG_LLM_TRECHO", "500"))
 SEG_LLM_CABECALHO = int(os.getenv("SEG_LLM_CABECALHO", "300"))

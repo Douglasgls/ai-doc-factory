@@ -4,8 +4,8 @@ Uso: python scripts/avaliar_segmentacao_offline.py textos_ocr.json anotacoes.csv
 
 textos_ocr.json: {lote_id: [texto da página 1, texto da página 2, ...]}.
 As métricas são as mesmas de scripts/avaliar_segmentacao.py. Com --diagnostico, cada fronteira errada
-(corte a mais ou fronteira perdida) sai com os sinais que a cascata viu: paginação, CNPJ, similaridade
-TF-IDF, P(mesmo documento) do Jev e o fim/início das duas páginas.
+(corte a mais ou fronteira perdida) sai com a regra que decidiu e os sinais que a cascata viu: paginação, CNPJ,
+CPFs válidos, similaridade TF-IDF, P(mesmo documento) do Jev e o fim/início das duas páginas.
 A faixa ambígua chama o Jev (com cache em disco); com CLASSIFICADOR=regras nada sai para a rede.
 """
 import argparse
@@ -40,16 +40,17 @@ def _ref_anterior(textos: list[str], i: int) -> int | None:
     return None
 
 
-def diagnostico(lote: str, textos: list[str], pagina: int, especie: str) -> str:
+def diagnostico(lote: str, textos: list[str], pagina: int, especie: str, regra: str = "") -> str:
     i = pagina - 1
     ref = _ref_anterior(textos, i)
-    partes = [f"--- {lote} pág {pagina}: {especie}"]
+    partes = [f"--- {lote} pág {pagina}: {especie}" + (f" | regra: {regra}" if regra else "")]
     if ref is None:
         return partes[0] + " (sem página anterior com conteúdo)"
     vet = segmentacao._vetores_tfidf(textos)
     sim = segmentacao._cosseno(vet[ref], vet[i])
     partes.append(f"anterior={ref + 1} sim={sim:.3f} paginacao={segmentacao.paginacao(textos[ref])}->"
-                  f"{segmentacao.paginacao(textos[i])} cnpj={segmentacao.cnpj(textos[ref])}->{segmentacao.cnpj(textos[i])}")
+                  f"{segmentacao.paginacao(textos[i])} cnpj={segmentacao.cnpj(textos[ref])}->{segmentacao.cnpj(textos[i])} "
+                  f"cpfs_validos={len(segmentacao.cpfs(textos[ref]))}->{len(segmentacao.cpfs(textos[i]))}")
     partes.append("FIM ANTERIOR: " + repr(textos[ref][-300:]))
     partes.append("INICIO ATUAL: " + repr(textos[i][:300]))
     return "\n".join(partes)
@@ -67,7 +68,9 @@ def main() -> int:
     todos, erros = [], []
     for lote, real in sorted(gabarito.items()):
         antes = len(probs)
-        docs = segmentacao.segmentar(textos[lote])
+        decisoes: list = []
+        docs = segmentacao.segmentar(textos[lote], decisoes)
+        regras = dict(decisoes)
         previsto = [(d.pagina_ini, d.pagina_fim) for d in docs]
         m = metricas(real, previsto)
         todos.append(m)
@@ -76,9 +79,9 @@ def main() -> int:
             fr, fp = _fronteiras(real), _fronteiras(previsto)
             ambiguos = {d.pagina_ini for d in docs if d.ambiguo}
             for p in sorted(fp - fr):
-                erros.append(diagnostico(lote, textos[lote], p, "CORTE A MAIS" + (" (ambíguo)" if p in ambiguos else "")))
+                erros.append(diagnostico(lote, textos[lote], p, "CORTE A MAIS" + (" (ambíguo)" if p in ambiguos else ""), regras.get(p, "")))
             for p in sorted(fr - fp):
-                erros.append(diagnostico(lote, textos[lote], p, "FRONTEIRA PERDIDA"))
+                erros.append(diagnostico(lote, textos[lote], p, "FRONTEIRA PERDIDA", regras.get(p, "")))
             if probs[antes:]:
                 erros.append(f"    {lote}: P(mesmo documento) do Jev, na ordem: {[round(p, 3) for p in probs[antes:]]}")
     print(linha("TOTAL", somar(todos)))
