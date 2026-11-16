@@ -12,6 +12,7 @@ _V = {
     "descanso_semanal_min": 1440, "intervalo_longo_acima_min": 360, "intervalo_longo_min": 60,
     "intervalo_curto_acima_min": 240, "intervalo_curto_min": 15, "noturno_inicio_min": 1320,
     "noturno_fim_min": 300, "hora_noturna_min": 52.5, "adicional_noturno_pct": 20,
+    "repouso_semanal_dias": 0,  # valor de base; as vigências da EC 141/2026 estão em tests/test_ponto_vigencia.py
 }
 PERFIL = {k: {"valor": v, "base_legal": f"base {k}"} for k, v in _V.items()}
 

@@ -67,8 +67,11 @@ def test_jornada_diurna_nao_muda_com_a_hora_noturna():
 
 
 @pytest.mark.parametrize("saida,div", [
-    ("07:00+1", []),                                                   # 480 noturnos + 120 diurnos: 2h extras exatas
-    ("07:01+1", [("horas_extras_acima_limite", "2025-11-03", 1)]),     # CLT art. 59, caput
+    # Jornada integralmente noturna (22h-5h = 480 computados): o que passa das 5h é prorrogação e também conta com a
+    # hora de 52min30s (CLT art. 73, § 5º). 105 min reais = 120 computados: 2h extras exatas.
+    ("06:45+1", []),
+    ("06:46+1", [("horas_extras_acima_limite", "2025-11-03", 1.14)]),  # CLT art. 59, caput
+    ("07:00+1", [("horas_extras_acima_limite", "2025-11-03", 17.14)]),
 ])
 def test_limite_de_duas_horas_extras_com_hora_noturna(saida, div):
     assert tipos(_noite("2025-11-03", "22:00", saida)) == div
