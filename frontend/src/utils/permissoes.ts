@@ -15,6 +15,9 @@ export const veConformidade = (usuario: Usuario): boolean => usuario?.nivel === 
 /** Organizações (tomador, prestador, contrato) também é exclusivo da plataforma. */
 export const veOrganizacoes = (usuario: Usuario): boolean => usuario?.nivel === 'plataforma'
 
+/** Perfis de jornada (análise de ponto) também são exclusivos da plataforma. */
+export const vePerfisJornada = (usuario: Usuario): boolean => usuario?.nivel === 'plataforma'
+
 /** Administradores de qualquer nível convidam colegas e veem a equipe. */
 export const podeConvidar = (usuario: Pick<UsuarioAtual, 'papel'> | null | undefined): boolean =>
   usuario?.papel === 'admin'

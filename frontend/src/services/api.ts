@@ -332,6 +332,38 @@ export interface Contrato {
   prestador_cnpj: string;
   prestador_ativo: boolean;
   acesso_prestador?: 'ativo' | 'convite_pendente' | 'sem_acesso';
+  perfil_jornada: string;
+}
+
+export interface PerfilJornadaResumo {
+  perfil: string;
+  padrao: boolean;
+  parametros_proprios: number;
+  contratos: number;
+}
+export interface ParametroProprio {
+  parametro: string;
+  valor: number;
+  unidade: string;
+  base_legal: string;
+  vigente_desde: string | null;
+}
+export interface ParametroEfetivo {
+  valor: number;
+  base_legal: string;
+  vigencias?: { desde: string; valor: number; base_legal: string }[];
+}
+export interface PerfilJornadaDetalhe {
+  perfil: string;
+  padrao: boolean;
+  proprios: ParametroProprio[];
+  efetivo: Record<string, ParametroEfetivo>;
+}
+export interface ParametroEntrada {
+  parametro: string;
+  valor: number;
+  base_legal: string;
+  vigente_desde: string | null;
 }
 export interface NovoContrato {
   tomador_id: number;
@@ -795,6 +827,46 @@ export const apiService = {
     });
     if (!response.ok) {
       throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar contrato'));
+    }
+    return response.json();
+  },
+
+  getPerfisJornada: async (): Promise<PerfilJornadaResumo[]> => {
+    const response = await authFetch(`/perfis-jornada`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar perfis de jornada'));
+    }
+    return response.json();
+  },
+
+  getPerfilJornada: async (perfil: string): Promise<PerfilJornadaDetalhe> => {
+    const response = await authFetch(`/perfis-jornada/${encodeURIComponent(perfil)}`);
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao carregar o perfil de jornada'));
+    }
+    return response.json();
+  },
+
+  gravarPerfilJornada: async (perfil: string, parametros: ParametroEntrada[]): Promise<PerfilJornadaDetalhe> => {
+    const response = await authFetch(`/perfis-jornada/${encodeURIComponent(perfil)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parametros }),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao salvar o perfil de jornada'));
+    }
+    return response.json();
+  },
+
+  associarPerfilJornada: async (contratoId: number, perfil: string): Promise<Contrato> => {
+    const response = await authFetch(`/contratos/${contratoId}/perfil-jornada`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ perfil }),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao trocar o perfil do contrato'));
     }
     return response.json();
   },
