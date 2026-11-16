@@ -8,6 +8,7 @@ import ManualReviewPage from './pages/ManualReviewPage'
 import { OFFICIAL_CATEGORY_OPTIONS } from './pages/reviewCategories'
 import LoginPage from './pages/LoginPage'
 import OrganizacoesPage from './pages/OrganizacoesPage'
+import PerfisJornadaPage from './pages/PerfisJornadaPage'
 import TerceirizadasPage from './pages/TerceirizadasPage'
 import EquipePage from './pages/EquipePage'
 import AceitarConvitePage from './pages/AceitarConvitePage'
@@ -19,7 +20,7 @@ import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse, type UsuarioAtual } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
-import { podeConvidar, podeEditar, podeEnviar, veConformidade, veOrganizacoes, veTerceirizadas } from './utils/permissoes'
+import { podeConvidar, podeEditar, podeEnviar, veConformidade, veOrganizacoes, vePerfisJornada, veTerceirizadas } from './utils/permissoes'
 
 function formatDatePtBr(isoString?: string | null): string {
   if (!isoString) return new Date().toLocaleDateString('pt-BR')
@@ -68,7 +69,7 @@ export function App() {
 
   // Navigation view state: 'home' | 'categoria' | 'revisao'
   const [currentView, setCurrentView] = useState<
-    'home' | 'categoria' | 'revisao' | 'organizacoes' | 'terceirizadas' | 'equipe'
+    'home' | 'categoria' | 'revisao' | 'organizacoes' | 'perfis' | 'terceirizadas' | 'equipe'
   >('home')
 
   // Tela pública de aceite de convite: tem prioridade sobre o login (o token vem no fragmento da URL)
@@ -579,11 +580,12 @@ export function App() {
         onOpenReview={handleOpenReview}
         reviewCount={reviewCount}
         activeTab={
-          currentView === 'revisao' || currentView === 'organizacoes' || currentView === 'terceirizadas' || currentView === 'equipe'
+          currentView === 'revisao' || currentView === 'organizacoes' || currentView === 'perfis' || currentView === 'terceirizadas' || currentView === 'equipe'
             ? currentView
             : 'documentos'
         }
         showOrganizacoes={veOrganizacoes(usuario)}
+        showPerfis={vePerfisJornada(usuario)}
         showTerceirizadas={veTerceirizadas(usuario)}
         showEquipe={podeConvidar(usuario)}
         mostrarEnvio={podeEnviar(usuario)}
@@ -677,6 +679,10 @@ export function App() {
 
             {currentView === 'organizacoes' && veOrganizacoes(usuario) && (
               <OrganizacoesPage onBack={handleBackToHome} />
+            )}
+
+            {currentView === 'perfis' && vePerfisJornada(usuario) && (
+              <PerfisJornadaPage onBack={handleBackToHome} />
             )}
 
             {currentView === 'terceirizadas' && veTerceirizadas(usuario) && (
