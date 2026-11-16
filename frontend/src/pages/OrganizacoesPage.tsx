@@ -630,6 +630,7 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                           <th className={TH}>CNPJ</th>
                           <th className={TH}>Vigência</th>
                           <th className={TH}>Situação</th>
+                          <th className={TH}>Perfil de jornada</th>
                           <th className={TH}>Acesso</th>
                           <th className={TH}></th>
                         </tr>
@@ -647,10 +648,11 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                                   : '—'}
                               </td>
                               <td className={TD}><Situacao ativo={c.ativo} /></td>
+                              <td className={`${TD} font-mono`}>{c.perfil_jornada}</td>
                               <td className={TD}><AcessoSelo contrato={c} /></td>
                               <td className={TD}><ReenvioBotao contrato={c} reenvio={reenvio} /></td>
                             </tr>
-                            <ReenvioLinha contrato={c} reenvio={reenvio} colSpan={7} />
+                            <ReenvioLinha contrato={c} reenvio={reenvio} colSpan={8} />
                           </React.Fragment>
                         ))}
                       </tbody>

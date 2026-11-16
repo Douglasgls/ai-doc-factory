@@ -1,5 +1,5 @@
 import React from 'react'
-import { Briefcase, Building2, FileText, LogOut, Moon, Sun, Users } from 'lucide-react'
+import { Briefcase, Building2, Clock, FileText, LogOut, Moon, Sun, Users } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
 import { EviDocsBrand } from './EviDocsBrand'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
@@ -12,10 +12,12 @@ interface HeaderProps {
   onOpenUpload: () => void
   onOpenReview: () => void
   reviewCount: number
-  activeTab: 'documentos' | 'revisao' | 'organizacoes' | 'terceirizadas' | 'equipe'
-  onSelectTab: (tab: 'documentos' | 'revisao' | 'organizacoes' | 'terceirizadas' | 'equipe') => void
+  activeTab: 'documentos' | 'revisao' | 'organizacoes' | 'perfis' | 'terceirizadas' | 'equipe'
+  onSelectTab: (tab: 'documentos' | 'revisao' | 'organizacoes' | 'perfis' | 'terceirizadas' | 'equipe') => void
   /** Só o nível plataforma vê a tela de Organizações. */
   showOrganizacoes?: boolean
+  /** Perfis de jornada (análise de ponto): também só a plataforma. */
+  showPerfis?: boolean
   /** Administrador do cliente (tomador) cadastra terceirizadas. */
   showTerceirizadas?: boolean
   /** Administradores de qualquer nível veem a equipe e convidam colegas. */
@@ -47,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onSelectTab,
   showOrganizacoes = false,
+  showPerfis = false,
   showTerceirizadas = false,
   showEquipe = false,
   mostrarEnvio = true,
@@ -79,6 +82,8 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('documentos')}
+              title="Documentos"
+              aria-label="Documentos"
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                 activeTab === 'documentos'
                   ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -86,13 +91,15 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>Documentos</span>
+              <span className="hidden lg:inline">Documentos</span>
             </button>
 
             {showOrganizacoes && (
               <button
                 type="button"
                 onClick={() => onSelectTab('organizacoes')}
+                title="Organizações"
+                aria-label="Organizações"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'organizacoes'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -100,7 +107,24 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                <span>Organizações</span>
+                <span className="hidden lg:inline">Organizações</span>
+              </button>
+            )}
+
+            {showPerfis && (
+              <button
+                type="button"
+                onClick={() => onSelectTab('perfis')}
+                title="Perfis de jornada"
+                aria-label="Perfis de jornada"
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
+                  activeTab === 'perfis'
+                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
+                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+                }`}
+              >
+                <Clock className="w-4 h-4" />
+                <span className="hidden lg:inline">Jornada</span>
               </button>
             )}
 
@@ -108,6 +132,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('terceirizadas')}
+                title="Terceirizadas"
+                aria-label="Terceirizadas"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'terceirizadas'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -115,7 +141,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Briefcase className="w-4 h-4" />
-                <span>Terceirizadas</span>
+                <span className="hidden lg:inline">Terceirizadas</span>
               </button>
             )}
 
@@ -123,6 +149,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('equipe')}
+                title="Equipe"
+                aria-label="Equipe"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'equipe'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -130,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Users className="w-4 h-4" />
-                <span>Equipe</span>
+                <span className="hidden lg:inline">Equipe</span>
               </button>
             )}
 
