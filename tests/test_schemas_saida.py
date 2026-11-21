@@ -398,6 +398,18 @@ def test_organizacoes(orgs, sessao):
                          org_actions.listar_contratos(sessao, tomador, prestador, usuario=PLATAFORMA))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
+    # ativar/desativar (PATCH {ativo}); a resposta tem o formato da listagem
+    r = client.patch(f"/tomadores/{tomador}", json={"ativo": False})
+    _confere_resposta("PATCH /tomadores/{tomador_id}", r, achar(org_actions.listar_tomadores(sessao), tomador), TomadorOut)
+    r = client.patch(f"/prestadores/{prestador}", json={"ativo": False})
+    _confere_resposta("PATCH /prestadores/{prestador_id}", r, achar(org_actions.listar_prestadores(sessao), prestador),
+                      PrestadorOut)
+    r = client.patch(f"/contratos/{contrato}", json={"ativo": False})
+    _confere_resposta("PATCH /contratos/{contrato_id}", r,
+                      achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut)
+    for rota, ident in (("tomadores", tomador), ("prestadores", prestador), ("contratos", contrato)):
+        assert client.patch(f"/{rota}/{ident}", json={"ativo": True}).json()["ativo"] is True
+
     # perfis de jornada e a associação ao contrato
     perfil = "teste_" + uuid.uuid4().hex[:12]
     try:
@@ -499,10 +511,18 @@ def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch, sessao):
             id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
             prestador_id=None)), UsuarioListadoOut)
         assert "senha_hash" not in r.text and uid in [u["id"] for u in r.json()]
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            alvo = conn.execute("INSERT INTO usuario (email, nome, nivel, papel, tomador_id) VALUES (%s, 'Alvo Schemas', "
+                                "'tomador', 'membro', %s) RETURNING id", (f"schemas-alvo-{sufixo}@exemplo.invalid", tomador)
+                                ).fetchone()[0]
+        r = client.patch(f"/usuarios/{alvo}", headers=h, json={"ativo": False})
+        listado = next(u for u in usu_actions.listar(sessao, PLATAFORMA) if u["id"] == alvo)
+        _confere_resposta("PATCH /usuarios/{usuario_id}", r, listado, UsuarioListadoOut)
+        assert r.json()["ativo"] is False
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email_conv,))
-            conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
+            conn.execute("DELETE FROM usuario WHERE id = %s OR lower(email) = %s", (uid, f"schemas-alvo-{sufixo}@exemplo.invalid"))
 
 
 def test_openapi_expoe_os_modelos():
@@ -546,6 +566,10 @@ COMPARACOES = {
     "PUT /perfis-jornada/{perfil}": ["test_organizacoes"],
     "PUT /contratos/{contrato_id}/perfil-jornada": ["test_organizacoes"],
     "GET /usuarios": ["test_terceirizadas_e_usuarios"],
+    "PATCH /usuarios/{usuario_id}": ["test_terceirizadas_e_usuarios"],
+    "PATCH /tomadores/{tomador_id}": ["test_organizacoes"],
+    "PATCH /prestadores/{prestador_id}": ["test_organizacoes"],
+    "PATCH /contratos/{contrato_id}": ["test_organizacoes"],
     "POST /terceirizadas": ["test_terceirizadas_e_usuarios"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],
