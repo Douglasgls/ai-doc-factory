@@ -420,9 +420,12 @@ export function App() {
         )
       const targetSlug = matchedCat
         ? matchedCat.slug
-        : OFFICIAL_CATEGORY_OPTIONS.some((c) => c.slug === finalCategorySlugOrName)
-          ? finalCategorySlugOrName
-          : OFFICIAL_CATEGORY_OPTIONS[0].slug
+        : OFFICIAL_CATEGORY_OPTIONS.find((c) => c.slug === finalCategorySlugOrName)
+            ?.slug
+      if (!targetSlug) {
+        // Nunca assumir um tipo (ex.: aso) quando o escolhido não é reconhecido
+        throw new Error('Tipo documental não reconhecido. Escolha um tipo antes de confirmar.')
+      }
 
       // Build campos update payload only for fields that were added, modified, or removed.
       // Never re-send masked identifiers ('cpf', 'rg', 'pis' containing '*') because the backend rejects masked values.

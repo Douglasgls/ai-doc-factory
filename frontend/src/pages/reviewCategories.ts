@@ -12,3 +12,10 @@ export const OFFICIAL_CATEGORY_OPTIONS: CategoryOption[] = [
   { slug: 'atestado_medico', name: 'Atestado médico' },
   { slug: 'contrato_trabalho', name: 'Contrato de trabalho' },
 ]
+
+/** Categoria inicial da revisão: só o tipo sugerido se for um dos oficiais; senão vazio (o revisor escolhe). */
+export function initialReviewCategory(suggestedType: string): string {
+  return OFFICIAL_CATEGORY_OPTIONS.some((c) => c.slug === suggestedType)
+    ? suggestedType
+    : ''
+}
