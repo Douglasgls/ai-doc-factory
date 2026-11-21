@@ -9,14 +9,14 @@ from pathlib import Path
 import psycopg
 from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import config
 from app.database import SessionLocal
-from app.escopo import exigir_contrato_de_upload
+from app.escopo import exigir_contrato_de_upload, filtro_contrato, filtro_lote
 from app.eventos import (
     canal_lote,
     limpar_cancelado,
@@ -156,6 +156,38 @@ def _serializar_pacote(pacote: dict, sort_keys: bool = False) -> str:
         ensure_ascii=False,
         default=_json_default,
     )
+
+
+def listar_lotes(session: Session, *, usuario: UsuarioContexto, limite: int = 20, antes_de: int | None = None,
+                 estado: str | None = None, contrato_id: int | None = None) -> dict:
+    """Resumo dos lotes no escopo do usuário, do mais novo para o mais antigo (uma consulta, com agregação).
+    `antes_de` é o cursor por id (id do último item da página anterior). `contrato_id` fora do escopo é 404."""
+    if contrato_id is not None and session.execute(
+            select(Contrato.id).join(Tomador, Tomador.id == Contrato.tomador_id)
+            .join(Prestador, Prestador.id == Contrato.prestador_id)
+            .where(Contrato.id == contrato_id, filtro_contrato(usuario))).first() is None:
+        raise HTTPException(404, "contrato não encontrado")
+    docs = (select(Documento.lote_id.label("lote_id"), func.count().label("total"),
+                   func.count().filter(Documento.estado == "em_revisao").label("em_revisao"),
+                   func.count().filter(Documento.estado == "erro").label("com_erro"))
+            .group_by(Documento.lote_id).subquery())
+    consulta = (select(Lote.id, Lote.nome_arquivo, Lote.estado, Lote.docs_pendentes, Lote.contrato_id, Lote.criado_em,
+                       func.coalesce(docs.c.total, 0), func.coalesce(docs.c.em_revisao, 0),
+                       func.coalesce(docs.c.com_erro, 0))
+                .outerjoin(docs, docs.c.lote_id == Lote.id).where(filtro_lote(usuario)))
+    if estado is not None:
+        consulta = consulta.where(Lote.estado == estado)
+    if contrato_id is not None:
+        consulta = consulta.where(Lote.contrato_id == contrato_id)
+    if antes_de is not None:
+        # cursor por id: criado_em é monótono com o id (now() na inserção); a ordem é a mesma de (criado_em, id) DESC
+        ref = select(Lote.criado_em).where(Lote.id == antes_de).scalar_subquery()
+        consulta = consulta.where(or_(Lote.criado_em < ref, and_(Lote.criado_em == ref, Lote.id < antes_de)))
+    linhas = session.execute(consulta.order_by(Lote.criado_em.desc(), Lote.id.desc()).limit(limite + 1)).all()
+    pagina = linhas[:limite]
+    itens = [{"id": l[0], "nome_arquivo": l[1], "estado": l[2], "docs_pendentes": l[3], "contrato_id": l[4],
+              "criado_em": l[5], "total_documentos": l[6], "em_revisao": l[7], "com_erro": l[8]} for l in pagina]
+    return {"itens": itens, "proximo_cursor": pagina[-1][0] if len(linhas) > limite else None}
 
 
 def obter_lote(session: Session, lote_id: int) -> dict:

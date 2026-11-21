@@ -1,7 +1,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,7 @@ from app.database import get_session
 from app.escopo import lote_para_escrita, lote_para_leitura
 from app.routers.auth.actions import UsuarioContexto, exigir_usuario
 from app.routers.lotes import actions
-from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.lotes.schemas import LoteCriadoOut, LoteOut, LotesListadosOut
 from app.routers.organizacoes.schemas import IdBanco
 from app.routers.lotes.validations import converter_para_pdf, ler_com_limite, validar_paginas
 
@@ -27,6 +27,16 @@ def criar_lote(arquivo: UploadFile = File(...), contrato_id: Annotated[IdBanco |
     pdf = converter_para_pdf(dados)
     validar_paginas(pdf)
     return actions.criar_lote(session, dados, pdf, arquivo.filename, contrato_id)
+
+
+@router.get("/lotes", response_model=LotesListadosOut)
+def listar_lotes(limite: Annotated[int, Query(ge=1, le=100)] = 20, antes_de: Annotated[IdBanco | None, Query()] = None,
+                 estado: Annotated[str | None, Query()] = None, contrato_id: Annotated[IdBanco | None, Query()] = None,
+                 usuario: UsuarioContexto = Depends(exigir_usuario), session: Session = Depends(get_session)):
+    """Resumo dos lotes do escopo do usuário, do mais novo para o mais antigo. `antes_de`: cursor por id (use
+    `proximo_cursor`). Filtros: `estado`, `contrato_id` (404 se fora do escopo). Detalhes: GET /lotes/{id}."""
+    return actions.listar_lotes(session, usuario=usuario, limite=limite, antes_de=antes_de, estado=estado,
+                                contrato_id=contrato_id)
 
 
 @router.get("/lotes/{lote_id}", response_model=LoteOut, response_model_exclude_unset=True,
