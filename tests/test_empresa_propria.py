@@ -1,7 +1,9 @@
 """Empresa própria (empresa solo): POST /empresas-proprias, o acesso do admin (nível prestador) ao próprio contrato,
 isolamento e a troca do perfil de jornada. Contra o Postgres real; só valores falsos. Reaproveita a fixture `mundo` de
 tests/test_terceirizadas.py (que apaga o que foi criado: a empresa criada pela API é registrada nela)."""
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
@@ -246,6 +248,92 @@ def test_post_contratos_com_outro_tomador_para_empresa_propria_da_409(mundo, cri
     # contrato comum entre outros continua podendo ser criado
     assert client.post("/contratos", headers=criar.plat, json={"tomador_id": outro, "prestador_id": mundo.prestador()}
                        ).status_code == 201
+
+
+# ---------- corrida, rollback e estados de acesso ----------
+
+def _simultaneas(*chamadas):
+    """Dispara as chamadas juntas (barreira), cada uma na sua thread e na sua sessão (a de cada requisição)."""
+    barreira = threading.Barrier(len(chamadas))
+
+    def rodar(f):
+        barreira.wait(timeout=10)
+        return f()
+    with ThreadPoolExecutor(len(chamadas)) as pool:
+        return [f.result() for f in [pool.submit(rodar, c) for c in chamadas]]
+
+
+def test_dois_cadastros_simultaneos_do_mesmo_cnpj_dao_um_201_e_um_409(mundo, criar):
+    for _ in range(3):  # repete: a janela da corrida é curta
+        cnpj = mundo.cnpj()
+        rs = _simultaneas(*[lambda: client.post("/empresas-proprias", headers=criar.plat, json={
+            "cnpj": cnpj, "razao_social": f"Corrida {uuid.uuid4().hex}", "email_admin": _email()})] * 2)
+        for r in rs:
+            if r.status_code == 201:
+                mundo.tomadores.append(r.json()["tomador"]["id"])
+        assert sorted(r.status_code for r in rs) == [201, 409]
+        assert _contagens(mundo, cnpj) == (1, 1)
+        assert mundo.db.execute("SELECT count(*) FROM contrato c JOIN prestador p ON p.id = c.prestador_id "
+                                "WHERE p.cnpj = %s", (cnpj,)).fetchone()[0] == 1
+
+
+def test_empresa_propria_contra_contrato_comum_no_mesmo_prestador_nunca_os_dois(mundo, criar):
+    for _ in range(3):
+        p, t = mundo.prestador(), mundo.tomador()
+        cnpj = mundo.db.execute("SELECT cnpj FROM prestador WHERE id = %s", (p,)).fetchone()[0]
+        propria, comum = _simultaneas(
+            lambda: client.post("/empresas-proprias", headers=criar.plat, json={
+                "cnpj": cnpj, "razao_social": f"Corrida {uuid.uuid4().hex}", "email_admin": _email()}),
+            lambda: client.post("/contratos", headers=criar.plat, json={"tomador_id": t, "prestador_id": p}))
+        if propria.status_code == 201:
+            mundo.tomadores.append(propria.json()["tomador"]["id"])
+        assert sorted([propria.status_code, comum.status_code]) == [201, 409]
+        proprios = mundo.db.execute("SELECT proprio FROM contrato WHERE prestador_id = %s", (p,)).fetchall()
+        assert len(proprios) == 1  # ou o contrato próprio, ou o comum: nunca os dois
+        assert proprios[0][0] is (propria.status_code == 201)
+
+
+def _nada_gravado(mundo, cnpj):
+    assert _contagens(mundo, cnpj) == (0, 0)
+    assert mundo.db.execute("SELECT count(*) FROM contrato c JOIN prestador p ON p.id = c.prestador_id "
+                            "WHERE p.cnpj = %s", (cnpj,)).fetchone()[0] == 0
+
+
+def test_email_de_usuario_existente_desfaz_tudo(mundo, criar):
+    uid = mundo.usuario()
+    email = mundo.db.execute("SELECT email FROM usuario WHERE id = %s", (uid,)).fetchone()[0]
+    cnpj = mundo.cnpj()
+    r = criar(cnpj, email=email)
+    assert r.status_code == 409 and "e-mail" in r.json()["detail"]
+    _nada_gravado(mundo, cnpj)
+
+
+def test_email_com_convite_pendente_desfaz_tudo(mundo, criar):
+    email = _email()
+    assert criar(email=email).status_code == 201  # deixa o convite pendente para este e-mail
+    cnpj = mundo.cnpj()
+    r = criar(cnpj, email=email)
+    assert r.status_code == 409 and "convite pendente" in r.json()["detail"]
+    _nada_gravado(mundo, cnpj)
+
+
+def test_prestador_existente_sem_contratos_ja_tem_acesso(mundo, criar):
+    p = mundo.prestador()
+    mundo.usuario("prestador", "admin", prestador_id=p)
+    cnpj = mundo.db.execute("SELECT cnpj FROM prestador WHERE id = %s", (p,)).fetchone()[0]
+    r = criar(cnpj)
+    assert r.status_code == 201 and r.json()["acesso"] == "ja_tem_acesso" and r.json()["convite"] is None
+    assert r.json()["prestador"]["id"] == p and r.json()["contrato"]["proprio"] is True
+    assert mundo.db.execute("SELECT count(*) FROM convite WHERE prestador_id = %s", (p,)).fetchone()[0] == 0
+
+
+def test_prestador_existente_com_convite_pendente(mundo, criar):
+    p = mundo.prestador()
+    assert mundo.convidar(criar.plat, nivel="prestador", papel="admin", prestador_id=p).status_code == 201
+    cnpj = mundo.db.execute("SELECT cnpj FROM prestador WHERE id = %s", (p,)).fetchone()[0]
+    r = criar(cnpj)
+    assert r.status_code == 201 and r.json()["acesso"] == "convite_pendente" and r.json()["convite"] is None
+    assert mundo.db.execute("SELECT count(*) FROM convite WHERE prestador_id = %s", (p,)).fetchone()[0] == 1
 
 
 # ---------- perfil de jornada ----------

@@ -2,6 +2,7 @@
 por um contrato `proprio`, e o convite do administrador (nível prestador). O controle de acesso é o de sempre
 (app/escopo.py): o admin é um prestador e só enxerga esse contrato. Uma transação; a linha do prestador fica travada
 até o commit (como em terceirizadas.actions), então cadastros simultâneos do mesmo CNPJ se serializam."""
+import psycopg
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -17,13 +18,20 @@ from app.routers.terceirizadas.actions import _prestador_travado
 
 
 def _tomador_travado(session: Session, cnpj: str, nome: str) -> tuple:
-    """(id, cnpj, nome, ativo) do tomador do CNPJ, criado se não existir, com a linha travada."""
+    """(id, cnpj, nome, ativo) do tomador do CNPJ, criado se não existir, com a linha travada.
+
+    Um tomador que já existe com este CNPJ é reaproveitado mesmo que tenha usuários ou terceirizadas: é a MESMA
+    empresa (mesmo CNPJ), e ela ver os documentos dos próprios funcionários é legítimo. O contrato próprio só liga o
+    prestador do CNPJ a ele; o acesso de cada usuário continua sendo o do seu nível (app/escopo.py)."""
     for _ in range(3):
         try:
             session.execute(pg_insert(Tomador).values(cnpj=cnpj, nome=nome)
                             .on_conflict_do_nothing(index_elements=[Tomador.cnpj]))
-        except IntegrityError:  # tomador_nome_uniq: outro tomador, de outro CNPJ, já tem este nome
-            raise HTTPException(409, "já existe outro tomador com este nome")
+        except IntegrityError as e:
+            # tomador_nome_uniq: outro tomador, de outro CNPJ, já tem este nome; qualquer outro erro sobe como está
+            if isinstance(e.orig, psycopg.errors.UniqueViolation) and e.orig.diag.constraint_name == "tomador_nome_uniq":
+                raise HTTPException(409, "já existe outro tomador com este nome")
+            raise
         linha = session.execute(select(Tomador.id, Tomador.cnpj, Tomador.nome, Tomador.ativo)
                                 .where(Tomador.cnpj == cnpj).with_for_update(key_share=True)).first()
         if linha:
