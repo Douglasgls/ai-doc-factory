@@ -21,6 +21,8 @@ interface HomePageProps {
   filteredCategories: DocumentCategory[]
   onOpenCategory: (category: DocumentCategory) => void
   companies: Company[]
+  /** Empresa solo: títulos neutros, sem termos de terceirização. */
+  empresaPropria?: boolean
 }
 
 const HomePage: React.FC<HomePageProps> = ({
@@ -35,6 +37,7 @@ const HomePage: React.FC<HomePageProps> = ({
   filteredCategories,
   onOpenCategory,
   companies,
+  empresaPropria = false,
 }) => {
   const [selecionada, setSelecionada] = useState<Company | null>(null)
   return (
@@ -46,7 +49,7 @@ const HomePage: React.FC<HomePageProps> = ({
         </div>
         <div className="space-y-1">
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#2d0a33] dark:text-[#fdfcfe]">
-            Documentos
+            {empresaPropria ? 'Seus documentos' : 'Documentos'}
           </h1>
           <p className="text-sm sm:text-base text-[#6f6379] dark:text-[#9f91a6]">
             Documentos processados pela IA, organizados por tipo documental.

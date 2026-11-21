@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { X, UploadCloud, File, Loader2, AlertCircle, Trash2 } from 'lucide-react'
 import { apiService, type Contrato } from '../services/api'
 import { contratoLabel, contratoUtilizavel } from '../utils/contratos'
+import { ehEmpresaPropria } from '../utils/permissoes'
 
 interface UploadModalProps {
   isOpen: boolean
@@ -66,6 +67,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   const contratoSelecionado = contratoId === '' ? null : Number(contratoId)
   const faltaContrato = contratoObrigatorio && contratoSelecionado === null
+  // Empresa solo (um único contrato, próprio): o contrato já vem selecionado e o seletor some.
+  const empresaPropria =
+    contratoObrigatorio && contratos.length === 1 && ehEmpresaPropria({ nivel: 'prestador' }, contratos)
 
   const addFiles = (incomingFiles: FileList | File[]) => {
     const list = Array.from(incomingFiles)
@@ -208,6 +212,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         </p>
 
         <div className="mt-5 space-y-4">
+            {!empresaPropria && (
             <div>
               <label
                 htmlFor="upload-contrato"
@@ -238,6 +243,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{contratosErro}</p>
               )}
             </div>
+            )}
 
             <label
               onDragOver={handleDragOver}

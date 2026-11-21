@@ -17,10 +17,10 @@ import { FailedDocumentsBanner, type FailedDocument } from './components/FailedD
 import { LotesStatusPanel } from './components/LotesStatusPanel'
 import { trackedStatus } from './hooks/lotePollingLogic'
 import { useLotePolling } from './hooks/useLotePolling'
-import { apiService, authToken, AUTH_EXPIRED_EVENT, type DocumentoResponse, type UsuarioAtual } from './services/api'
+import { apiService, authToken, AUTH_EXPIRED_EVENT, type Contrato, type DocumentoResponse, type UsuarioAtual } from './services/api'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
-import { podeConvidar, podeEditar, podeEnviar, veConformidade, veOrganizacoes, vePerfisJornada, veTerceirizadas } from './utils/permissoes'
+import { ehEmpresaPropria, podeConvidar, podeEditar, podeEnviar, veConformidade, veOrganizacoes, vePerfisJornada, veTerceirizadas } from './utils/permissoes'
 
 function formatDatePtBr(isoString?: string | null): string {
   if (!isoString) return new Date().toLocaleDateString('pt-BR')
@@ -77,6 +77,9 @@ export function App() {
 
   // Usuário logado: o nível decide o que aparece (Organizações e contrato obrigatório no upload)
   const [usuario, setUsuario] = useState<UsuarioAtual | null>(null)
+  // Contratos do prestador: se todos são próprios (empresa solo), a tela esconde os termos de terceirização
+  const [contratosDoUsuario, setContratosDoUsuario] = useState<Contrato[]>([])
+  const empresaPropria = ehEmpresaPropria(usuario, contratosDoUsuario)
 
   // Data states
   const [categories, setCategories] = useState<DocumentCategory[]>([])
@@ -117,6 +120,7 @@ export function App() {
     const handleExpired = () => {
       setIsAuthenticated(false)
       setUsuario(null)
+      setContratosDoUsuario([])
       setCategories([])
       setDetailedDocs([])
       setReviewPendingDocs([])
@@ -329,6 +333,22 @@ export function App() {
       cancelado = true
     }
   }, [isAuthenticated])
+
+  useEffect(() => {
+    if (usuario?.nivel !== 'prestador') return
+    let cancelado = false
+    apiService
+      .getContratos()
+      .then((lista) => {
+        if (!cancelado) setContratosDoUsuario(lista)
+      })
+      .catch(() => {
+        // Sem a lista, a tela mostra os rótulos de sempre.
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [usuario])
 
   useEffect(() => {
     if (!isAuthenticated || !usuario) return
@@ -587,6 +607,7 @@ export function App() {
         showOrganizacoes={veOrganizacoes(usuario)}
         showPerfis={vePerfisJornada(usuario)}
         showTerceirizadas={veTerceirizadas(usuario)}
+        empresaPropria={empresaPropria}
         showEquipe={podeConvidar(usuario)}
         mostrarEnvio={podeEnviar(usuario)}
         onSelectTab={(tab) => {
@@ -707,6 +728,7 @@ export function App() {
                 filteredCategories={filteredCategories}
                 onOpenCategory={handleOpenCategory}
                 companies={companies}
+                empresaPropria={empresaPropria}
               />
             )}
           </>
