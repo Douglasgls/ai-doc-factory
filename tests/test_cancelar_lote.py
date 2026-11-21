@@ -115,18 +115,19 @@ def test_c_revisao_humana_depois_do_cancelar_enfileira_e_handlers_nao_sao_barrad
     assert lote_cancelado(lote_id, r)
 
     analises = []
-    monkeypatch.setattr(revisao_actions, "enfileirar_analise", lambda doc, cli=None: analises.append(doc))
+    monkeypatch.setattr(revisao_actions, "enfileirar_analise", lambda doc, cli=None, forcar=False: analises.append(doc))
     from app.routers.documentos import actions as documentos_actions
-    monkeypatch.setattr(documentos_actions, "enfileirar_analise", lambda doc, cli=None: analises.append(doc))
+    monkeypatch.setattr(documentos_actions, "enfileirar_analise",
+                        lambda doc, cli=None, forcar=False: analises.append(doc))
 
     # PATCH /documentos/{id}/tipo: classificado -> folha_ponto
     resp = client.patch(f"/documentos/{d_ponto}/tipo", json={"tipo": "folha_ponto", "revisor": "ana"})
     assert resp.status_code == 200
-    assert not lote_cancelado(lote_id, r)
-    assert d_ponto in extracoes and analises == [d_ponto]
+    assert lote_cancelado(lote_id, r)  # a marca do lote inteiro continua
+    assert d_ponto in extracoes.forcadas and analises == [d_ponto]
 
     # o handler de extração de verdade não é barrado (sem rede, cai no caminho de LLM indisponível)
-    extracao.extrair_campos({"documento_id": d_ponto})
+    extracao.extrair_campos({"documento_id": d_ponto, "forcar": True})
     assert obter_progresso_lote(lote_id, r)[0]["mensagem"].startswith("Processamento concluído")
 
     # o handler de análise de verdade também passa da checagem da flag
@@ -137,17 +138,54 @@ def test_c_revisao_humana_depois_do_cancelar_enfileira_e_handlers_nao_sao_barrad
         raise Passou
     monkeypatch.setattr(analise, "analisar", analisar_falso)
     with pytest.raises(Passou):
-        analise.analisar_documento({"documento_id": d_ponto})
+        analise.analisar_documento({"documento_id": d_ponto, "forcar": True})
+    # sem o flag, o job de outro documento do lote cancelado continua barrado
+    analise.analisar_documento({"documento_id": d_ponto})
 
-    # POST /documentos/{id}/revisao: cancela de novo e revisa o outro documento
-    assert client.post(f"/lotes/{lote_id}/cancelar").status_code == 200
-    assert lote_cancelado(lote_id, r)
+    # POST /documentos/{id}/revisao: revisa o outro documento; a marca de cancelamento continua
     resp = client.post(f"/documentos/{d_rev}/revisao", json={"tipo": "folha_ponto", "revisor": "ana"})
     assert resp.status_code == 200
-    assert not lote_cancelado(lote_id, r)
+    assert lote_cancelado(lote_id, r)
     assert d_rev in extracoes and d_rev in analises
     assert _estados(lote_id) == ("concluido", 0, ["revisado", "revisado"])
 
+
+
+def test_revisao_apos_cancelar_mantem_a_marca_e_enfileira_com_forcar(novo_lote, extracoes, monkeypatch):
+    lote_id, (d1, d2) = novo_lote("concluido", 0, [("em_revisao", "aso"), ("em_revisao", "holerite")])
+    registrar_tarefas_pos(lote_id, [f"extracao:{d1}", f"extracao:{d2}"], r)
+    assert client.post(f"/lotes/{lote_id}/cancelar").status_code == 200
+    assert client.post(f"/documentos/{d1}/revisao", json={"tipo": "aso", "revisor": "x"}).status_code == 200
+    assert lote_cancelado(lote_id, r)  # o outro documento do lote segue cancelado
+    assert extracoes.forcadas == [d1] and d2 not in extracoes
+
+
+def test_revisao_corrige_folha_ponto_para_outro_tipo_apaga_analise(novo_lote):
+    lote_id, (d,) = novo_lote("concluido", 0, [("classificado", "folha_ponto")])
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("INSERT INTO analise_ponto (documento_id, estado) VALUES (%s, 'concluida')", (d,))
+    assert client.get(f"/documentos/{d}/analise-ponto").status_code == 200
+    # classificado não aceita revisão; passa por em_revisao como na fila real
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("UPDATE documento SET estado = 'em_revisao' WHERE id = %s", (d,))
+    assert client.post(f"/documentos/{d}/revisao", json={"tipo": "holerite", "revisor": "x"}).status_code == 200
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        assert conn.execute("SELECT count(*) FROM analise_ponto WHERE documento_id = %s", (d,)).fetchone()[0] == 0
+    assert client.get(f"/documentos/{d}/analise-ponto").status_code == 404
+
+
+def test_analise_pendente_de_folha_revisada_conta_no_acompanhamento(novo_lote):
+    lote_id, (d,) = novo_lote("concluido", 0, [("revisado", "folha_ponto")])
+    with SessionLocal() as sessao:
+        assert lotes_actions._ha_pos_processamento_pendente(sessao, lote_id, 0) is True
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("INSERT INTO analise_ponto (documento_id, estado) VALUES (%s, 'concluida')", (d,))
+        assert extracao._apurar_pendencias_lote(conn, lote_id) == (0, False)
+        conn.execute("DELETE FROM analise_ponto WHERE documento_id = %s", (d,))
+        assert extracao._apurar_pendencias_lote(conn, lote_id) == (0, True)
+        assert analise._pendencias_lote_analise(conn, lote_id) == (0, True)
+    with SessionLocal() as sessao:
+        assert lotes_actions._ha_pos_processamento_pendente(sessao, lote_id, 0) is True
 
 _OUVINTES: list = []
 

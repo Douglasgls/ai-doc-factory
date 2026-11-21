@@ -189,7 +189,7 @@ def _ha_pos_processamento_pendente(session: Session, lote_id: int, docs_pendente
         select(1).select_from(Documento).outerjoin(AnalisePonto, AnalisePonto.documento_id == Documento.id)
         .where(Documento.lote_id == lote_id,
                or_(Documento.estado == "segmentado",
-                   and_(Documento.estado == "classificado", Documento.tipo == "folha_ponto",
+                   and_(Documento.estado.in_(("classificado", "revisado")), Documento.tipo == "folha_ponto",
                         or_(AnalisePonto.estado.is_(None), AnalisePonto.estado.not_in(("concluida", "erro"))))))
         .limit(1)).first()
     return pendente_db is not None

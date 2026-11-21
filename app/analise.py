@@ -51,13 +51,17 @@ SCHEMA_GEMINI = {
 }
 
 
-def enfileirar_analise(documento_id: int, cliente: redis.Redis | None = None) -> bool:
+def enfileirar_analise(documento_id: int, cliente: redis.Redis | None = None, forcar: bool = False) -> bool:
     """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão.
-    Se falhar, remove a pendência de análise do lote no Redis para não travar o acompanhamento."""
+    Se falhar, remove a pendência de análise do lote no Redis para não travar o acompanhamento.
+    `forcar`: revisão humana; o handler ignora a marca de cancelamento do lote."""
     try:
         from app.filas import enfileirar
         cli = cliente or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-        enfileirar(cli, config.FILA_ANALISAR, {"documento_id": documento_id})
+        payload = {"documento_id": documento_id}
+        if forcar:
+            payload["forcar"] = True
+        enfileirar(cli, config.FILA_ANALISAR, payload)
         return True
     except Exception:
         log.exception("não foi possível enfileirar a análise de ponto do documento %s", documento_id)
@@ -219,7 +223,7 @@ def _pendencias_lote_analise(conn, lote_id: int) -> tuple[int, bool]:
         conn.execute(
             "SELECT 1 FROM documento d "
             "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
-            "WHERE d.lote_id = %s AND d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
+            "WHERE d.lote_id = %s AND d.estado IN ('classificado', 'revisado') AND d.tipo = 'folha_ponto' "
             "AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')) "
             "LIMIT 1",
             (lote_id,),
@@ -231,12 +235,25 @@ def _pendencias_lote_analise(conn, lote_id: int) -> tuple[int, bool]:
 
 def analisar_documento(payload: dict) -> None:
     doc_id = payload["documento_id"]
+    forcar = bool(payload.get("forcar"))  # revisão humana vale mesmo com o lote cancelado
+
+    def cancelado(lote: int) -> bool:
+        return not forcar and lote_cancelado(lote)
+
     with psycopg.connect(config.DATABASE_URL) as conn:
         doc = conn.execute("SELECT estado, tipo, lote_id, pagina_ini, pagina_fim FROM documento WHERE id = %s",
                            (doc_id,)).fetchone()
         if doc is None or doc[1] != "folha_ponto" or doc[0] not in ("classificado", "revisado"):
+            if doc is not None:  # tipo mudou: não deixa a pendência órfã no acompanhamento do lote
+                if cancelado(doc[2]):
+                    concluir_tarefa_pos(doc[2], f"analise:{doc_id}")
+                else:
+                    docs_pend, ap_pend = _pendencias_lote_analise(conn, doc[2])
+                    etapa = _resolver_etapa_pos_analise(doc[2], doc_id, docs_pend, ap_pend)  # conclui a tarefa
+                    publicar_evento(doc[2], etapa, f"Análise de ponto do documento #{doc_id} dispensada (tipo mudou).",
+                                    documento_id=doc_id)
             return  # tipo mudou, documento removido ou ainda não decidido: nada a analisar
-        if lote_cancelado(doc[2]):
+        if cancelado(doc[2]):
             concluir_tarefa_pos(doc[2], f"analise:{doc_id}")
             return
         textos = [t or "" for (t,) in conn.execute(
@@ -252,13 +269,13 @@ def analisar_documento(payload: dict) -> None:
         documento_id=doc_id,
     )
     resultado = analisar("\n".join(textos), _imagens(lote_id, doc[3], doc[4]), perfil)
-    if lote_cancelado(lote_id):
+    if cancelado(lote_id):
         concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
         return
     resultado["perfil"] = perfil  # o perfil efetivamente usado, inteiro
     resultado["perfil_nome"] = perfil_nome
     with psycopg.connect(config.DATABASE_URL) as conn:
-        if lote_cancelado(lote_id):
+        if cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
             return
         _gravar(conn, doc_id, "concluida", resultado)  # uma linha por documento: reprocessar substitui
@@ -275,6 +292,11 @@ def analisar_documento(payload: dict) -> None:
 def marcar_erro_analise(payload: dict) -> None:
     """ao_esgotar: o job foi para a dlq. Grava a linha como erro (sem sobrescrever documento ou lote)."""
     doc_id = payload["documento_id"]
+    forcar = bool(payload.get("forcar"))
+
+    def cancelado(lote: int) -> bool:
+        return not forcar and lote_cancelado(lote)
+
     lote_id = None
     docs_pend = 0
     ap_pend = False
@@ -282,10 +304,10 @@ def marcar_erro_analise(payload: dict) -> None:
         existe = conn.execute("SELECT lote_id FROM documento WHERE id = %s", (doc_id,)).fetchone()
         if existe:
             lote_id = existe[0]
-            if not lote_cancelado(lote_id):
+            if not cancelado(lote_id):
                 _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
                 docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
-    if lote_id is not None and not lote_cancelado(lote_id):
+    if lote_id is not None and not cancelado(lote_id):
         etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
         publicar_evento(
             lote_id,

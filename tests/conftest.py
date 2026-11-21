@@ -49,10 +49,15 @@ def extracoes(monkeypatch):
     """Não enfileira extração de verdade (o worker do compose chamaria o Gemini). Devolve os ids pedidos."""
     from app import extracao
     from app.routers.revisao import actions as revisao_actions
-    pedidas = []
+    class Pedidas(list):
+        forcadas: list
+    pedidas = Pedidas()
+    pedidas.forcadas = []
 
-    def registrar(documento_id, r=None):
+    def registrar(documento_id, r=None, forcar=False):
         pedidas.append(documento_id)
+        if forcar:
+            pedidas.forcadas.append(documento_id)  # pedidos feitos pela revisão humana (payload forcar)
     registrar.__wrapped__ = extracao.enfileirar_extracao  # a função real, para testá-la
     monkeypatch.setattr(extracao, "enfileirar_extracao", registrar)
     monkeypatch.setattr(revisao_actions, "enfileirar_extracao", registrar)

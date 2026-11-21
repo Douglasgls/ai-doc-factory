@@ -1,12 +1,11 @@
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.analise import enfileirar_analise
-from app.eventos import limpar_cancelado
 from app.escopo import filtro_lote
 from app.extracao import enfileirar_extracao
-from app.models import Documento, Lote
+from app.models import AnalisePonto, Documento, Lote
 from app.renomeacao import atualizar_nome_padronizado_sessao
 from app.routers import r
 from app.routers.auth.actions import UsuarioContexto
@@ -49,10 +48,13 @@ def revisar_documento(session: Session, documento_id: int, revisao: Revisao, rev
             raise HTTPException(404, "documento não encontrado")
         raise HTTPException(409, f"documento em estado '{estado[0]}' não aceita revisão")
     atualizar_nome_padronizado_sessao(session, documento_id)
+    if revisao.tipo != "folha_ponto":  # análise de ponto obsoleta: o documento deixou de ser folha de ponto
+        session.execute(delete(AnalisePonto).where(AnalisePonto.documento_id == documento_id)
+                        .execution_options(synchronize_session=False))
     session.commit()  # antes de enfileirar: o worker precisa enxergar o estado novo
-    limpar_cancelado(row[6], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
+    # forcar=True: a revisão humana vale mesmo com o lote cancelado (a marca de cancelamento continua)
     if revisao.tipo == "folha_ponto":
-        enfileirar_analise(documento_id, r)  # nunca levanta: não derruba a revisão
-    enfileirar_extracao(documento_id, r)  # depois do commit; nunca levanta
+        enfileirar_analise(documento_id, r, forcar=True)  # nunca levanta: não derruba a revisão
+    enfileirar_extracao(documento_id, r, forcar=True)  # depois do commit; nunca levanta
     return {"id": row[0], "estado": row[1], "tipo": row[2], "tipo_original": row[3],
             "revisor": row[4], "revisado_em": row[5]}

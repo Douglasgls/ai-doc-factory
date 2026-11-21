@@ -15,7 +15,7 @@ client = TestClient(app)
 @pytest.fixture
 def banco(extracoes, monkeypatch, orgs):
     analises = []
-    monkeypatch.setattr(actions, "enfileirar_analise", lambda doc_id, cliente=None: analises.append(doc_id))
+    monkeypatch.setattr(actions, "enfileirar_analise", lambda doc_id, cliente=None, forcar=False: analises.append(doc_id))
     conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
     lotes = []
 
@@ -147,14 +147,46 @@ def test_patch_aceita_em_revisao_e_revisado(banco):
     assert _patch(b, "holerite").status_code == 200
 
 
-def test_patch_dispara_analise_so_ao_virar_folha_ponto(banco):
+def test_patch_dispara_analise_ao_virar_folha_ponto_sem_analise_concluida(banco):
     _, lote, _, _, analises = banco
     _, (a, b, c) = lote([("classificado", "aso"), ("classificado", "folha_ponto"), ("classificado", "aso")])
     _patch(a, "folha_ponto")
     assert analises == [a]
-    _patch(b, "folha_ponto")  # já era folha_ponto
+    _patch(b, "folha_ponto")  # já era folha_ponto, mas sem análise concluída: enfileira
     _patch(c, "holerite")
+    assert analises == [a, b]
+
+
+def test_patch_nao_reenfileira_se_ja_ha_analise_concluida(banco):
+    conn, lote, _, _, analises = banco
+    _, (a,) = lote([("classificado", "folha_ponto")])
+    conn.execute("INSERT INTO analise_ponto (documento_id, estado) VALUES (%s, 'concluida')", (a,))
+    _patch(a, "folha_ponto")
+    assert analises == []
+
+
+def test_patch_em_revisao_com_sugestao_folha_ponto_enfileira_analise(banco):
+    _, lote, _, _, analises = banco
+    _, (a,) = lote([("em_revisao", "folha_ponto")])
+    assert _patch(a, "folha_ponto").status_code == 200
     assert analises == [a]
+
+
+def test_patch_para_outro_tipo_apaga_analise_e_get_da_404(banco):
+    conn, lote, _, _, _ = banco
+    _, (a,) = lote([("classificado", "folha_ponto")])
+    conn.execute("INSERT INTO analise_ponto (documento_id, estado) VALUES (%s, 'concluida')", (a,))
+    assert client.get(f"/documentos/{a}/analise-ponto").json()["estado"] == "concluida"
+    _patch(a, "holerite")
+    assert conn.execute("SELECT count(*) FROM analise_ponto WHERE documento_id = %s", (a,)).fetchone()[0] == 0
+    assert client.get(f"/documentos/{a}/analise-ponto").status_code == 404
+
+
+def test_get_analise_404_se_tipo_atual_nao_e_folha_ponto_mesmo_com_linha(banco):
+    conn, lote, _, _, _ = banco
+    _, (a,) = lote([("classificado", "aso")])
+    conn.execute("INSERT INTO analise_ponto (documento_id, estado) VALUES (%s, 'concluida')", (a,))
+    assert client.get(f"/documentos/{a}/analise-ponto").status_code == 404
 
 
 # ---------- DELETE ----------

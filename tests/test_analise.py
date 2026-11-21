@@ -209,7 +209,7 @@ def test_correcao_humana_para_folha_ponto_enfileira_a_analise(fila_analise):
     lote, d = _doc(tipo="desconhecido", estado="em_revisao")
     resp = client.post(f"/documentos/{d}/revisao", json={"tipo": "folha_ponto", "revisor": "ana"})
     assert resp.status_code == 200 and cli.llen(fila) == 1
-    assert json.loads(cli.lrange(fila, 0, 0)[0])["payload"] == {"documento_id": d}
+    assert json.loads(cli.lrange(fila, 0, 0)[0])["payload"] == {"documento_id": d, "forcar": True}
     client.post(f"/documentos/{d}/revisao", json={"tipo": "holerite", "revisor": "ana"})
     assert cli.llen(fila) == 1  # outro tipo não enfileira
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
