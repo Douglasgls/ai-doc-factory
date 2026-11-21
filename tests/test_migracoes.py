@@ -88,6 +88,14 @@ def test_upgrade_head_cria_tabelas_e_downgrade_base_remove(banco_descartavel):
                             "AND column_name = 'perfil_jornada'").fetchone()[0].startswith("'clt_padrao'")
         assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE table_name = 'analise_ponto' "
                             "AND column_name = 'perfil_nome'").fetchone()[0] == 1
+    with psycopg.connect(url) as conn:  # 0009: contrato.proprio, falso para os contratos existentes
+        assert conn.execute("SELECT is_nullable, column_default FROM information_schema.columns "
+                            "WHERE table_name = 'contrato' AND column_name = 'proprio'").fetchone() == ("NO", "false")
+    _alembic(url, "downgrade", "0008_documento_campos_autor")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE table_name = 'contrato' "
+                            "AND column_name = 'proprio'").fetchone()[0] == 0
+    _alembic(url, "upgrade", "head")
     _alembic(url, "downgrade", "0006_perfil_jornada_vigencia")
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE (table_name, column_name) IN "
@@ -141,3 +149,19 @@ def test_downgrade_recusa_mesmo_arquivo_em_dois_contratos(banco_descartavel):
     assert "downgrade impossível" in erro.value.stderr
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT count(*) FROM lote").fetchone()[0] == 2  # nada foi apagado
+
+
+def test_0009_contratos_existentes_ficam_nao_proprios(banco_descartavel):
+    url = banco_descartavel
+    _alembic(url, "upgrade", "0008_documento_campos_autor")
+    with psycopg.connect(url, autocommit=True) as conn:
+        t = conn.execute("INSERT INTO tomador (nome) VALUES ('T') RETURNING id").fetchone()[0]
+        p = conn.execute("INSERT INTO prestador (cnpj, razao_social) VALUES ('11222333000181', 'P') RETURNING id"
+                         ).fetchone()[0]
+        conn.execute("INSERT INTO contrato (tomador_id, prestador_id) VALUES (%s, %s)", (t, p))
+    _alembic(url, "upgrade", "0009_contrato_proprio")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT proprio FROM contrato").fetchall() == [(False,)]
+    _alembic(url, "downgrade", "0008_documento_campos_autor")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*) FROM contrato").fetchone()[0] == 1  # o contrato fica, só perde a marca
