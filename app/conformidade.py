@@ -1,7 +1,10 @@
 """Score de conformidade da empresa prestadora (Goal 7): funções puras, sem banco e sem LLM.
 
 A empresa é identificada pelo CNPJ da prestadora (validado em código); seus documentos são reunidos entre
-lotes. Há três níveis, com a mesma fórmula e os mesmos pesos: geral da empresa, por tipo e por documento.
+lotes. O contrato do lote é fonte cadastrada, não palpite: em lote com contrato, o documento sem CNPJ válido
+(ou sem distinção prestadora/tomadora) liga ao prestador do contrato (origem "contrato"), e um CNPJ extraído
+válido e diferente do contrato também liga ao prestador do contrato, com a divergência `cnpj_diferente_do_contrato`
+(conta na Consistência). Lote sem contrato exige CNPJ extraído válido com distinção prestadora/tomadora. Há três níveis, com a mesma fórmula e os mesmos pesos: geral da empresa, por tipo e por documento.
 
 Convenções (documentadas aqui para o teste ser determinístico):
 - Nota de um critério = bons / (bons + ruins). Itens pendentes ficam fora da conta (nunca valem zero).
@@ -19,6 +22,9 @@ Convenções (documentadas aqui para o teste ser determinístico):
   ou desconhecido); a pendência torna o score do tipo provisório, sem mudar a nota. O nível por documento não tem pendentes.
 - Consistência: razão social é comparada entre os documentos da empresa (o CNPJ é a chave que os reúne);
   nome, matrícula e data de admissão só dentro do mesmo CPF válido. Valor ausente não é divergência.
+  Exceção: em lote com contrato, o CNPJ extraído válido conta um item por documento (coerente se igual ao do
+  contrato, `cnpj_diferente_do_contrato` se diferente). Documento ligado pelo contrato sem CNPJ válido não entra.
+  Um CNPJ igual ao do contrato, mas sem `distingue_prestadora`, também liga pelo contrato (origem "contrato").
 """
 import math
 import re
@@ -158,21 +164,38 @@ def identificar_empresa(campos_doc: dict) -> tuple[str | None, str | None]:
     return cnpj, None
 
 
+def resolver_empresa(campos_doc: dict, cnpj_contrato: str | None = None) -> dict:
+    """Com contrato (cnpj_contrato válido): sempre liga ao prestador do contrato. Sem contrato: identificar_empresa.
+    Devolve {cnpj, motivo, origem ("extraido"|"contrato"|None), divergencia (None | {extraido, contrato})}."""
+    contrato = validar_cnpj(cnpj_contrato)
+    cnpj, motivo = identificar_empresa(campos_doc)
+    if contrato is None:
+        return {"cnpj": cnpj, "motivo": motivo, "origem": "extraido" if cnpj else None, "divergencia": None}
+    if cnpj == contrato:
+        return {"cnpj": contrato, "motivo": None, "origem": "extraido", "divergencia": None}
+    diverge = None
+    if cnpj:  # extraído válido, distingue a prestadora e é outro CNPJ
+        diverge = {"extraido": cnpj, "contrato": contrato}
+    return {"cnpj": contrato, "motivo": None, "origem": "contrato", "divergencia": diverge}
+
+
 def agrupar_empresas(documentos: list[dict], campos: dict) -> tuple[dict, list[dict]]:
-    """documentos: [{id, lote_id, tipo, estado}]. Devolve ({cnpj: [docs]}, [docs sem empresa]).
-    Documentos analisados e em_revisao (extraídos, mas sem tipo confirmado) entram na empresa pelo CNPJ;
-    segmentado e erro nunca têm empresa. Documento sem empresa não afeta a nota de nenhuma empresa."""
+    """documentos: [{id, lote_id, tipo, estado, cnpj_contrato?}]. Devolve ({cnpj: [docs]}, [docs sem empresa]).
+    Documentos analisados e em_revisao (extraídos, mas sem tipo confirmado) entram na empresa pelo CNPJ (ou pelo
+    contrato do lote, ver resolver_empresa); segmentado e erro nunca têm empresa. Cada documento ligado ganha
+    `origem_empresa` e, se for o caso, `divergencia_cnpj`. Documento sem empresa não afeta a nota de nenhuma empresa."""
     empresas: dict[str, list[dict]] = {}
     sem: list[dict] = []
     for d in documentos:
         if not analisado(d) and d.get("estado") != "em_revisao":
             sem.append({**d, "motivo": f"documento não analisado (estado '{d.get('estado')}', tipo '{d.get('tipo')}')"})
             continue
-        cnpj, motivo = identificar_empresa(campos.get(d["id"], {}))
-        if cnpj:
-            empresas.setdefault(cnpj, []).append(d)
+        r = resolver_empresa(campos.get(d["id"], {}), d.get("cnpj_contrato"))
+        if r["cnpj"]:
+            empresas.setdefault(r["cnpj"], []).append(
+                {**d, "origem_empresa": r["origem"], "divergencia_cnpj": r["divergencia"]})
         else:
-            sem.append({**d, "motivo": motivo})
+            sem.append({**d, "motivo": r["motivo"]})
     return empresas, sem
 
 
@@ -199,6 +222,16 @@ def _grupos_consistencia(docs: list[dict], campos: dict):
 
     for campo, tipos in CONSISTENCIA_EMPRESA.items():
         comparar(campo, tipos, docs, None)
+    for d in docs:  # CNPJ extraído x CNPJ do contrato do lote (divergência só existe com CNPJ extraído válido)
+        dv = d.get("divergencia_cnpj")
+        if dv:
+            grupos.append({"campo": "cnpj_prestadora", "chave": None, "docs": {d["id"]}, "divergente": True,
+                           "regra": "cnpj_diferente_do_contrato", "documento": d["id"], "tipo": d["tipo"],
+                           "detalhe": f"CNPJ extraído {dv['extraido']} difere do CNPJ do contrato {dv['contrato']}",
+                           "cnpj_extraido": dv["extraido"], "cnpj_contrato": dv["contrato"],
+                           "valores": [{"documento": d["id"], "tipo": d["tipo"], "valor": dv["extraido"]}]})
+        elif d.get("origem_empresa") == "extraido" and d.get("cnpj_contrato"):
+            grupos.append({"campo": "cnpj_prestadora", "chave": None, "docs": {d["id"]}, "divergente": False})
     por_cpf: dict[str, list[dict]] = {}
     for d in docs:
         if d["tipo"] not in CPF_ESPERADO:
@@ -282,8 +315,11 @@ def _avaliar(escopo, campos, ref, grupos, faltas, completude=(), validade=True, 
             if not g["divergente"]:
                 bons += 1
                 continue
-            r = {"documento": None, "tipo": None, "regra": "campo_divergente", "campo": g["campo"],
-                 "conferir": True, "detalhe": f"valores diferentes para '{g['campo']}'", "valores": g["valores"]}
+            r = {"documento": g.get("documento"), "tipo": g.get("tipo"), "regra": g.get("regra", "campo_divergente"),
+                 "campo": g["campo"], "conferir": True,
+                 "detalhe": g.get("detalhe", f"valores diferentes para '{g['campo']}'"), "valores": g["valores"]}
+            if "cnpj_extraido" in g:
+                r["cnpj_extraido"], r["cnpj_contrato"] = g["cnpj_extraido"], g["cnpj_contrato"]
             if g["chave"]:
                 r["cpf"] = g["chave"]
             ruins.append(r)
@@ -338,7 +374,8 @@ def calcular_empresa(todos: list[dict], campos: dict, ref: date) -> dict:
         possiveis = [p for p in pendentes if p["tipo"] not in config.TIPOS or p["tipo"] == t]
         por_tipo[t] = _avaliar([d for d in docs if d["tipo"] == t], campos, ref, grupos, faltas,
                                (t,) if t in OBRIGATORIOS else (), t in VALIDADE, escondido, possiveis)
-    por_doc = {d["id"]: _avaliar([d], campos, ref, grupos, faltas, (), d["tipo"] in VALIDADE) for d in docs}
+    por_doc = {d["id"]: {**_avaliar([d], campos, ref, grupos, faltas, (), d["tipo"] in VALIDADE),
+                         "origem_empresa": d.get("origem_empresa")} for d in docs}
     razoes = Counter(campos.get(d["id"], {}).get("razao_social_prestadora") for d in docs)
     razao = next((r for r, _ in razoes.most_common() if r), None)
     return {"razao_social": razao, "documentos_por_tipo": dict(Counter(str(d["tipo"]) for d in todos)), "data_referencia": ref.isoformat(), "geral": geral, "por_tipo": por_tipo,

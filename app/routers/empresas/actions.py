@@ -6,13 +6,17 @@ from sqlalchemy.orm import Session
 
 from app import conformidade
 from app.anonimizacao import mascarar_estrutura
-from app.models import Documento, DocumentoCampo, Lote
+from app.models import Contrato, Documento, DocumentoCampo, Lote, Prestador
 
 
 def _carregar_conformidade(session: Session):
     """Todos os documentos e campos: a empresa reúne documentos de vários lotes."""
-    docs = [{"id": i, "lote_id": l, "tipo": t, "estado": e} for i, l, t, e in session.execute(
-        select(Documento.id, Documento.lote_id, Documento.tipo, Documento.estado)
+    # CNPJ do prestador do contrato do lote (NULL sem contrato), em uma consulta só
+    docs = [{"id": i, "lote_id": l, "tipo": t, "estado": e, "cnpj_contrato": c} for i, l, t, e, c in session.execute(
+        select(Documento.id, Documento.lote_id, Documento.tipo, Documento.estado, Prestador.cnpj)
+        .join(Lote, Lote.id == Documento.lote_id)
+        .outerjoin(Contrato, Contrato.id == Lote.contrato_id)
+        .outerjoin(Prestador, Prestador.id == Contrato.prestador_id)
         .order_by(Documento.lote_id, Documento.ordem))]
     campos: dict[int, dict[str, str]] = {}
     for doc, campo, valor in session.execute(
