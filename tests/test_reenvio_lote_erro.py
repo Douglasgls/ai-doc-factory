@@ -1,6 +1,8 @@
 """Reenvio do mesmo arquivo: lote em 'erro' reprocessa; os demais estados não mudam.
 Contra o Postgres: docker compose exec api python -m pytest tests"""
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psycopg
@@ -112,6 +114,48 @@ def test_reenvio_com_documento_revisado_da_409_e_preserva_a_revisao(enviar, jobs
     assert f"lote {id_} possui documentos revisados" in e.value.detail
     assert _estado(id_) == "erro"
     assert jobs == []
+    assert _documento(doc) == (("revisado", "aso", "holerite", "ana"), [("nome", "Ana", "humano")])
+
+
+def test_dois_reenvios_simultaneos_reprocessam_uma_unica_vez(enviar, jobs, monkeypatch):
+    """Os dois leem o lote em 'erro' e só então disparam o UPDATE condicional (a barreira fica logo antes dele):
+    exatamente um vence, exatamente um job de segmentação."""
+    from app.database import SessionLocal
+    dados, id_ = enviar()
+    _estado(id_, "erro")
+    barreira = threading.Barrier(2, timeout=10)
+    update_real = lotes_actions.update
+
+    def update_com_barreira(*a, **k):
+        barreira.wait()
+        return update_real(*a, **k)
+    monkeypatch.setattr(lotes_actions, "update", update_com_barreira)
+
+    def reenviar():
+        with SessionLocal() as s:
+            return lotes_actions.criar_lote(s, dados, dados, "a.pdf")
+    with ThreadPoolExecutor(2) as pool:
+        respostas = [f.result() for f in [pool.submit(reenviar), pool.submit(reenviar)]]
+    assert sorted(bool(r.get("reprocessando")) for r in respostas) == [False, True]
+    assert jobs == [(config.FILA_SEGMENTAR, {"lote_id": id_})]
+    assert _estado(id_) == "recebido"
+
+
+def test_processar_lote_com_documento_revisado_nao_faz_ocr_nem_segmenta(enviar, monkeypatch):
+    _, id_ = enviar()
+    doc = _criar_documento_revisado(id_)
+    _estado(id_, "recebido")
+
+    def proibido(*a, **k):
+        raise AssertionError("não deveria ser chamado")
+    monkeypatch.setattr(ocr, "pdfinfo_from_path", proibido)
+    monkeypatch.setattr(ocr, "processar_pagina", proibido)
+    monkeypatch.setattr(ocr, "segmentar", proibido)
+    eventos = []
+    monkeypatch.setattr(ocr, "publicar_evento", lambda lote, etapa, msg, **k: eventos.append((lote, etapa, msg)))
+    ocr.processar_lote({"lote_id": id_})
+    assert _estado(id_) == "erro"
+    assert [e[:2] for e in eventos] == [(id_, "erro")]
     assert _documento(doc) == (("revisado", "aso", "holerite", "ana"), [("nome", "Ana", "humano")])
 
 
