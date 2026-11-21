@@ -54,21 +54,37 @@ def validar_contrato(session: Session, contrato_id: int | None, usuario: Usuario
         raise HTTPException(409, f"contrato {contrato_id} inativo (ou de tomador/prestador inativo)")
 
 
+def _lote_tem_revisao(session: Session, lote_id: int) -> bool:
+    """True se o lote tem documento 'revisado' (revisão humana que um reprocessamento apagaria)."""
+    return session.execute(
+        select(1).where(Documento.lote_id == lote_id, Documento.estado == "revisado").limit(1)).first() is not None
+
+
+def _erro_lote_revisado(lote_id: int) -> HTTPException:
+    return HTTPException(409, f"lote {lote_id} possui documentos revisados e não pode ser reprocessado")
+
+
 def _reenvio(session: Session, sha: str, pdf: bytes, contrato_id: int | None) -> tuple[dict, bool]:
     """Mesmo arquivo já enviado NESTE contrato (ou, sem contrato, já enviado sem contrato): devolve o lote existente
     e diz se precisa enfileirar a segmentação. Lote em 'erro' volta para 'recebido' (reprocessa); 'ocr',
-    'classificando' e 'concluido' ficam como estão. O lote nunca troca de contrato."""
+    'classificando' e 'concluido' ficam como estão. O lote nunca troca de contrato.
+    Lote em 'erro' com documento revisado não reprocessa (409), para não apagar a revisão humana."""
     id_, estado = session.execute(
         select(Lote.id, Lote.estado).where(Lote.sha256 == sha, Lote.contrato_id.is_not_distinct_from(contrato_id))
     ).one()
     reprocessando = False
     if estado == "erro":
         # atômico: de dois reenvios simultâneos, só um enxerga 'erro' e enfileira
+        # (a ausência de documento revisado é checada no mesmo UPDATE, sem janela entre checagem e escrita)
+        sem_revisao = ~select(1).where(Documento.lote_id == id_, Documento.estado == "revisado").exists()
         reprocessando = session.execute(
-            update(Lote).where(Lote.id == id_, Lote.estado == "erro").values(estado="recebido").returning(Lote.id)
-            .execution_options(synchronize_session=False)).first() is not None
+            update(Lote).where(Lote.id == id_, Lote.estado == "erro", sem_revisao).values(estado="recebido")
+            .returning(Lote.id).execution_options(synchronize_session=False)).first() is not None
         if reprocessando:
             estado = "recebido"
+        elif _lote_tem_revisao(session, id_):
+            session.rollback()
+            raise _erro_lote_revisado(id_)
     # em 'recebido' o enfileirar original pode ter falhado; job duplicado é aceitável (handlers idempotentes)
     reenfileirar = estado == "recebido"
     if reenfileirar:
@@ -243,10 +259,8 @@ def reprocessar_lote(session: Session, lote_id: int) -> dict:
         raise HTTPException(404, "lote não encontrado")
     if lote[1] != "erro":
         raise HTTPException(409, f"lote {lote_id} em estado '{lote[1]}' não pode ser reprocessado")
-    tem_revisao = session.execute(
-        select(1).where(Documento.lote_id == lote_id, Documento.estado == "revisado").limit(1)).first()
-    if tem_revisao is not None:
-        raise HTTPException(409, f"lote {lote_id} possui documentos revisados e não pode ser reprocessado")
+    if _lote_tem_revisao(session, lote_id):
+        raise _erro_lote_revisado(lote_id)
     original = Path(config.DATA_DIR) / f"lote_{lote_id}" / "original.pdf"
     if not original.is_file():
         raise HTTPException(400, "arquivo original do lote não está disponível para reprocessamento")

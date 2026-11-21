@@ -5,8 +5,9 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from fastapi import HTTPException
 
-from app import config
+from app import config, ocr
 from app.routers.lotes import actions as lotes_actions
 
 PDF = b"%PDF-1.4 reenvio"
@@ -77,3 +78,60 @@ def test_original_pdf_existente_nao_e_sobrescrito(enviar, jobs, sessao):
     _estado(id_, "erro")
     lotes_actions.criar_lote(sessao, dados, b"%PDF-outro", "a.pdf")
     assert (Path(config.DATA_DIR) / f"lote_{id_}" / "original.pdf").read_bytes() == dados
+
+
+def _criar_documento_revisado(id_):
+    """Documento revisado (com revisor e campo editado) num lote; devolve o id."""
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        doc = conn.execute(
+            "INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo, tipo_original, revisor, "
+            "revisado_em) VALUES (%s, 1, 1, 1, 'revisado', 'aso', 'holerite', 'ana', now()) RETURNING id",
+            (id_,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, 'nome', 'Ana', 'humano')",
+            (doc,))
+    return doc
+
+
+def _documento(doc_id):
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        d = conn.execute("SELECT estado, tipo, tipo_original, revisor FROM documento WHERE id = %s",
+                         (doc_id,)).fetchone()
+        campos = conn.execute("SELECT campo, valor, origem FROM documento_campos WHERE documento_id = %s",
+                              (doc_id,)).fetchall()
+    return d, campos
+
+
+def test_reenvio_com_documento_revisado_da_409_e_preserva_a_revisao(enviar, jobs, sessao):
+    dados, id_ = enviar()
+    doc = _criar_documento_revisado(id_)
+    _estado(id_, "erro")
+    with pytest.raises(HTTPException) as e:
+        lotes_actions.criar_lote(sessao, dados, dados, "a.pdf")
+    assert e.value.status_code == 409
+    assert f"lote {id_} possui documentos revisados" in e.value.detail
+    assert _estado(id_) == "erro"
+    assert jobs == []
+    assert _documento(doc) == (("revisado", "aso", "holerite", "ana"), [("nome", "Ana", "humano")])
+
+
+def test_reenvio_sem_revisao_reprocessa_mesmo_com_documento_classificado(enviar, jobs, sessao):
+    dados, id_ = enviar()
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, estado, tipo) "
+                     "VALUES (%s, 1, 1, 1, 'classificado', 'aso')", (id_,))
+    _estado(id_, "erro")
+    resp = lotes_actions.criar_lote(sessao, dados, dados, "a.pdf")
+    assert resp["reprocessando"] is True and _estado(id_) == "recebido"
+    assert jobs == [(config.FILA_SEGMENTAR, {"lote_id": id_})]
+
+
+def test_segmentar_e_gravar_nao_apaga_documento_revisado(enviar):
+    _, id_ = enviar()
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("INSERT INTO pagina (lote_id, numero, texto) VALUES (%s, 1, 'HOLERITE proventos')", (id_,))
+    doc = _criar_documento_revisado(id_)
+    _estado(id_, "ocr")
+    assert ocr.segmentar_e_gravar(id_) == []
+    assert _estado(id_) == "erro"
+    assert _documento(doc) == (("revisado", "aso", "holerite", "ana"), [("nome", "Ana", "humano")])

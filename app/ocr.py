@@ -92,6 +92,13 @@ def segmentar_e_gravar(lote_id: int) -> list[int]:
         if lote_cancelado(lote_id):
             conn.execute("UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s", (lote_id,))
             return []
+        if conn.execute("SELECT 1 FROM documento WHERE lote_id = %s AND estado = 'revisado' LIMIT 1",
+                        (lote_id,)).fetchone():
+            # defesa: regravar apagaria a revisão humana. Sem erro (não vai à dlq em loop); o lote fica em 'erro',
+            # o mesmo estado de um lote cancelado, em vez de preso em 'ocr'.
+            log.warning("lote %s possui documentos revisados: segmentação não regravada", lote_id)
+            conn.execute("UPDATE lote SET estado = 'erro', docs_pendentes = 0 WHERE id = %s", (lote_id,))
+            return []
         conn.execute("DELETE FROM documento WHERE lote_id = %s", (lote_id,))  # refazer não duplica
         ids = []
         for ordem, d in enumerate(docs, start=1):
