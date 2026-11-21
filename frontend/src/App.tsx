@@ -138,7 +138,7 @@ export function App() {
 
   // Fetch data from backend
   const fetchData = useCallback(async (silent: boolean = false) => {
-    // Sem o nível do usuário não se sabe quais rotas chamar (as de conformidade são só da plataforma)
+    // Sem o nível do usuário não se sabe quais rotas chamar (as de conformidade e de organizações dependem dele)
     if (!isAuthenticated || !usuario) return
     if (!silent) {
       setIsLoading(true)

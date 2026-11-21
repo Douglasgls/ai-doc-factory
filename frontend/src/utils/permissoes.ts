@@ -9,8 +9,9 @@ export const podeEnviar = (usuario: Usuario): boolean =>
 /** Revisão, correção de tipo/campos, cancelar, reprocessar e excluir seguem a mesma regra do envio. */
 export const podeEditar = (usuario: Usuario): boolean => podeEnviar(usuario)
 
-/** Conformidade por empresa (/empresas e /conformidade) é exclusiva da plataforma. */
-export const veConformidade = (usuario: Usuario): boolean => usuario?.nivel === 'plataforma'
+/** Conformidade por empresa: os três níveis; o backend filtra cada um pelo seu escopo (contratos). */
+export const veConformidade = (usuario: Usuario): boolean =>
+  usuario?.nivel === 'plataforma' || usuario?.nivel === 'tomador' || usuario?.nivel === 'prestador'
 
 /** Organizações (tomador, prestador, contrato) também é exclusivo da plataforma. */
 export const veOrganizacoes = (usuario: Usuario): boolean => usuario?.nivel === 'plataforma'
