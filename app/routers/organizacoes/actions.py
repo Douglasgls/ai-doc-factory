@@ -4,7 +4,7 @@ from sqlalchemy import case, exists, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.escopo import filtro_contrato
+from app.escopo import exigir_prestador_sem_empresa_propria, filtro_contrato
 from app.models import Contrato, Convite, Prestador, Tomador, Usuario
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.organizacoes.schemas import NovoContrato, NovoPrestador, NovoTomador
@@ -89,6 +89,7 @@ def listar_prestadores(session: Session) -> list[dict]:
 
 
 def criar_contrato(session: Session, corpo: NovoContrato) -> dict:
+    exigir_prestador_sem_empresa_propria(session, corpo.prestador_id)
     try:
         id_ = session.execute(insert(Contrato).values(
             tomador_id=corpo.tomador_id, prestador_id=corpo.prestador_id, vigencia_inicio=corpo.vigencia_inicio,

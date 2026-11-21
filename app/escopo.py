@@ -235,3 +235,13 @@ def leitura_de_perfis(usuario: UsuarioContexto = Depends(exigir_usuario),
     leitura_de_perfis_permitida(session, usuario)
     session.commit()
     return usuario
+
+
+def exigir_prestador_sem_empresa_propria(session: Session, prestador_id: int) -> None:
+    """409 se o prestador tem contrato próprio: um contrato com outro tomador faria o admin da empresa própria ver
+    os lotes dele. Trava a linha do prestador (a mesma trava do cadastro de empresa própria), então a checagem vale
+    até o commit de quem chama, mesmo com criação simultânea."""
+    session.execute(select(Prestador.id).where(Prestador.id == prestador_id).with_for_update(key_share=True)).all()
+    if session.execute(select(Contrato.id).where(Contrato.prestador_id == prestador_id, Contrato.proprio).limit(1)
+                       ).first():
+        raise HTTPException(409, "prestador é uma empresa própria; não aceita contrato com outro tomador")

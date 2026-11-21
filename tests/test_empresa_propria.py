@@ -231,6 +231,23 @@ def test_admin_nao_ve_terceirizadas_nem_contratos_de_outros(mundo, criar, novo_l
     mundo.db.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
+def test_post_contratos_com_outro_tomador_para_empresa_propria_da_409(mundo, criar, novo_lote):
+    x = criar()
+    hx = _admin(mundo, x)
+    outro = mundo.tomador()
+    antes = mundo.db.execute("SELECT count(*) FROM contrato WHERE prestador_id = %s",
+                             (x.json()["prestador"]["id"],)).fetchone()[0]
+    r = client.post("/contratos", headers=criar.plat, json={"tomador_id": outro,
+                                                            "prestador_id": x.json()["prestador"]["id"]})
+    assert r.status_code == 409 and "empresa própria" in r.json()["detail"]
+    assert mundo.db.execute("SELECT count(*) FROM contrato WHERE prestador_id = %s",
+                            (x.json()["prestador"]["id"],)).fetchone()[0] == antes == 1
+    assert [c["id"] for c in client.get("/contratos", headers=hx).json()] == [x.json()["contrato"]["id"]]
+    # contrato comum entre outros continua podendo ser criado
+    assert client.post("/contratos", headers=criar.plat, json={"tomador_id": outro, "prestador_id": mundo.prestador()}
+                       ).status_code == 201
+
+
 # ---------- perfil de jornada ----------
 
 @pytest.fixture
