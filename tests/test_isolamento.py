@@ -43,11 +43,14 @@ EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas n
     ("POST", "/tomadores"): "plataforma", ("GET", "/tomadores"): "plataforma",
     ("POST", "/prestadores"): "plataforma", ("GET", "/prestadores"): "plataforma",
     ("POST", "/contratos"): "plataforma",
+    ("PATCH", "/tomadores/{tomador_id}"): "plataforma", ("PATCH", "/prestadores/{prestador_id}"): "plataforma",
+    ("PATCH", "/contratos/{contrato_id}"): "plataforma",
     ("GET", "/perfis-jornada"): "plataforma", ("GET", "/perfis-jornada/{perfil}"): "plataforma",
     ("PUT", "/perfis-jornada/{perfil}"): "plataforma", ("PUT", "/contratos/{contrato_id}/perfil-jornada"): "plataforma",
     # Autenticadas; a action decide por nível e papel (admin da própria organização), fora do bloqueio de escrita do
     # tomador de propósito: o admin do tomador gerencia terceirizadas e convites (testes em tests/test_terceirizadas.py).
     ("GET", "/convites"): "organizacao", ("GET", "/usuarios"): "organizacao", ("POST", "/terceirizadas"): "organizacao",
+    ("PATCH", "/usuarios/{usuario_id}"): "organizacao", ("DELETE", "/convites/{convite_id}"): "organizacao",
     ("POST", "/convites"): "convidar",  # autenticada; quem convida quem é decidido por escopo.pode_convidar
     ("GET", "/contratos"): "lista", ("GET", "/documentos"): "lista", ("GET", "/revisao"): "lista",
     ("GET", "/busca"): "lista", ("POST", "/lotes"): "upload",

@@ -399,8 +399,10 @@ SO_PLATAFORMA = {("GET", "/empresas"), ("GET", "/empresas/{cnpj:path}/conformida
                  ("GET", "/lotes/{lote_id}/conformidade"), ("POST", "/tomadores"), ("GET", "/tomadores"),
                  ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos"),
                  ("GET", "/perfis-jornada"), ("GET", "/perfis-jornada/{perfil}"), ("PUT", "/perfis-jornada/{perfil}"),
-                 ("PUT", "/contratos/{contrato_id}/perfil-jornada")}
-# POST /convites, GET /convites, GET /usuarios e POST /terceirizadas: autenticadas, e o 403 por nível e papel vem da
+                 ("PUT", "/contratos/{contrato_id}/perfil-jornada"),
+                 ("PATCH", "/tomadores/{tomador_id}"), ("PATCH", "/prestadores/{prestador_id}"),
+                 ("PATCH", "/contratos/{contrato_id}")}
+# POST/GET/DELETE /convites, GET/PATCH /usuarios e POST /terceirizadas: autenticadas, e o 403 por nível e papel vem da
 # action (escopo.pode_convidar; tests/test_convites.py e tests/test_terceirizadas.py).
 
 
