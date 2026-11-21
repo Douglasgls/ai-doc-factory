@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_session
 
 from app.routers.auth.actions import UsuarioContexto, exigir_usuario
+from app.routers.empresas_proprias.actions import com_proprio
 from app.routers.organizacoes import actions
 from app.routers.organizacoes.schemas import (
     ContratoOut, IdBanco, NovoContrato, NovoPrestador, NovoTomador, PrestadorOut, TomadorOut)
@@ -46,4 +47,4 @@ def listar_contratos(tomador_id: Annotated[IdBanco | None, Query()] = None,
                      session: Session = Depends(get_session)):
     """Filtros opcionais por tomador e por prestador. Plataforma vê todos; tomador, os do seu tomador;
     prestador, só os ativos dele."""
-    return actions.listar_contratos(session, tomador_id, prestador_id, usuario=usuario)
+    return com_proprio(session, actions.listar_contratos(session, tomador_id, prestador_id, usuario=usuario))

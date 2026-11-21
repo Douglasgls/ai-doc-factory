@@ -47,6 +47,9 @@ def cadastrar(session: Session, corpo: NovaTerceirizada, usuario: UsuarioContext
     prestador_id, cnpj, razao_social, prestador_ativo = _prestador_travado(session, corpo.cnpj, corpo.razao_social)
     if not prestador_ativo:
         raise HTTPException(409, "terceirizada desativada")
+    if session.execute(select(Contrato.id).where(Contrato.prestador_id == prestador_id, Contrato.proprio).limit(1)
+                       ).first():  # o admin da empresa própria passaria a ver os lotes deste tomador
+        raise HTTPException(409, "este CNPJ é uma empresa própria e não pode ser terceirizada")
     contrato = session.execute(
         pg_insert(Contrato).values(tomador_id=tomador_id, prestador_id=prestador_id)
         .on_conflict_do_nothing(index_elements=[Contrato.tomador_id, Contrato.prestador_id])
