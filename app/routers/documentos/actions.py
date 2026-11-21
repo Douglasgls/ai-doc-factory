@@ -133,7 +133,7 @@ def listar_documentos(session: Session, contrato_id: int | None = None, falhou: 
     return {"grupos": [{"tipo": t, "total": len(grupos[t]), "documentos": grupos[t]} for t in chaves]}
 
 
-def atualizar_tipo(session: Session, documento_id: int, revisao: Revisao) -> dict:
+def atualizar_tipo(session: Session, documento_id: int, revisao: Revisao, revisor: str) -> dict:
     """Corrige o tipo em qualquer estado, exceto 'segmentado' e 'erro'. tipo_original só é gravado se ainda NULL."""
     atual = session.execute(select(Documento.estado, Documento.tipo, Documento.lote_id)
                             .where(Documento.id == documento_id).with_for_update()).first()
@@ -143,7 +143,7 @@ def atualizar_tipo(session: Session, documento_id: int, revisao: Revisao) -> dic
         raise HTTPException(409, f"documento em estado '{atual[0]}' não aceita alteração de tipo")
     session.execute(update(Documento).where(Documento.id == documento_id).values(
         estado="revisado", tipo_original=func.coalesce(Documento.tipo_original, Documento.tipo),
-        tipo=revisao.tipo, revisor=revisao.revisor, revisado_em=func.now()
+        tipo=revisao.tipo, revisor=revisor, revisado_em=func.now()
     ).execution_options(synchronize_session=False))
     atualizar_nome_padronizado_sessao(session, documento_id)
     session.commit()  # antes de enfileirar: o worker precisa enxergar o estado novo
@@ -170,8 +170,8 @@ def excluir_documento(session: Session, documento_id: int) -> None:
     session.commit()
 
 
-def atualizar_campos(session: Session, documento_id: int, corpo: AtualizacaoCampos) -> dict:
-    """String não vazia -> upsert com origem 'humano'; null -> remove o campo. Qualquer estado de documento."""
+def atualizar_campos(session: Session, documento_id: int, corpo: AtualizacaoCampos, autor: str) -> dict:
+    """String não vazia -> upsert com origem 'humano' e `autor` (e-mail do usuário autenticado); null -> remove o campo. Qualquer estado de documento."""
     if session.execute(select(Documento.id).where(Documento.id == documento_id).with_for_update()).first() is None:
         raise HTTPException(404, "documento não encontrado")
     for nome, valor in corpo.campos.items():
@@ -181,10 +181,11 @@ def atualizar_campos(session: Session, documento_id: int, corpo: AtualizacaoCamp
                             .execution_options(synchronize_session=False))
         else:
             novo = pg_insert(DocumentoCampo).values(documento_id=documento_id, campo=nome, valor=valor.strip(),
-                                                    origem="humano")
+                                                    origem="humano", autor=autor)
             session.execute(novo.on_conflict_do_update(
                 index_elements=[DocumentoCampo.documento_id, DocumentoCampo.campo],
-                set_={"valor": novo.excluded.valor, "origem": novo.excluded.origem, "atualizado_em": func.now()}))
+                set_={"valor": novo.excluded.valor, "origem": novo.excluded.origem, "autor": novo.excluded.autor,
+                      "atualizado_em": func.now()}))
     atualizar_nome_padronizado_sessao(session, documento_id)
     session.commit()
     return obter_documento(session, documento_id)

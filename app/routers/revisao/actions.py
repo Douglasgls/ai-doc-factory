@@ -31,14 +31,15 @@ def fila_revisao(session: Session, usuario: UsuarioContexto) -> list[dict]:
     ]
 
 
-def revisar_documento(session: Session, documento_id: int, revisao: Revisao) -> dict:
+def revisar_documento(session: Session, documento_id: int, revisao: Revisao, revisor: str) -> dict:
+    """`revisor`: e-mail do usuário autenticado; o `revisao.revisor` do corpo é ignorado."""
     # um único UPDATE condicional; no lado direito, tipo e tipo_original ainda são os valores antigos,
     # então tipo_original guarda o tipo sugerido na primeira revisão e não muda nas seguintes
     row = session.execute(
         update(Documento)
         .where(Documento.id == documento_id, Documento.estado.in_(("em_revisao", "revisado")))
         .values(estado="revisado", tipo_original=func.coalesce(Documento.tipo_original, Documento.tipo),
-                tipo=revisao.tipo, revisor=revisao.revisor, revisado_em=func.now())
+                tipo=revisao.tipo, revisor=revisor, revisado_em=func.now())
         .returning(Documento.id, Documento.estado, Documento.tipo, Documento.tipo_original, Documento.revisor,
                    Documento.revisado_em, Documento.lote_id)
         .execution_options(synchronize_session=False)).first()

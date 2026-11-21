@@ -17,5 +17,6 @@ def fila_revisao(usuario: UsuarioContexto = Depends(exigir_usuario), session: Se
 
 @router.post("/documentos/{documento_id}/revisao", response_model=RevisaoOut,
              dependencies=[Depends(documento_para_escrita)])
-def revisar_documento(documento_id: int, revisao: Revisao, session: Session = Depends(get_session)):
-    return actions.revisar_documento(session, documento_id, revisao)
+def revisar_documento(documento_id: int, revisao: Revisao, usuario: UsuarioContexto = Depends(exigir_usuario),
+                      session: Session = Depends(get_session)):
+    return actions.revisar_documento(session, documento_id, revisao, usuario.email)

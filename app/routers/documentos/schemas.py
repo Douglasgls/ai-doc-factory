@@ -8,17 +8,12 @@ from app.routers.documentos import validations
 
 class AtualizacaoCampos(BaseModel):
     campos: dict[str, str | None]
-    revisor: str
+    revisor: str | None = None  # IGNORADO: o autor gravado é o e-mail do usuário autenticado
 
     @field_validator("campos")
     @classmethod
     def _campos_validos(cls, v: dict) -> dict:
         return validations.validar_campos(v)
-
-    @field_validator("revisor")
-    @classmethod
-    def _revisor_preenchido(cls, v: str) -> str:
-        return validations.validar_revisor(v)
 
 
 class ExtrasDocumentoOut(BaseModel):

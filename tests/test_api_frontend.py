@@ -96,6 +96,8 @@ def test_put_campos_upsert_e_remocao(banco):
     origens = dict(conn.execute("SELECT campo, origem FROM documento_campos WHERE documento_id = %s",
                                 (did,)).fetchall())
     assert origens == {"nome": "humano", "matricula": "humano"}
+    autores = dict(conn.execute("SELECT campo, autor FROM documento_campos WHERE documento_id = %s", (did,)).fetchall())
+    assert autores == {"nome": "admin-falso@exemplo.invalid", "matricula": "admin-falso@exemplo.invalid"}  # o "revisor" do corpo (" ana ") é ignorado
     # remover campo inexistente é inofensivo
     assert client.put(f"/documentos/{did}/campos", json={"campos": {"xyz": None}, "revisor": "a"}).status_code == 200
 
@@ -115,8 +117,6 @@ def test_put_campos_qualquer_estado(banco, estado):
     {"campos": {"nome": "x" * 501}, "revisor": "a"},
     {"campos": {"nome": "  "}, "revisor": "a"},
     {"campos": {}, "revisor": "a"},
-    {"campos": {"nome": "x"}, "revisor": "  "},
-    {"campos": {"nome": "x"}},
 ])
 def test_put_campos_validacao(banco, corpo):
     _, lote = banco
