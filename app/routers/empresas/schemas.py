@@ -24,6 +24,7 @@ class ValorComparadoOut(BaseModel):
     documento: int
     tipo: str | None
     valor: str
+    cnpj_contrato: str | None = None  # só em cnpj_diferente_do_contrato
 
 
 class DescontoOut(BaseModel):

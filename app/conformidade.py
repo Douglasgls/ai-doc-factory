@@ -22,8 +22,9 @@ Convenções (documentadas aqui para o teste ser determinístico):
   ou desconhecido); a pendência torna o score do tipo provisório, sem mudar a nota. O nível por documento não tem pendentes.
 - Consistência: razão social é comparada entre os documentos da empresa (o CNPJ é a chave que os reúne);
   nome, matrícula e data de admissão só dentro do mesmo CPF válido. Valor ausente não é divergência.
-  Exceção: em lote com contrato, o CNPJ extraído válido conta um item por documento (coerente se igual ao do
-  contrato, `cnpj_diferente_do_contrato` se diferente). Documento ligado pelo contrato sem CNPJ válido não entra.
+  Exceção: em lote com contrato, o CNPJ extraído válido vs o CNPJ do contrato conta UM campo por empresa
+  (como a razão social): coerente se todos batem; divergente (`cnpj_diferente_do_contrato`) se algum difere, e aí o
+  desconto vale só para os documentos divergentes. Documento ligado pelo contrato sem CNPJ válido não entra.
   Um CNPJ igual ao do contrato, mas sem `distingue_prestadora`, também liga pelo contrato (origem "contrato").
 """
 import math
@@ -222,16 +223,24 @@ def _grupos_consistencia(docs: list[dict], campos: dict):
 
     for campo, tipos in CONSISTENCIA_EMPRESA.items():
         comparar(campo, tipos, docs, None)
-    for d in docs:  # CNPJ extraído x CNPJ do contrato do lote (divergência só existe com CNPJ extraído válido)
-        dv = d.get("divergencia_cnpj")
-        if dv:
-            grupos.append({"campo": "cnpj_prestadora", "chave": None, "docs": {d["id"]}, "divergente": True,
-                           "regra": "cnpj_diferente_do_contrato", "documento": d["id"], "tipo": d["tipo"],
-                           "detalhe": f"CNPJ extraído {dv['extraido']} difere do CNPJ do contrato {dv['contrato']}",
-                           "cnpj_extraido": dv["extraido"], "cnpj_contrato": dv["contrato"],
-                           "valores": [{"documento": d["id"], "tipo": d["tipo"], "valor": dv["extraido"]}]})
-        elif d.get("origem_empresa") == "extraido" and d.get("cnpj_contrato"):
-            grupos.append({"campo": "cnpj_prestadora", "chave": None, "docs": {d["id"]}, "divergente": False})
+    # CNPJ extraído x CNPJ do contrato: UM campo comparado por empresa (como a razão social), só com documento
+    # de lote com contrato e CNPJ extraído válido. Divergente: o grupo cobre só os documentos divergentes.
+    comparados = [d for d in docs if d.get("divergencia_cnpj") or (d.get("origem_empresa") == "extraido"
+                                                                   and d.get("cnpj_contrato"))]
+    if comparados:
+        div = [d for d in comparados if d.get("divergencia_cnpj")]
+        g = {"campo": "cnpj_prestadora", "chave": None, "divergente": bool(div),
+             "docs": {d["id"] for d in (div or comparados)}}
+        if div:
+            g.update(regra="cnpj_diferente_do_contrato",
+                     detalhe=f"{len(div)} documento(s) com CNPJ extraído diferente do CNPJ do contrato",
+                     valores=[{"documento": d["id"], "tipo": d["tipo"], "valor": d["divergencia_cnpj"]["extraido"],
+                               "cnpj_contrato": d["divergencia_cnpj"]["contrato"]} for d in div])
+            if len(div) == 1:
+                g.update(documento=div[0]["id"], tipo=div[0]["tipo"],
+                         cnpj_extraido=div[0]["divergencia_cnpj"]["extraido"],
+                         cnpj_contrato=div[0]["divergencia_cnpj"]["contrato"])
+        grupos.append(g)
     por_cpf: dict[str, list[dict]] = {}
     for d in docs:
         if d["tipo"] not in CPF_ESPERADO:

@@ -326,3 +326,26 @@ def test_dois_contratos_diferentes_ficam_separados():
     db, cb = lote(OBRIG, pessoa(cnpj="", cpf=CPF2), primeiro_id=10, lote_id=2)
     empresas, sem = agrupar_empresas(com_contrato(da, CNPJ_A) + com_contrato(db, CNPJ_B), {**ca, **cb})
     assert sem == [] and {c: len(v) for c, v in empresas.items()} == {CNPJ_A: 5, CNPJ_B: 5}
+
+
+def test_cnpj_do_contrato_e_um_campo_por_empresa_e_nao_dilui_outras_divergencias():
+    base = {"cnpj_prestadora": CNPJ_A, "distingue_prestadora": "true", "cpf": CPF1, "nome": "Maria da Silva"}
+    docs, campos = lote(["holerite"] * 10, base)
+    campos[4] = {**base, "nome": "Mario Souza"}  # mesmo CPF, nome divergente
+    r = avaliar(com_contrato(docs, CNPJ_A), campos)
+    c = r["geral"]["criterios"]["consistencia"]
+    assert (c["bons"], c["ruins"], c["nota"]) == (1, 1, 0.5)  # 1 coerente (CNPJ) + 1 divergente (nome), não 10/11
+    assert [d["regra"] for d in r["geral"]["descontos"] if d["criterio"] == "consistencia"] == ["campo_divergente"]
+
+
+def test_cnpj_divergente_so_pune_os_documentos_divergentes():
+    docs, campos = lote(OBRIG, pessoa())
+    for i in (2, 3):
+        campos[i] = pessoa(cnpj=CNPJ_B)
+    r = avaliar(com_contrato(docs, CNPJ_A), campos)
+    d = [x for x in r["geral"]["descontos"] if x["regra"] == "cnpj_diferente_do_contrato"]
+    assert len(d) == 1 and "2 documento" in d[0]["detalhe"] and d[0]["documento"] is None
+    assert {v["documento"] for v in d[0]["valores"]} == {2, 3} and "cnpj_extraido" not in d[0]
+    assert {v["cnpj_contrato"] for v in d[0]["valores"]} == {CNPJ_A}
+    assert r["por_documento"][2]["descontos"] and r["por_documento"][3]["descontos"]
+    assert r["por_documento"][1]["descontos"] == []  # coerente numa empresa com divergência: não é punido
