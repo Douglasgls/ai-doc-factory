@@ -205,16 +205,18 @@ DIMENSOES_PONTO = tuple(PERGUNTAS_PONTO)
 
 
 # --- Gemini: extração de campos para o score de conformidade (Goal 7) e renomeação ---
-VERSAO_PROMPT_EXTRACAO = "gemini-extracao-v2"
+VERSAO_PROMPT_EXTRACAO = "gemini-extracao-v3"
 FIM_TEXTO = "</texto_documento>"
 INSTRUCOES_EXTRACAO = (
     "Você extrai campos de um documento trabalhista brasileiro (tipo informado abaixo). Use a imagem da "
     "primeira página e o texto de OCR (pode ter erros). Preencha só o que estiver claramente escrito; "
     "deixe null o que não aparecer ou estiver ilegível. Nunca invente valores. Datas no formato AAAA-MM-DD "
     "e competência no formato AAAA-MM. "
-    "A prestadora é a empresa terceirizada que fornece os funcionários; a tomadora é a empresa que recebe o "
-    "serviço. `distingue_prestadora` é true só se o documento deixa claro qual CNPJ é o da prestadora (por "
-    "rótulo ou por ser o empregador do funcionário), e false se prestadora e tomadora se confundem. "
+    "A prestadora é a empresa EMPREGADORA do funcionário, terceirizada ou não; a tomadora, quando existe, é a "
+    "empresa que recebe o serviço. `distingue_prestadora` é true se o documento deixa claro qual CNPJ é o da "
+    "prestadora (por rótulo ou por ser o empregador do funcionário), inclusive quando há um único empregador e "
+    "nenhuma tomadora; e false se prestadora e tomadora se confundem ou se não dá para saber qual CNPJ é do "
+    "empregador. "
     "`nome` é o nome completo do funcionário (nunca da empresa); `nome_empresa` é o nome da empresa empregadora. "
     "`data_exame` e `tipo_exame` só para ASO; `data_termino` e `tipo_prazo` só para contrato de trabalho; "
     "`competencia` para holerite, folha_ponto e folha_pagamento; `inicio_periodo` e `fim_periodo` quando "
