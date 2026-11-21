@@ -48,12 +48,17 @@ def revisar_documento(session: Session, documento_id: int, revisao: Revisao, rev
             raise HTTPException(404, "documento não encontrado")
         raise HTTPException(409, f"documento em estado '{estado[0]}' não aceita revisão")
     atualizar_nome_padronizado_sessao(session, documento_id)
+    analisar = False
     if revisao.tipo != "folha_ponto":  # análise de ponto obsoleta: o documento deixou de ser folha de ponto
         session.execute(delete(AnalisePonto).where(AnalisePonto.documento_id == documento_id)
                         .execution_options(synchronize_session=False))
+    else:  # não gasta Gemini de novo se já há análise concluída
+        analisar = session.execute(
+            select(AnalisePonto.documento_id).where(AnalisePonto.documento_id == documento_id,
+                                                    AnalisePonto.estado == "concluida")).first() is None
     session.commit()  # antes de enfileirar: o worker precisa enxergar o estado novo
     # forcar=True: a revisão humana vale mesmo com o lote cancelado (a marca de cancelamento continua)
-    if revisao.tipo == "folha_ponto":
+    if analisar:
         enfileirar_analise(documento_id, r, forcar=True)  # nunca levanta: não derruba a revisão
     enfileirar_extracao(documento_id, r, forcar=True)  # depois do commit; nunca levanta
     return {"id": row[0], "estado": row[1], "tipo": row[2], "tipo_original": row[3],

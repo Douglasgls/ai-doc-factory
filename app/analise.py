@@ -192,7 +192,15 @@ _CAMPOS_JSON = ("perfil", "marcacoes", "totais", "divergencias", "diferencas_gem
                 "contagens", "scores_dimensao", "custo")
 
 
-def _gravar(conn, documento_id: int, estado: str, dados: dict, erro: str | None = None) -> None:
+def _gravar(conn, documento_id: int, estado: str, dados: dict, erro: str | None = None) -> bool:
+    """Grava só se o documento ainda é folha_ponto em classificado/revisado. Trava a linha do documento (FOR UPDATE)
+    até o fim da transação: a revisão que muda o tipo (UPDATE + DELETE da análise) espera por este upsert e apaga
+    a linha depois; se a revisão commitou antes, o tipo já mudou e nada é gravado. Nenhuma ordem deixa linha órfã.
+    Devolve False quando não gravou."""
+    vivo = conn.execute("SELECT 1 FROM documento WHERE id = %s AND tipo = 'folha_ponto' "
+                        "AND estado IN ('classificado', 'revisado') FOR UPDATE", (documento_id,)).fetchone()
+    if vivo is None:
+        return False
     linha = {c: None for c in ("perfil_nome", "perfil", "marcacoes", "intervalo_pre_assinalado", "totais", "divergencias",
                                "diferencas_gemini", "ponto_britanico", "analise", "contagens", "scores_dimensao",
                                "score_geral", "modelo_gemini", "modelo_jev", "custo")}
@@ -203,6 +211,15 @@ def _gravar(conn, documento_id: int, estado: str, dados: dict, erro: str | None 
     linha.update(documento_id=documento_id, estado=estado, erro=erro, requer_revisao=bool(dados.get("requer_revisao")),
                  versao_prompt_gemini=prompts.VERSAO_PROMPT_PONTO_GEMINI, versao_prompt_jev=prompts.VERSAO_PROMPT_PONTO_JEV)
     conn.execute(_UPSERT, linha)
+    return True
+
+
+def _dispensar_analise(conn, lote_id: int, doc_id: int) -> None:
+    """Análise não gravada (tipo mudou): conclui a pendência pós-classificação como no caminho 'tipo mudou'."""
+    docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+    etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)  # conclui a tarefa
+    publicar_evento(lote_id, etapa, f"Análise de ponto do documento #{doc_id} dispensada (tipo mudou).",
+                    documento_id=doc_id)
 
 
 def _resolver_etapa_pos_analise(lote_id: int, doc_id: int, docs_pendentes: int, ap_pendente: bool) -> str:
@@ -278,7 +295,9 @@ def analisar_documento(payload: dict) -> None:
         if cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"analise:{doc_id}")
             return
-        _gravar(conn, doc_id, "concluida", resultado)  # uma linha por documento: reprocessar substitui
+        if not _gravar(conn, doc_id, "concluida", resultado):  # uma linha por documento: reprocessar substitui
+            _dispensar_analise(conn, lote_id, doc_id)  # o tipo mudou durante a análise
+            return
         docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
     etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
     publicar_evento(
@@ -305,8 +324,11 @@ def marcar_erro_analise(payload: dict) -> None:
         if existe:
             lote_id = existe[0]
             if not cancelado(lote_id):
-                _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise")
-                docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+                if _gravar(conn, doc_id, "erro", {}, erro="análise falhou após as tentativas; veja o log do worker_analise"):
+                    docs_pend, ap_pend = _pendencias_lote_analise(conn, lote_id)
+                else:  # tipo mudou: nada gravado, só fecha a pendência
+                    _dispensar_analise(conn, lote_id, doc_id)
+                    return
     if lote_id is not None and not cancelado(lote_id):
         etapa = _resolver_etapa_pos_analise(lote_id, doc_id, docs_pend, ap_pend)
         publicar_evento(
