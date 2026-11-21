@@ -214,6 +214,7 @@ const HomePage: React.FC<HomePageProps> = ({
           cnpj={selecionada.cnpj}
           razaoSocial={selecionada.razao_social}
           onClose={() => setSelecionada(null)}
+          empresaPropria={empresaPropria}
         />
       )}
     </div>

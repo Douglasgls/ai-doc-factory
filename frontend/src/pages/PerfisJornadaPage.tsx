@@ -14,9 +14,11 @@ type Tela = { tipo: 'lista' } | { tipo: 'ver'; perfil: string } | { tipo: 'form'
 
 interface Props {
   onBack: () => void
+  /** Admin de empresa própria: só consulta os perfis e escolhe o do próprio contrato (sem criar nem editar). */
+  modoEscolha?: boolean
 }
 
-const PerfisJornadaPage: React.FC<Props> = ({ onBack }) => {
+const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => {
   const [tela, setTela] = useState<Tela>({ tipo: 'lista' })
   const [perfis, setPerfis] = useState<PerfilJornadaResumo[]>([])
   const [contratos, setContratos] = useState<Contrato[]>([])
@@ -138,16 +140,16 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack }) => {
           <ListaPerfis
             perfis={perfis}
             onVer={(perfil) => setTela({ tipo: 'ver', perfil })}
-            onNovo={() => setTela({ tipo: 'form', perfil: null })}
+            onNovo={modoEscolha ? undefined : () => setTela({ tipo: 'form', perfil: null })}
           />
-          <ContratosPerfis contratos={contratos} perfis={perfis} onTrocar={trocarContrato} />
+          <ContratosPerfis contratos={contratos} perfis={perfis} onTrocar={trocarContrato} modoEscolha={modoEscolha} />
         </>
       ) : tela.tipo === 'ver' ? (
         detalhe && (
           <VerPerfil
             detalhe={detalhe}
             catalogo={catalogo}
-            onEditar={() => setTela({ tipo: 'form', perfil: detalhe.perfil })}
+            onEditar={modoEscolha ? undefined : () => setTela({ tipo: 'form', perfil: detalhe.perfil })}
           />
         )
       ) : tela.perfil === null ? (
@@ -180,7 +182,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack }) => {
 const ListaPerfis: React.FC<{
   perfis: PerfilJornadaResumo[]
   onVer: (perfil: string) => void
-  onNovo: () => void
+  onNovo?: () => void
 }> = ({ perfis, onVer, onNovo }) => (
   <div className={`${CARD} overflow-hidden`}>
     <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39] flex items-center justify-between gap-3">
@@ -190,10 +192,12 @@ const ListaPerfis: React.FC<{
           {perfis.length} {perfis.length === 1 ? 'perfil' : 'perfis'}
         </p>
       </div>
-      <button type="button" onClick={onNovo} className={BTN}>
-        <Plus className="w-4 h-4" />
-        Novo perfil
-      </button>
+      {onNovo && (
+        <button type="button" onClick={onNovo} className={BTN}>
+          <Plus className="w-4 h-4" />
+          Novo perfil
+        </button>
+      )}
     </div>
     <div className="overflow-x-auto">
       <table className="w-full text-left border-collapse min-w-[560px]">
@@ -229,7 +233,7 @@ const ListaPerfis: React.FC<{
 const VerPerfil: React.FC<{
   detalhe: PerfilJornadaDetalhe
   catalogo: { parametro: string; unidade: string }[]
-  onEditar: () => void
+  onEditar?: () => void
 }> = ({ detalhe, catalogo, onEditar }) => {
   const proprios = new Set(detalhe.proprios.map((p) => p.parametro))
   const unidades = new Map(catalogo.map((c) => [c.parametro, c.unidade]))
@@ -248,7 +252,7 @@ const VerPerfil: React.FC<{
               : `${proprios.size} ${proprios.size === 1 ? 'parâmetro próprio' : 'parâmetros próprios'}; o restante é herdado do ${PERFIL_PADRAO}.`}
           </p>
         </div>
-        {!detalhe.padrao && (
+        {!detalhe.padrao && onEditar && (
           <button type="button" onClick={onEditar} className={BTN_SEC}>
             <Pencil className="w-3.5 h-3.5" />
             Editar
@@ -301,7 +305,8 @@ const ContratosPerfis: React.FC<{
   contratos: Contrato[]
   perfis: PerfilJornadaResumo[]
   onTrocar: (contratoId: number, perfil: string) => Promise<void>
-}> = ({ contratos, perfis, onTrocar }) => {
+  modoEscolha?: boolean
+}> = ({ contratos, perfis, onTrocar, modoEscolha = false }) => {
   const [pendente, setPendente] = useState<{ id: number; perfil: string } | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -323,7 +328,9 @@ const ContratosPerfis: React.FC<{
   return (
     <div className={`${CARD} overflow-hidden`}>
       <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-        <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">Perfil de cada contrato</h3>
+        <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">
+          {modoEscolha ? 'Perfil de jornada da empresa' : 'Perfil de cada contrato'}
+        </h3>
         <p className="text-xs text-[#877991] dark:text-[#a093a8] mt-0.5">
           A troca vale para as análises feitas a partir daí. Lote sem contrato usa o {PERFIL_PADRAO}.
         </p>
@@ -338,8 +345,8 @@ const ContratosPerfis: React.FC<{
           <table className="w-full text-left border-collapse min-w-[640px]">
             <thead>
               <tr className="bg-[#fbf9fc] dark:bg-[#1f1325] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-                <th className={TH}>Tomador</th>
-                <th className={TH}>Prestador</th>
+                {!modoEscolha && <th className={TH}>Tomador</th>}
+                {!modoEscolha && <th className={TH}>Prestador</th>}
                 <th className={TH}>Perfil de jornada</th>
               </tr>
             </thead>
@@ -349,8 +356,8 @@ const ContratosPerfis: React.FC<{
                 return (
                   <React.Fragment key={c.id}>
                     <tr>
-                      <td className={`${TD} font-bold`}>{c.tomador_nome}</td>
-                      <td className={TD}>{c.prestador_razao_social}</td>
+                      {!modoEscolha && <td className={`${TD} font-bold`}>{c.tomador_nome}</td>}
+                      {!modoEscolha && <td className={TD}>{c.prestador_razao_social}</td>}
                       <td className={TD}>
                         <select
                           aria-label={`Perfil de jornada do contrato ${c.id}`}
@@ -373,7 +380,7 @@ const ContratosPerfis: React.FC<{
                     </tr>
                     {emTroca && pendente && (
                       <tr>
-                        <td colSpan={3} className="px-5 pb-4">
+                        <td colSpan={modoEscolha ? 1 : 3} className="px-5 pb-4">
                           <div
                             role="alert"
                             className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 text-xs space-y-2"

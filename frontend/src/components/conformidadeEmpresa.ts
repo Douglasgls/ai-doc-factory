@@ -108,8 +108,11 @@ const ROTULO_CAMPO: Record<string, string> = {
   data_admissao: 'data de admissão',
 }
 
-export const rotuloCampo = (campo: string | undefined): string =>
-  campo ? (ROTULO_CAMPO[campo] ?? campo.replace(/_/g, ' ')) : 'campo'
+/** Empresa própria: a empresa dona dos documentos é a própria, sem o termo "prestadora". */
+const ROTULO_CAMPO_PROPRIA: Record<string, string> = { razao_social_prestadora: 'razão social da empresa' }
+
+export const rotuloCampo = (campo: string | undefined, propria = false): string =>
+  campo ? ((propria ? ROTULO_CAMPO_PROPRIA[campo] : undefined) ?? ROTULO_CAMPO[campo] ?? campo.replace(/_/g, ' ')) : 'campo'
 
 /** Tipo que a API usa quando a confiança ficou abaixo do mínimo (app/config.py); não está em /tipos. */
 const TIPO_DESCONHECIDO = 'desconhecido'
@@ -181,7 +184,7 @@ export const motivosProvisorio = (g: Avaliacao, rotulos: Rotulos): string[] => {
 // ---------------------------------------------------------------------------------------------
 // Resumo em uma frase
 // ---------------------------------------------------------------------------------------------
-export const gerarResumo = (c: ConformidadeEmpresa, rotulos: Rotulos): string => {
+export const gerarResumo = (c: ConformidadeEmpresa, rotulos: Rotulos, propria = false): string => {
   const g = c.geral
   if (g.score == null || g.classificacao == null) {
     const motivos = motivosProvisorio(g, rotulos)
@@ -210,7 +213,7 @@ export const gerarResumo = (c: ConformidadeEmpresa, rotulos: Rotulos): string =>
     partes.push(`${plural(vencidos.length, 'documento está vencido', 'documentos estão vencidos')} (${nomes})`)
   }
   if (divergentes.length > 0) {
-    const campos = listaPt([...new Set(divergentes.map((d) => rotuloCampo(d.campo)))])
+    const campos = listaPt([...new Set(divergentes.map((d) => rotuloCampo(d.campo, propria)))])
     partes.push(
       `${plural(divergentes.length, 'informação diverge', 'informações divergem')} entre documentos (${campos}) e precisa ser conferida`,
     )
@@ -324,6 +327,21 @@ export const ACOES: Record<string, AcaoRecomendada> = {
   },
 }
 
+/** Empresa própria: não há a quem "pedir" o documento; o texto manda enviar ou renovar. */
+const ACOES_PROPRIA: Record<string, AcaoRecomendada> = {
+  obrigatorio_ausente: { ...ACOES.obrigatorio_ausente, texto: 'Envie o documento em um novo lote.' },
+  documento_vencido: { ...ACOES.documento_vencido, texto: 'Renove o documento e envie em um novo lote.' },
+  campo_divergente: {
+    ...ACOES.campo_divergente,
+    texto:
+      'Confira os valores na imagem dos documentos. Se a leitura errou, corrija o campo na revisão; se o documento está ' +
+      'errado, providencie a correção e envie de novo.',
+  },
+}
+
+export const acoesPara = (propria: boolean): Record<string, AcaoRecomendada> =>
+  propria ? { ...ACOES, ...ACOES_PROPRIA } : ACOES
+
 export interface DescontoExplicado {
   titulo: string
   detalhe: string | null
@@ -336,7 +354,7 @@ export interface DescontoExplicado {
   conhecida: boolean
 }
 
-export const explicarDesconto = (d: Desconto, rotulos: Rotulos): DescontoExplicado => {
+export const explicarDesconto = (d: Desconto, rotulos: Rotulos, propria = false): DescontoExplicado => {
   const tipoRotulo = rotuloTipoDoc(d.tipo, rotulos)
   const base = { documento: d.documento, tipoRotulo, pontos: d.pontos, regra: d.regra, valores: [] as DescontoExplicado['valores'] }
   switch (d.regra) {
@@ -355,7 +373,7 @@ export const explicarDesconto = (d: Desconto, rotulos: Rotulos): DescontoExplica
       return {
         ...base,
         conhecida: true,
-        titulo: `Divergência em ${rotuloCampo(d.campo)}`,
+        titulo: `Divergência em ${rotuloCampo(d.campo, propria)}`,
         detalhe: d.cpf
           ? `Documentos do mesmo CPF (${d.cpf}) trazem valores diferentes.`
           : 'Documentos da mesma empresa trazem valores diferentes.',
@@ -375,10 +393,11 @@ export interface AcaoAgrupada {
 }
 
 /** Junta as ações repetidas: uma linha por regra, com a lista do que ela atinge. */
-export const agruparAcoes = (g: Avaliacao, rotulos: Rotulos): AcaoAgrupada[] => {
+export const agruparAcoes = (g: Avaliacao, rotulos: Rotulos, propria = false): AcaoAgrupada[] => {
+  const acoes = acoesPara(propria)
   const mapa = new Map<string, AcaoAgrupada>()
   const adicionar = (chave: string, fallbackTitulo: string, fallbackTexto: string, item: string) => {
-    const acao = ACOES[chave]
+    const acao = acoes[chave]
     const atual = mapa.get(chave) ?? {
       chave,
       titulo: acao?.titulo ?? fallbackTitulo,
@@ -392,7 +411,7 @@ export const agruparAcoes = (g: Avaliacao, rotulos: Rotulos): AcaoAgrupada[] => 
     `${rotuloTipoDoc(tipo, rotulos)}${id != null ? ` (documento ${id})` : ''}`
 
   for (const d of g.descontos) {
-    const item = d.regra === 'campo_divergente' ? rotuloCampo(d.campo) : doc(d.tipo, d.documento)
+    const item = d.regra === 'campo_divergente' ? rotuloCampo(d.campo, propria) : doc(d.tipo, d.documento)
     // Regra desconhecida: o título é o `detalhe` da API e o texto é genérico.
     adicionar(d.regra, d.detalhe || d.regra, 'Confira este ponto nos documentos da empresa.', item)
   }

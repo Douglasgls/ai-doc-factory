@@ -17,6 +17,8 @@ interface ManualReviewPageProps {
     initialCampos?: Record<string, string>
   ) => void
   availableCategories: CategoryOption[]
+  /** Empresa solo: o início se chama "Seus documentos". */
+  empresaPropria?: boolean
 }
 
 interface DetailPanelProps {
@@ -381,6 +383,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
   onBack,
   onApprove,
   availableCategories,
+  empresaPropria = false,
 }) => {
   // Ordena prioritariamente pelo timestamp de processamento (mais recente primeiro)
   // e utiliza o id como critério de desempate secundário
@@ -520,7 +523,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
           onClick={onBack}
           className="hover:text-[#2d0a33] dark:hover:text-white transition-colors cursor-pointer"
         >
-          Documentos
+          {empresaPropria ? 'Seus documentos' : 'Documentos'}
         </button>
         <span>&gt;</span>
         <span className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">
@@ -559,7 +562,7 @@ const ManualReviewPage: React.FC<ManualReviewPageProps> = ({
             onClick={onBack}
             className="mt-5 px-5 py-2 rounded-xl text-sm font-medium text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] transition-all cursor-pointer"
           >
-            Voltar para Documentos
+            {empresaPropria ? 'Voltar para Seus documentos' : 'Voltar para Documentos'}
           </button>
         </div>
       ) : (

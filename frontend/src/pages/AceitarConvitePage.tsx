@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Loader2, UserPlus } from 'lucide-react'
 import { aceitarConvite, consultarConvite, ConviteInvalidoError, type ConvitePublico } from '../services/api'
-import { lerTokenDoFragmento, NIVEL_ROTULO } from '../utils/convites'
+import { lerTokenDoFragmento, rotuloNivel } from '../utils/convites'
 import { ErroBox, INPUT, LABEL, BTN } from '../components/formUi'
 
 const SENHA_MIN = 8
@@ -89,7 +89,7 @@ const AceitarConvitePage: React.FC<AceitarConvitePageProps> = ({ onSuccess }) =>
           <form onSubmit={enviar} className="space-y-4" aria-label="Criar acesso">
             <p className="text-sm text-center text-[#6f6379] dark:text-[#9f91a6]">
               Você recebeu um convite para{' '}
-              <strong className="text-[#2d0a33] dark:text-white">{convite.organizacao_nome ?? NIVEL_ROTULO[convite.nivel] ?? 'a equipe'}</strong>.
+              <strong className="text-[#2d0a33] dark:text-white">{convite.organizacao_nome ?? (convite.nivel === 'prestador' ? rotuloNivel(convite.nivel, true) : rotuloNivel(convite.nivel))}</strong>.
             </p>
             <div>
               <label htmlFor="conv-email" className={LABEL}>E-mail</label>

@@ -99,4 +99,8 @@ export const NIVEL_ROTULO: Record<string, string> = {
   prestador: 'Terceirizada',
 }
 
+/** Rótulo do nível; na empresa própria o prestador é "Empresa" (sem o termo de terceirização). */
+export const rotuloNivel = (nivel: string, empresaPropria = false): string =>
+  nivel === 'prestador' && empresaPropria ? 'Empresa' : (NIVEL_ROTULO[nivel] ?? nivel)
+
 export const PAPEL_ROTULO: Record<string, string> = { admin: 'Administrador', membro: 'Membro' }
