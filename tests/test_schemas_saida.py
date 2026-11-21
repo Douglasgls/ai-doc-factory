@@ -265,7 +265,7 @@ def test_revisao_e_correcoes(cenario, extracoes, sessao):
 
     r = client.post(f"/documentos/{ids[3]}/revisao", json={"tipo": "atestado_medico", "revisor": "ana"})
     corpo = _confere_resposta("POST /documentos/{documento_id}/revisao", r,
-                              rev_actions.revisar_documento(sessao, ids[3], Revisao(tipo="atestado_medico", revisor="ana")),
+                              rev_actions.revisar_documento(sessao, ids[3], Revisao(tipo="atestado_medico"), "admin-falso@exemplo.invalid"),
                               RevisaoOut, ignorar=("revisado_em",))  # a segunda chamada regrava revisado_em
     assert set(corpo) == {"id", "estado", "tipo", "tipo_original", "revisor", "revisado_em"}
     assert corpo["tipo_original"] == "recibo_ferias" and corpo["estado"] == "revisado"

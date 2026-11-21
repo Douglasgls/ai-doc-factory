@@ -105,15 +105,16 @@ def _patch(i, tipo="aso", revisor="ana"):
 
 
 def test_patch_feliz_preserva_tipo_original(banco):
-    _, lote, _, extracoes, _ = banco
+    conn, lote, _, extracoes, _ = banco
     _, (i,) = lote([("classificado", "holerite")])
     r = _patch(i, "aso", "  ana ")
     assert r.status_code == 200
     j = r.json()
-    assert (j["id"], j["estado"], j["tipo"], j["tipo_original"], j["revisor"]) == (i, "revisado", "aso", "holerite", "ana")
+    assert (j["id"], j["estado"], j["tipo"], j["tipo_original"], j["revisor"]) == (i, "revisado", "aso", "holerite", "admin-falso@exemplo.invalid")
     assert j["revisado_em"] and j["paginas"][0]["numero"] == 1
-    j = _patch(i, "contrato_trabalho", "bia").json()
-    assert (j["tipo"], j["tipo_original"], j["revisor"]) == ("contrato_trabalho", "holerite", "bia")
+    j = _patch(i, "contrato_trabalho", "impostor@exemplo.invalid").json()
+    assert (j["tipo"], j["tipo_original"], j["revisor"]) == ("contrato_trabalho", "holerite", "admin-falso@exemplo.invalid")
+    assert conn.execute("SELECT count(*) FROM documento WHERE revisor = 'impostor@exemplo.invalid'").fetchone()[0] == 0
     assert extracoes == [i, i]
     assert client.get(f"/documentos/{i}").json()["tipo"] == "contrato_trabalho"
 
@@ -123,7 +124,6 @@ def test_patch_validacoes(banco):
     _, (i,) = lote([("classificado", "aso")])
     assert _patch(i, "inexistente").status_code == 422
     assert _patch(i, "desconhecido").status_code == 422
-    assert _patch(i, "aso", "   ").status_code == 422
     assert client.get(f"/documentos/{i}").json()["estado"] == "classificado"
 
 
