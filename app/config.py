@@ -30,6 +30,10 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://docfactory:docfactory@loc
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 
+# Limites do upload (POST /lotes): tamanho do arquivo e páginas do PDF (já convertido, no caso de imagens).
+UPLOAD_MAX_MB = int(os.getenv("UPLOAD_MAX_MB", "50"))
+UPLOAD_MAX_PAGINAS = int(os.getenv("UPLOAD_MAX_PAGINAS", "300"))
+
 FILA_SEGMENTAR = "segmentar_lote"
 FILA_CLASSIFICAR = "classificar_documento"
 FILA_ANALISAR = "analisar_folha_ponto"

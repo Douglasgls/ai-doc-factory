@@ -11,7 +11,7 @@ from app.routers.auth.actions import UsuarioContexto, exigir_usuario
 from app.routers.lotes import actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
 from app.routers.organizacoes.schemas import IdBanco
-from app.routers.lotes.validations import converter_para_pdf
+from app.routers.lotes.validations import converter_para_pdf, ler_com_limite, validar_paginas
 
 router = APIRouter(tags=["Lotes"])
 
@@ -23,8 +23,9 @@ def criar_lote(arquivo: UploadFile = File(...), contrato_id: Annotated[IdBanco |
     Prestador: obrigatório (422) e tem que ser contrato ativo dele (404 se fora do escopo). Tomador: 403.
     O mesmo arquivo em contratos diferentes gera lotes diferentes."""
     actions.validar_contrato(session, contrato_id, usuario)  # antes de gravar ou enfileirar qualquer coisa
-    dados = arquivo.file.read()
+    dados = ler_com_limite(arquivo)
     pdf = converter_para_pdf(dados)
+    validar_paginas(pdf)
     return actions.criar_lote(session, dados, pdf, arquivo.filename, contrato_id)
 
 

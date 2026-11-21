@@ -12,6 +12,10 @@ interface UploadModalProps {
   contratoObrigatorio?: boolean
 }
 
+/** Mesmo limite do backend (UPLOAD_MAX_MB, padrão 50). O limite de páginas só o backend confere. */
+const MAX_UPLOAD_MB = 50
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 const ACCEPTED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff']
 
 function isValidUploadFile(file: File): boolean {
@@ -72,12 +76,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     if (list.length === 0) return
 
     const invalid = list.filter((f) => !isValidUploadFile(f))
-    const valid = list.filter((f) => isValidUploadFile(f))
+    const formatoOk = list.filter((f) => isValidUploadFile(f))
+    const grandes = formatoOk.filter((f) => f.size > MAX_UPLOAD_BYTES)
+    const valid = formatoOk.filter((f) => f.size <= MAX_UPLOAD_BYTES)
 
     if (invalid.length > 0) {
       setError(
         `Formato não suportado (${invalid.map((f) => f.name).join(', ')}). Use PDF, JPEG, PNG ou TIFF.`
       )
+    } else if (grandes.length > 0) {
+      setError(`Arquivo maior que ${MAX_UPLOAD_MB} MB (${grandes.map((f) => f.name).join(', ')}).`)
     } else {
       setError(null)
     }
@@ -262,7 +270,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   : 'Clique ou arraste um ou mais PDFs / imagens'}
               </span>
               <span className="text-xs text-[#8f8298] dark:text-[#7f7188] mt-1 text-center">
-                PDF, JPEG, PNG ou TIFF · Suporta envio de múltiplos arquivos (máx. 50MB cada)
+                PDF, JPEG, PNG ou TIFF · Suporta envio de múltiplos arquivos (máx. {MAX_UPLOAD_MB} MB cada)
               </span>
               <input
                 type="file"
