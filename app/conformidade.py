@@ -226,7 +226,7 @@ def _grupos_consistencia(docs: list[dict], campos: dict):
     # CNPJ extraído x CNPJ do contrato: UM campo comparado por empresa (como a razão social), só com documento
     # de lote com contrato e CNPJ extraído válido. Divergente: o grupo cobre só os documentos divergentes.
     comparados = [d for d in docs if d.get("divergencia_cnpj") or (d.get("origem_empresa") == "extraido"
-                                                                   and d.get("cnpj_contrato"))]
+                                                                   and validar_cnpj(d.get("cnpj_contrato")))]
     if comparados:
         div = [d for d in comparados if d.get("divergencia_cnpj")]
         g = {"campo": "cnpj_prestadora", "chave": None, "divergente": bool(div),

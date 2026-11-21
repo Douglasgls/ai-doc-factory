@@ -47,21 +47,21 @@ app.add_middleware(
 )
 # Abertas: /health (healthcheck do compose), /auth/login e as duas rotas por token de /convites/{token}. Todo o resto exige token.
 # /auth/me se protege sozinha (qualquer usuário autenticado). Matriz de acesso (app/escopo.py):
-#   - lotes, busca, documentos, revisao, GET /contratos: qualquer nível, filtrado pelo escopo; tomador só lê;
+#   - lotes, busca, documentos, revisao, empresas (conformidade), GET /contratos: qualquer nível, filtrado pelo escopo; tomador só lê;
 #   - tipos: qualquer usuário logado;
 #   - POST /terceirizadas (admin do tomador ou plataforma), GET /usuarios e GET /convites (admin da organização):
 #     autenticadas, decididas na action; fora de acesso_a_dados de propósito (o admin do tomador escreve aqui);
-#   - empresas (conformidade), criação de tomador/prestador/contrato e perfis de jornada (cadastro e associação
+#   - criação de tomador/prestador/contrato e perfis de jornada (cadastro e associação
 #     ao contrato): só plataforma.
 # Router novo SEM dependência fica aberto: a varredura de tests/test_autenticacao.py e tests/test_isolamento.py cobra isso.
 app.include_router(saude)
 app.include_router(auth)
 app.include_router(convites_publico)  # GET /convites/{token} e POST /convites/{token}/aceitar: o token é a credencial
 app.include_router(convites, dependencies=[Depends(exigir_usuario)])  # POST /convites: pode_convidar decide; GET /convites: escopo por organização (membro 403)
-for router in (lotes, busca, documentos, revisao, contratos_leitura):
+for router in (lotes, busca, documentos, revisao, contratos_leitura, empresas):
     app.include_router(router, dependencies=[Depends(acesso_a_dados)])
 app.include_router(tipos, dependencies=[Depends(exigir_usuario)])
 for router in (terceirizadas, usuarios):  # a action decide por nível e papel (admin do tomador / admin da organização)
     app.include_router(router, dependencies=[Depends(exigir_usuario)])
-for router in (empresas, organizacoes, perfis_jornada):
+for router in (organizacoes, perfis_jornada):
     app.include_router(router, dependencies=[Depends(exigir_plataforma)])

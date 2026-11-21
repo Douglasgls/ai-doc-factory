@@ -275,6 +275,15 @@ def com_contrato(docs, cnpj):
     return [{**d, "cnpj_contrato": cnpj} for d in docs]
 
 
+def test_grupo_cnpj_prestadora_so_conta_cnpj_de_contrato_valido():
+    doc = {"id": 1, "lote_id": 1, "tipo": "holerite", "estado": "classificado", "origem_empresa": "extraido"}
+    for invalido in (None, "", "11222333000182", "123"):
+        grupos, _ = conformidade._grupos_consistencia([{**doc, "cnpj_contrato": invalido}], {})
+        assert [g for g in grupos if g["campo"] == "cnpj_prestadora"] == [], invalido
+    grupos, _ = conformidade._grupos_consistencia([{**doc, "cnpj_contrato": CNPJ_A}], {})
+    assert [g["campo"] for g in grupos if g["campo"] == "cnpj_prestadora"] == ["cnpj_prestadora"]
+
+
 def test_contrato_cnpj_igual_liga_normalmente():
     docs, campos = lote(OBRIG, pessoa())
     r = avaliar(com_contrato(docs, CNPJ_A), campos)

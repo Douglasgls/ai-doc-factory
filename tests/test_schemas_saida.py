@@ -300,7 +300,7 @@ def empresa_sem_nada_analisavel():
 def test_conformidade(cenario, empresa_sem_nada_analisavel, sessao):
     lote, ids = cenario
     emp = _confere("GET /empresas/{cnpj:path}/conformidade", f"/empresas/{CNPJ}/conformidade", ConformidadeEmpresaOut,
-                   emp_actions.conformidade_empresa(sessao, CNPJ))
+                   emp_actions.conformidade_empresa(sessao, PLATAFORMA, CNPJ))
     regras = {(d["criterio"], d["regra"]) for d in emp["geral"]["descontos"]}
     assert ("validade", "documento_vencido") in regras and ("consistencia", "campo_divergente") in regras
     assert emp["geral"]["pendencias"], "o cenário precisa exercitar as pendências"
@@ -313,18 +313,18 @@ def test_conformidade(cenario, empresa_sem_nada_analisavel, sessao):
     assert diverg["cpf"] != CPF  # CPF mascarado na resposta
 
     b = _confere("GET /empresas/{cnpj:path}/conformidade", f"/empresas/{CNPJ_B}/conformidade", ConformidadeEmpresaOut,
-                 emp_actions.conformidade_empresa(sessao, CNPJ_B))
+                 emp_actions.conformidade_empresa(sessao, PLATAFORMA, CNPJ_B))
     assert b["geral"]["score"] is None and b["geral"]["provisorio"] is True
 
-    resumos = _confere("GET /empresas", "/empresas", EmpresaResumoOut, emp_actions.listar_empresas(sessao))
+    resumos = _confere("GET /empresas", "/empresas", EmpresaResumoOut, emp_actions.listar_empresas(sessao, PLATAFORMA))
     assert {CNPJ, CNPJ_B} <= {e["cnpj"] for e in resumos}
 
     corpo = _confere("GET /lotes/{lote_id}/conformidade", f"/lotes/{lote}/conformidade", ConformidadeLoteOut,
-                     emp_actions.conformidade_lote(sessao, lote))
+                     emp_actions.conformidade_lote(sessao, PLATAFORMA, lote))
     assert [s["documento"] for s in corpo["sem_empresa"]] == [ids[4]]
     assert corpo["empresas"][0]["documentos"] == sorted(ids[:4])
     _confere("GET /lotes/{lote_id}/conformidade", f"/lotes/{empresa_sem_nada_analisavel}/conformidade",
-             ConformidadeLoteOut, emp_actions.conformidade_lote(sessao, empresa_sem_nada_analisavel))
+             ConformidadeLoteOut, emp_actions.conformidade_lote(sessao, PLATAFORMA, empresa_sem_nada_analisavel))
 
 
 def test_analise_ponto(cenario, monkeypatch, sessao):
