@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_session
 from app.routers.auth.actions import UsuarioContexto, exigir_usuario
 from app.routers.auth.schemas import TokenOut
 from app.routers.convites import actions
+from app.routers.organizacoes.schemas import IdBanco
 from app.routers.convites.schemas import (
     AceiteIn, ConviteCriadoOut, ConviteOut, ConvitePublicoOut, NovoConvite)
 
@@ -23,6 +24,14 @@ def criar_convite(corpo: NovoConvite, usuario: UsuarioContexto = Depends(exigir_
 def listar_convites(usuario: UsuarioContexto = Depends(exigir_usuario), session: Session = Depends(get_session)):
     """Plataforma: todos. Admin de tomador/prestador: os criados por usuários da própria organização. Membro: 403."""
     return actions.listar(session, usuario)
+
+
+@router.delete("/convites/{convite_id}", status_code=204)
+def revogar_convite(convite_id: IdBanco, usuario: UsuarioContexto = Depends(exigir_usuario),
+                    session: Session = Depends(get_session)):
+    """Revoga um convite pendente (o token deixa de valer). Mesmo escopo de GET /convites; usado: 409."""
+    actions.revogar(session, usuario, convite_id)
+    return Response(status_code=204)
 
 
 @router_publico.get("/convites/{token}", response_model=ConvitePublicoOut)

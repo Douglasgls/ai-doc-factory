@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 from app.routers.comum import DataHora
 from app.routers.organizacoes import validations
@@ -50,6 +50,10 @@ class NovoContrato(BaseModel):
         if self.vigencia_inicio and self.vigencia_fim and self.vigencia_fim < self.vigencia_inicio:
             raise ValueError("vigencia_fim não pode ser anterior a vigencia_inicio")
         return self
+
+
+class AtivoIn(BaseModel):
+    ativo: StrictBool
 
 
 class TomadorOut(BaseModel):
