@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.api import app
+from conftest import cnpj_valido
 from test_conformidade_api import CPF1, CPF2, campos_pessoa, novo_lote  # noqa: F401  (novo_lote é fixture)
 
 client = TestClient(app)
@@ -49,11 +50,15 @@ def cen(orgs, novo_lote, auth_real):
         return lote, ids
 
     s = type("Cenario", (), {})()
+    s.contrato, s.lote_do_contrato, s.p = contrato, lote_do_contrato, p
+    s.orgs, s.ta, s.tb = orgs, ta, tb
     s.cnpj_p, s.cnpj_q = cnpj["p"], cnpj["q"]
     # contrato A-P: ASO em dia e holerite. Contrato B-P: ASO vencido (desconto que só B, P e a plataforma enxergam).
-    s.lote_ap, s.ids_ap = lote_do_contrato(contrato(ta, p), [
+    s.novo_lote = novo_lote
+    s.contrato_ap, s.contrato_bp = contrato(ta, p), contrato(tb, p)
+    s.lote_ap, s.ids_ap = lote_do_contrato(s.contrato_ap, [
         ("aso", "classificado", campos_pessoa(s.cnpj_p, CPF1)), ("holerite", "classificado", campos_pessoa(s.cnpj_p, CPF1))])
-    s.lote_bp, s.ids_bp = lote_do_contrato(contrato(tb, p), [
+    s.lote_bp, s.ids_bp = lote_do_contrato(s.contrato_bp, [
         ("aso", "classificado", campos_pessoa(s.cnpj_p, CPF2, data_exame="2000-01-01"))])
     s.lote_aq, s.ids_aq = lote_do_contrato(contrato(ta, q), [
         ("aso", "classificado", campos_pessoa(s.cnpj_q, CPF1))])
@@ -116,3 +121,70 @@ def test_plataforma_continua_vendo_tudo(cen):
     assert _docs(j) == _ids(cen.ids_ap, cen.ids_bp)
     assert client.get(f"/empresas/{cen.cnpj_q}/conformidade", headers=cen.h["plat"]).status_code == 200
     assert client.get(f"/lotes/{cen.lote_bp}/conformidade", headers=cen.h["plat"]).status_code == 200
+
+
+# ---------- regressões de escopo ----------
+
+def _geral(cen, quem, cnpj=None):
+    r = client.get(f"/empresas/{cnpj or cen.cnpj_p}/conformidade", headers=cen.h[quem])
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_pendencia_e_campo_faltando_em_outro_contrato_nao_afetam_o_tomador(cen):
+    antes = _geral(cen, "A")
+    cen.lote_do_contrato(cen.contrato_bp, [
+        ("desconhecido", "em_revisao", campos_pessoa(cen.cnpj_p, CPF2)),
+        ("holerite", "classificado", {"cnpj_prestadora": cen.cnpj_p, "distingue_prestadora": "true"})])
+    depois = _geral(cen, "A")
+    assert depois == antes
+    assert depois["geral"]["pendencias"] == antes["geral"]["pendencias"]
+    assert depois["geral"]["provisorio"] == antes["geral"]["provisorio"]
+    # sanidade: quem enxerga o contrato B-P vê o efeito (a pendência de revisão)
+    assert _geral(cen, "P")["geral"]["pendencias"] != antes["geral"]["pendencias"]
+
+
+def test_nome_divergente_do_mesmo_cpf_em_outro_contrato_nao_desconta_o_tomador(cen):
+    antes = _geral(cen, "A")
+    cen.lote_do_contrato(cen.contrato_bp, [
+        ("holerite", "classificado", campos_pessoa(cen.cnpj_p, CPF1, nome="Mario Souza Totalmente Outro"))])
+    depois = _geral(cen, "A")
+    assert depois == antes
+    assert not [d for d in depois["geral"]["descontos"] if d["regra"] == "campo_divergente"]
+    # sanidade: o prestador, que vê os dois contratos, enxerga a divergência
+    assert [d for d in _geral(cen, "P")["geral"]["descontos"] if d["regra"] == "campo_divergente"]
+
+
+def test_razao_social_de_outro_contrato_nao_muda_a_vista_pelo_tomador(cen):
+    antes = _geral(cen, "A")
+    assert antes["razao_social"] == "Alfa Ltda"
+    extra = [("holerite", "classificado", {**campos_pessoa(cen.cnpj_p, CPF2), "razao_social_prestadora": "Beta SA"})
+             for _ in range(5)]  # maioria no contrato B-P, para a razão social de P mudar se vazar
+    cen.lote_do_contrato(cen.contrato_bp, extra)
+    assert _geral(cen, "A")["razao_social"] == "Alfa Ltda"
+    assert _geral(cen, "A") == antes
+    assert _geral(cen, "P")["razao_social"] == "Beta SA"
+
+
+def test_404_de_empresa_fora_do_escopo_igual_ao_de_cnpj_inexistente(cen):
+    fora = client.get(f"/empresas/{cen.cnpj_q}/conformidade", headers=cen.h["B"])
+    inexistente = client.get(f"/empresas/{cnpj_valido(uuid.uuid4().int)}/conformidade", headers=cen.h["B"])
+    assert fora.status_code == inexistente.status_code == 404
+    assert fora.json() == inexistente.json()
+    assert cen.cnpj_q not in fora.text
+
+
+def test_lote_sem_contrato_e_contrato_inativo_nao_alteram_o_que_o_prestador_ve(cen):
+    antes = _geral(cen, "P")
+    # lote sem contrato com o mesmo CNPJ de P: só a plataforma o enxerga
+    novo = cen.novo_lote([("aso", "classificado", campos_pessoa(cen.cnpj_p, CPF1, data_exame="2000-01-01"))])
+    # contrato B2-P inativo, com documentos que dariam desconto
+    inativo = cen.orgs.db.execute(
+        "INSERT INTO contrato (tomador_id, prestador_id, ativo) VALUES (%s, %s, false) RETURNING id",
+        (cen.orgs.tomador(), cen.p)).fetchone()[0]
+    cen.orgs.registrar("contrato", inativo)
+    cen.lote_do_contrato(inativo, [("aso", "classificado", campos_pessoa(cen.cnpj_p, CPF2, data_exame="2000-01-01"))])
+    assert _geral(cen, "P") == antes
+    assert str(novo[1][0]) not in _geral(cen, "P")["por_documento"]
+    # sanidade: a plataforma vê o lote sem contrato
+    assert str(novo[1][0]) in _geral(cen, "plat")["por_documento"]
