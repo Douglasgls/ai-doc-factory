@@ -19,7 +19,7 @@ def _select_contrato():
                                  Convite.expira_em > func.now())
     acesso = case((tem_usuario, "ativo"), (tem_convite, "convite_pendente"), else_="sem_acesso")
     return (select(Contrato.id, Contrato.tomador_id, Contrato.prestador_id, Contrato.ativo, Contrato.vigencia_inicio,
-                   Contrato.vigencia_fim, Contrato.criado_em, Contrato.perfil_jornada, Tomador.nome, Tomador.ativo, Prestador.razao_social,
+                   Contrato.vigencia_fim, Contrato.criado_em, Contrato.perfil_jornada, Contrato.proprio, Tomador.nome, Tomador.ativo, Prestador.razao_social,
                    Prestador.cnpj, Prestador.ativo, acesso)
             .join(Tomador, Tomador.id == Contrato.tomador_id)
             .join(Prestador, Prestador.id == Contrato.prestador_id))
@@ -35,7 +35,7 @@ def _prestador(l) -> dict:
 
 def _contrato(l) -> dict:
     return dict(zip(("id", "tomador_id", "prestador_id", "ativo", "vigencia_inicio", "vigencia_fim", "criado_em",
-                     "perfil_jornada", "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj", "prestador_ativo",
+                     "perfil_jornada", "proprio", "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj", "prestador_ativo",
                      "acesso_prestador"), l))
 
 

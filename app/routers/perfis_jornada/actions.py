@@ -9,7 +9,6 @@ from app import ponto
 from app.escopo import filtro_contrato
 from app.models import Contrato, PerfilJornada, Prestador, Tomador
 from app.routers.auth.actions import UsuarioContexto
-from app.routers.empresas_proprias.actions import com_proprio
 from app.routers.organizacoes import actions as organizacoes
 from app.routers.perfis_jornada.schemas import PerfilEntrada
 
@@ -84,6 +83,5 @@ def associar_perfil(session: Session, contrato_id: int, perfil: str) -> dict:
                        .returning(Contrato.id)).first() is None:
         raise HTTPException(404, f"contrato {contrato_id} não encontrado")
     linha = session.execute(organizacoes._select_contrato().where(Contrato.id == contrato_id)).one()
-    resposta = com_proprio(session, [organizacoes._contrato(linha)])[0]
     session.commit()
-    return resposta
+    return organizacoes._contrato(linha)

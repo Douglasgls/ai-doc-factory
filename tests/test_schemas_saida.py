@@ -374,8 +374,8 @@ def test_analise_ponto(cenario, monkeypatch, sessao):
 
 
 def _contratos(sessao, *filtros):
-    """O que GET /contratos devolve: a listagem das actions mais `proprio` (empresas_proprias.com_proprio)."""
-    return propria_actions.com_proprio(sessao, org_actions.listar_contratos(sessao, *filtros, usuario=PLATAFORMA))
+    """O que GET /contratos devolve: a listagem das actions."""
+    return org_actions.listar_contratos(sessao, *filtros, usuario=PLATAFORMA)
 
 
 def test_organizacoes(orgs, sessao):

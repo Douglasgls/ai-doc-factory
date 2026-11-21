@@ -70,13 +70,3 @@ def cadastrar(session: Session, corpo: NovaEmpresaPropria, usuario: UsuarioConte
             "tomador": {"id": tomador_id, "cnpj": t_cnpj, "nome": t_nome},
             "prestador": {"id": prestador_id, "cnpj": p_cnpj, "nome": p_nome},
             "acesso": acesso, "convite": convite}
-
-
-def com_proprio(session: Session, contratos: list[dict]) -> list[dict]:
-    """Preenche `proprio` nos contratos montados por organizacoes.actions (que não o seleciona)."""
-    if contratos:
-        proprios = dict(session.execute(select(Contrato.id, Contrato.proprio)
-                                        .where(Contrato.id.in_([c["id"] for c in contratos]))).all())
-        for c in contratos:
-            c["proprio"] = proprios.get(c["id"], False)
-    return contratos
