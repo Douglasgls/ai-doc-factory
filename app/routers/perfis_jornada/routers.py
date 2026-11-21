@@ -34,6 +34,6 @@ def gravar_perfil(perfil: NomePerfil, corpo: PerfilEntrada, session: Session = D
 
 
 @router_empresa_propria.put("/contratos/{contrato_id}/perfil-jornada", response_model=ContratoOut)
-def associar_perfil(contrato_id: IdBanco, corpo: AssociacaoPerfil, _: int = Depends(perfil_de_contrato_proprio),
+def associar_perfil(contrato_id: IdBanco, corpo: AssociacaoPerfil, _: str = Depends(perfil_de_contrato_proprio),
                     session: Session = Depends(get_session)):
     return actions.associar_perfil(session, contrato_id, corpo.perfil)

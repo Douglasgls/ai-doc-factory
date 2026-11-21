@@ -216,10 +216,15 @@ def leitura_de_perfis_permitida(session: Session, usuario: UsuarioContexto) -> N
         raise HTTPException(403, _NEGADO_PERFIL)
 
 
-def perfil_de_contrato_proprio(contrato_id: int, usuario: UsuarioContexto = Depends(exigir_usuario),
-                               session: Session = Depends(get_session)) -> int:
-    """Dependência de PUT /contratos/{id}/perfil-jornada: plataforma ou admin do contrato próprio."""
-    contrato_proprio_do_admin(session, usuario, contrato_id)
+def perfil_de_contrato_proprio(contrato_id: str, usuario: UsuarioContexto = Depends(exigir_usuario),
+                               session: Session = Depends(get_session)) -> str:
+    """Dependência de PUT /contratos/{id}/perfil-jornada: plataforma ou admin do contrato próprio. O id chega como
+    texto para o 403 de quem não pode vir antes da validação do caminho (id malformado = 403, como inexistente)."""
+    try:
+        id_ = int(contrato_id)
+    except ValueError:
+        id_ = 0
+    contrato_proprio_do_admin(session, usuario, id_)
     session.commit()
     return contrato_id
 
