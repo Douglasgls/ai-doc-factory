@@ -10,6 +10,7 @@ import {
   shouldRefreshList,
   shouldWarnNetwork,
   trackedStatus,
+  lotesNovosDoServidor,
   type LoteSnapshot,
   type TrackedLote,
 } from './lotePollingLogic'
@@ -24,6 +25,8 @@ interface PollRun {
 }
 
 const SESSION_STORAGE_KEY = 'evidocs_tracked_lotes_v2'
+/** Quantos lotes recentes carregar do servidor. */
+const HISTORICO_LIMITE = 20
 const SESSION_STORAGE_KEY_LEGADO = 'evidocs_tracked_lotes_v1'
 /** Banco IndexedDB usado por versões anteriores para guardar arquivos; hoje só é apagado. */
 const IDB_NAME_LEGADO = 'evidocs_pending_uploads_db_v1'
@@ -141,7 +144,7 @@ function carregarLotesSessao(): TrackedLote[] {
  * Acompanha os lotes enviados nesta sessão do navegador em tempo real via SSE (Server-Sent Events + Redis Pub/Sub),
  * respeitando o limite de conexões simultâneas do navegador (MAX_CONCURRENT_SSE) com fallback automático para polling.
  */
-export function useLotePolling(onProgress: () => void | Promise<void>) {
+export function useLotePolling(onProgress: () => void | Promise<void>, autenticado: boolean = true) {
   const [lotes, setLotes] = useState<TrackedLote[]>(() => carregarLotesSessao())
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
   const runs = useRef(new Map<number, PollRun>())
@@ -154,6 +157,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
   const pickerAberto = useRef(false)
   const active = useRef(false)
   const resumedOnMount = useRef(false)
+  const lotesRef = useRef<TrackedLote[]>(lotes)
   const onProgressRef = useRef(onProgress)
 
   useEffect(() => {
@@ -664,6 +668,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
 
   // Persiste a lista de lotes no sessionStorage para sobreviver ao F5
   useEffect(() => {
+    lotesRef.current = lotes
     try {
       if (lotes.length === 0) {
         sessionStorage.removeItem(SESSION_STORAGE_KEY)
@@ -721,6 +726,36 @@ export function useLotePolling(onProgress: () => void | Promise<void>) {
       }
     })
   }, [lotes, patch, startPolling])
+
+  // Histórico do servidor: ao montar já autenticado e depois do login. O sessionStorage é só cache da primeira pintura.
+  useEffect(() => {
+    if (!autenticado) return
+    let cancelado = false
+    apiService
+      .listLotes({ limite: HISTORICO_LIMITE })
+      .then(({ itens }) => {
+        if (cancelado || !active.current) return
+        const novos = lotesNovosDoServidor(lotesRef.current, itens)
+        if (novos.length === 0) return
+        setLotes((prev) => {
+          const ja = new Set(prev.map((l) => l.id))
+          return [...prev, ...novos.filter((l) => !ja.has(l.id))]
+        })
+        novos.forEach((lote) => {
+          if (trackedStatus(lote) === 'processando') {
+            startPolling(lote.id, {
+              estado: lote.estado,
+              docsPendentes: lote.docsPendentes,
+              etapaAtual: lote.etapaAtual ?? lote.estado,
+            })
+          }
+        })
+      })
+      .catch(() => undefined) // histórico é complemento: sem ele, vale o cache e os envios desta aba
+    return () => {
+      cancelado = true
+    }
+  }, [autenticado, startPolling])
 
   return { lotes, track, uploadFiles, recheck, retry, cancel, dismiss, dismissAcaoErro, clearFinished }
 }
