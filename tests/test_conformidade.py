@@ -114,6 +114,37 @@ def test_em_revisao_com_tipo_sugerido_cobre_so_esse_tipo():
     assert g["provisorio"] is True and g["score"] == 90
 
 
+def _por_tipo_com_revisao(tipo_revisao):
+    docs, campos = lote(OBRIG, pessoa())
+    nao, cn = lote([tipo_revisao], pessoa(), primeiro_id=50, estado="em_revisao")
+    base = avaliar(docs, campos)["por_tipo"]
+    return base, avaliar(docs + nao, {**campos, **cn})["por_tipo"]
+
+
+def test_por_tipo_com_doc_do_mesmo_tipo_em_revisao_fica_provisorio_com_pendencia():
+    base, r = _por_tipo_com_revisao("holerite")
+    h = r["holerite"]
+    assert base["holerite"]["provisorio"] is False and h["provisorio"] is True
+    assert [(p["documento"], p["tipo"]) for p in h["pendencias"]] == [(50, "holerite")]
+    assert "não analisado" in h["pendencias"][0]["motivo"]
+    assert (h["score"], h["score_bruto"]) == (base["holerite"]["score"], base["holerite"]["score_bruto"])  # pendente nunca vale zero
+
+
+def test_por_tipo_em_revisao_desconhecido_torna_qualquer_tipo_provisorio():
+    base, r = _por_tipo_com_revisao("desconhecido")
+    for t in OBRIG:
+        assert r[t]["provisorio"] is True and r[t]["score"] == base[t]["score"]
+        assert [p["documento"] for p in r[t]["pendencias"]] == [50]
+
+
+def test_por_tipo_em_revisao_de_outro_tipo_conhecido_nao_torna_provisorio():
+    base, r = _por_tipo_com_revisao("holerite")
+    for t in OBRIG:
+        if t != "holerite":
+            assert r[t]["provisorio"] is False and r[t]["pendencias"] == []
+            assert r[t]["score"] == base[t]["score"]
+
+
 def test_pendente_em_uma_empresa_nao_blinda_a_outra_nem_documento_sem_empresa_afeta():
     da, ca = lote([t for t in OBRIG if t != "folha_ponto"], pessoa())
     db, cb = lote([t for t in OBRIG if t != "folha_ponto"], pessoa(cnpj=CNPJ_B, cpf=CPF2), primeiro_id=10)
