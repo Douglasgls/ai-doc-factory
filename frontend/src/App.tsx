@@ -474,12 +474,11 @@ export function App() {
       if (Object.keys(camposPayload).length > 0) {
         await apiService.updateDocumentCampos(
           Number(docId),
-          camposPayload,
-          'Revisor Humano'
+          camposPayload
         )
       }
 
-      await apiService.submitReview(Number(docId), targetSlug, 'Revisor Humano')
+      await apiService.submitReview(Number(docId), targetSlug)
 
       // Optimistically remove from pending queue and refresh full state from backend
       setReviewPendingDocs((prev) => prev.filter((d) => d.id !== docId))

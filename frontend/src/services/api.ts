@@ -640,11 +640,11 @@ export const apiService = {
   /**
    * Submete a revisão de um documento (estado 'em_revisao' ou 'revisado')
    */
-  submitReview: async (documentoId: number, tipo: string, revisor: string): Promise<RevisaoResultResponse> => {
+  submitReview: async (documentoId: number, tipo: string): Promise<RevisaoResultResponse> => {
     const response = await authFetch(`/documentos/${documentoId}/revisao`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo, revisor }),
+      body: JSON.stringify({ tipo }),
     });
 
     if (!response.ok) {
@@ -657,11 +657,11 @@ export const apiService = {
   /**
    * Atualiza o tipo de um documento em qualquer estado exceto 'segmentado' e 'erro'
    */
-  updateDocumentTipo: async (documentoId: number, tipo: string, revisor: string): Promise<DocumentoResponse> => {
+  updateDocumentTipo: async (documentoId: number, tipo: string): Promise<DocumentoResponse> => {
     const response = await authFetch(`/documentos/${documentoId}/tipo`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo, revisor }),
+      body: JSON.stringify({ tipo }),
     });
 
     if (!response.ok) {
@@ -676,13 +676,12 @@ export const apiService = {
    */
   updateDocumentCampos: async (
     documentoId: number,
-    campos: Record<string, string | null>,
-    revisor: string
+    campos: Record<string, string | null>
   ): Promise<DocumentoResponse> => {
     const response = await authFetch(`/documentos/${documentoId}/campos`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campos, revisor }),
+      body: JSON.stringify({ campos }),
     });
 
     if (!response.ok) {
