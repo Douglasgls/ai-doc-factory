@@ -15,6 +15,8 @@ Convenções (documentadas aqui para o teste ser determinístico):
 - Vencer na data de referência ainda conta como válido (vence ao fim do dia).
 - `provisorio` só com documento não analisado, obrigatório pendente ou critério aplicável inteiro pendente.
   Campo ausente aparece nas pendências, mas não torna o score provisório.
+- No nível por tipo, documento em revisão só conta como pendente se puder ser desse tipo (tipo sugerido igual
+  ou desconhecido); a pendência torna o score do tipo provisório, sem mudar a nota. O nível por documento não tem pendentes.
 - Consistência: razão social é comparada entre os documentos da empresa (o CNPJ é a chave que os reúne);
   nome, matrícula e data de admissão só dentro do mesmo CPF válido. Valor ausente não é divergência.
 """
@@ -333,8 +335,9 @@ def calcular_empresa(todos: list[dict], campos: dict, ref: date) -> dict:
     geral = _avaliar(docs, campos, ref, grupos, faltas, OBRIGATORIOS, True, escondido, pendentes)
     por_tipo = {}
     for t in sorted({d["tipo"] for d in docs} | set(OBRIGATORIOS)):
+        possiveis = [p for p in pendentes if p["tipo"] not in config.TIPOS or p["tipo"] == t]
         por_tipo[t] = _avaliar([d for d in docs if d["tipo"] == t], campos, ref, grupos, faltas,
-                               (t,) if t in OBRIGATORIOS else (), t in VALIDADE, escondido)
+                               (t,) if t in OBRIGATORIOS else (), t in VALIDADE, escondido, possiveis)
     por_doc = {d["id"]: _avaliar([d], campos, ref, grupos, faltas, (), d["tipo"] in VALIDADE) for d in docs}
     razoes = Counter(campos.get(d["id"], {}).get("razao_social_prestadora") for d in docs)
     razao = next((r for r, _ in razoes.most_common() if r), None)
