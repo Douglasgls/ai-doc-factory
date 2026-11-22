@@ -96,6 +96,53 @@ def motivo_recusa_convite(session: Session, usuario: UsuarioContexto, nivel: str
     return _NEGADO_CONVITE
 
 
+def _condicao_da_organizacao(usuario: UsuarioContexto, coluna_tomador, coluna_prestador) -> ColumnElement[bool] | None:
+    """Condição "pertence à organização de quem pede" para admins; plataforma vê tudo. None = sem permissão (403):
+    membro e qualquer caso sem vínculo."""
+    if usuario.nivel == "plataforma":
+        return true()
+    if usuario.papel != "admin":
+        return None
+    if usuario.nivel == "tomador" and usuario.tomador_id is not None:
+        return coluna_tomador == usuario.tomador_id
+    if usuario.nivel == "prestador" and usuario.prestador_id is not None:
+        return coluna_prestador == usuario.prestador_id
+    return None
+
+
+def filtro_usuario_gerenciavel(usuario: UsuarioContexto) -> ColumnElement[bool] | None:
+    """Usuários que `usuario` lista e gerencia: plataforma, todos; admin de tomador/prestador, os da própria
+    organização. None = sem permissão (403)."""
+    return _condicao_da_organizacao(usuario, Usuario.tomador_id, Usuario.prestador_id)
+
+
+def filtro_convite_gerenciavel(usuario: UsuarioContexto) -> ColumnElement[bool] | None:
+    """Convites que `usuario` lista e revoga: plataforma, todos; admin, os criados por usuários da própria
+    organização. None = sem permissão (403)."""
+    if usuario.nivel == "plataforma":
+        return true()
+    condicao = filtro_usuario_gerenciavel(usuario)
+    return None if condicao is None else Convite.criado_por.in_(select(Usuario.id).where(condicao))
+
+
+def motivo_recusa_gestao_usuario(session: Session, usuario: UsuarioContexto, alvo_id: int,
+                                 ativo: bool) -> tuple[int, str] | None:
+    """Único lugar que decide quem ativa/desativa quem. None = permitido; senão (status, motivo).
+
+    - plataforma: qualquer usuário; admin de tomador/prestador: só os da PRÓPRIA organização; membro: 403.
+    - alvo inexistente ou fora do escopo: 404 (não revela existência).
+    - ninguém se desativa: 409 (para não se trancar fora)."""
+    condicao = filtro_usuario_gerenciavel(usuario)
+    if condicao is None:
+        return 403, "apenas administradores gerenciam usuários"
+    if not _id_valido(alvo_id) or session.execute(
+            select(Usuario.id).where(Usuario.id == alvo_id, condicao)).first() is None:
+        return 404, "usuário não encontrado"
+    if alvo_id == usuario.id and not ativo:
+        return 409, "você não pode desativar a si mesmo"
+    return None
+
+
 def pode_convidar(session: Session, usuario: UsuarioContexto, nivel: str, papel: str,
                   tomador_id: int | None, prestador_id: int | None) -> bool:
     return motivo_recusa_convite(session, usuario, nivel, papel, tomador_id, prestador_id) is None
