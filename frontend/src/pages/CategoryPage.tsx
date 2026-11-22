@@ -29,6 +29,8 @@ interface CategoryPageProps {
   onSelectCategory?: (category: DocumentCategory) => void
   documents: DetailedDocument[]
   onBack: () => void
+  /** Empresa solo: o início se chama "Seus documentos". */
+  empresaPropria?: boolean
 }
 
 const CategoryPage: React.FC<CategoryPageProps> = ({
@@ -37,6 +39,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   onSelectCategory,
   documents,
   onBack,
+  empresaPropria = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedPerson, setSelectedPerson] = useState('todas')
@@ -296,7 +299,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
           onClick={onBack}
           className="hover:text-[#2d0a33] dark:hover:text-white transition-colors cursor-pointer"
         >
-          Documentos
+          {empresaPropria ? 'Seus documentos' : 'Documentos'}
         </button>
         <span>&gt;</span>
         <span className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">

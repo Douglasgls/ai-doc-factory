@@ -1,11 +1,14 @@
-"""Perfis de jornada (Goal 6) e a associação ao contrato. Só a plataforma (app/api.py). A herança e a vigência por
+"""Perfis de jornada (Goal 6) e a associação ao contrato. Gravar perfil: só a plataforma (app/api.py); ler perfis e
+escolher o do contrato: também o admin de empresa própria (app/escopo.py). A herança e a vigência por
 data ficam em app/ponto.py; aqui só se grava e se lê."""
 from fastapi import HTTPException
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app import ponto
-from app.models import Contrato, PerfilJornada
+from app.escopo import filtro_contrato
+from app.models import Contrato, PerfilJornada, Prestador, Tomador
+from app.routers.auth.actions import UsuarioContexto
 from app.routers.organizacoes import actions as organizacoes
 from app.routers.perfis_jornada.schemas import PerfilEntrada
 
@@ -32,9 +35,11 @@ def _perfil(session: Session, perfil: str) -> dict:
     }
 
 
-def listar_perfis(session: Session) -> list[dict]:
-    contratos = {nome: n for nome, n in session.execute(
-        select(Contrato.perfil_jornada, func.count()).group_by(Contrato.perfil_jornada))}
+def listar_perfis(session: Session, usuario: UsuarioContexto) -> list[dict]:
+    consulta = (select(Contrato.perfil_jornada, func.count())
+                .join(Tomador, Tomador.id == Contrato.tomador_id).join(Prestador, Prestador.id == Contrato.prestador_id)
+                .where(filtro_contrato(usuario)))
+    contratos = {nome: n for nome, n in session.execute(consulta.group_by(Contrato.perfil_jornada))}
     linhas = session.execute(
         select(PerfilJornada.perfil, func.count(func.distinct(PerfilJornada.parametro)))
         .group_by(PerfilJornada.perfil).order_by(PerfilJornada.perfil))

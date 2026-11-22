@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.escopo import prestador_tem_convite_pendente, prestador_tem_usuario_ativo
+from app.escopo import exigir_prestador_sem_empresa_propria, prestador_tem_convite_pendente, prestador_tem_usuario_ativo
 from app.models import Contrato, Prestador, Tomador
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.convites.actions import criar_na_transacao
@@ -47,6 +47,7 @@ def cadastrar(session: Session, corpo: NovaTerceirizada, usuario: UsuarioContext
     prestador_id, cnpj, razao_social, prestador_ativo = _prestador_travado(session, corpo.cnpj, corpo.razao_social)
     if not prestador_ativo:
         raise HTTPException(409, "terceirizada desativada")
+    exigir_prestador_sem_empresa_propria(session, prestador_id)
     contrato = session.execute(
         pg_insert(Contrato).values(tomador_id=tomador_id, prestador_id=prestador_id)
         .on_conflict_do_nothing(index_elements=[Contrato.tomador_id, Contrato.prestador_id])

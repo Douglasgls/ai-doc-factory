@@ -20,6 +20,8 @@ interface HeaderProps {
   showPerfis?: boolean
   /** Administrador do cliente (tomador) cadastra terceirizadas. */
   showTerceirizadas?: boolean
+  /** Empresa solo: rótulos sem termos de terceirização. */
+  empresaPropria?: boolean
   /** Administradores de qualquer nível veem a equipe e convidam colegas. */
   showEquipe?: boolean
   /** Tomador é somente leitura: sem botão Enviar nem acompanhamento de envios. */
@@ -51,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
   showOrganizacoes = false,
   showPerfis = false,
   showTerceirizadas = false,
+  empresaPropria = false,
   showEquipe = false,
   mostrarEnvio = true,
   // globalSearch,
@@ -82,8 +85,8 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('documentos')}
-              title="Documentos"
-              aria-label="Documentos"
+              title={empresaPropria ? 'Seus documentos' : 'Documentos'}
+              aria-label={empresaPropria ? 'Seus documentos' : 'Documentos'}
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                 activeTab === 'documentos'
                   ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -91,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span className="hidden lg:inline">Documentos</span>
+              <span className="hidden lg:inline">{empresaPropria ? 'Seus documentos' : 'Documentos'}</span>
             </button>
 
             {showOrganizacoes && (

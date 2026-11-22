@@ -12,6 +12,7 @@ import { extraEmailClasses, validarEmail } from '../utils/convites'
 import { BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 import { CadastroTerceirizadaForm } from '../components/CadastroTerceirizadaForm'
+import { CadastroEmpresaPropriaForm } from '../components/CadastroEmpresaPropriaForm'
 import {
   AcessoSelo,
   ConviteGeradoCard,
@@ -586,6 +587,8 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                 onCadastrada={carregar}
                 onTrocarAbaTomadores={() => trocarAba('tomadores')}
               />
+
+              <CadastroEmpresaPropriaForm onCadastrada={carregar} />
 
               <ConviteGeradoCard reenvio={reenvio} />
 

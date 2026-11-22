@@ -35,6 +35,8 @@ interface Props {
   cnpj: string
   razaoSocial: string
   onClose: () => void
+  /** Empresa solo: textos sem o termo de terceirização ("prestadora", "Solicite"). */
+  empresaPropria?: boolean
 }
 
 const ROTULO_CRITERIO_CARD: Record<CriterioChave, string> = {
@@ -139,7 +141,7 @@ const AnelNota: React.FC<{ score: number | null; faixa: CorFaixa }> = ({ score, 
   )
 }
 
-const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose }) => {
+const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose, empresaPropria = false }) => {
   const [dados, setDados] = useState<ConformidadeEmpresa | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [rotulos, setRotulos] = useState<Rotulos>({})
@@ -284,7 +286,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
           vencidos.length === 1
             ? '1 documento obrigatório está vencido'
             : `${vencidos.length} documentos obrigatórios estão vencidos`,
-        subtituloHero: `Solicite a renovação dos documentos vencidos e envie um novo lote.${sufixoEmAnalise}`,
+        subtituloHero: `${empresaPropria ? 'Renove os documentos vencidos' : 'Solicite a renovação dos documentos vencidos'} e envie um novo lote.${sufixoEmAnalise}`,
       }
     }
 
@@ -319,9 +321,9 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
     return {
       etiquetaHero: etiqueta,
       tituloHero: `${g.descontos.length} ${g.descontos.length === 1 ? 'ponto exige atenção' : 'pontos exigem atenção'}`,
-      subtituloHero: gerarResumo(dados, rotulos),
+      subtituloHero: gerarResumo(dados, rotulos, empresaPropria),
     }
-  }, [ausentes.length, dados, divergentes.length, g, qtdPendenciasRevisao, rotulos, vencidos.length])
+  }, [ausentes.length, dados, divergentes.length, empresaPropria, g, qtdPendenciasRevisao, rotulos, vencidos.length])
 
   // Texto natural para o banner amarelo ("Este resultado ainda pode mudar")
   const textoBannerProvisorio = useMemo(() => {
@@ -355,7 +357,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
         chave: 'ausentes',
         icone: 'arquivo',
         cor: 'vermelho',
-        titulo: 'Solicite os documentos que faltam',
+        titulo: empresaPropria ? 'Envie os documentos que faltam' : 'Solicite os documentos que faltam',
         descricao: `${capitalizarFrase(nomes)}.`,
         badge: `${ausentes.length} ${ausentes.length === 1 ? 'documento' : 'documentos'}`,
       })
@@ -398,14 +400,14 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
         chave: 'vencidos',
         icone: 'alerta',
         cor: 'vermelho',
-        titulo: 'Solicite a renovação dos vencidos',
+        titulo: empresaPropria ? 'Renove os documentos vencidos' : 'Solicite a renovação dos vencidos',
         descricao: `${capitalizarFrase(listaPt(detalhes))}.`,
         badge: `${vencidos.length} ${vencidos.length === 1 ? 'vencido' : 'vencidos'}`,
       })
     }
 
     if (divergentes.length > 0) {
-      const campos = [...new Set(divergentes.map((d) => rotuloCampo(d.campo)))]
+      const campos = [...new Set(divergentes.map((d) => rotuloCampo(d.campo, empresaPropria)))]
       lista.push({
         chave: 'divergentes',
         icone: 'alerta',
@@ -417,7 +419,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose 
     }
 
     return lista
-  }, [ausentes, divergentes, g, qtdPendenciasRevisao, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio, vencidos])
+  }, [ausentes, divergentes, empresaPropria, g, qtdPendenciasRevisao, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio, vencidos])
 
   // Fórmula e explicação do "Cálculo atual"
   const { textoCalculo, formulaCalculo } = useMemo(() => {

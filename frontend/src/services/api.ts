@@ -350,6 +350,8 @@ export interface Contrato {
   prestador_ativo: boolean;
   acesso_prestador?: 'ativo' | 'convite_pendente' | 'sem_acesso';
   perfil_jornada: string;
+  /** Empresa solo: o mesmo CNPJ é tomador e prestador (sem terceirização). */
+  proprio?: boolean;
 }
 
 export interface PerfilJornadaResumo {
@@ -435,6 +437,18 @@ export interface NovaTerceirizada {
 export interface TerceirizadaCadastrada {
   contrato: { id: number; ativo: boolean };
   prestador: { id: number; cnpj: string; razao_social: string };
+  acesso: 'convite_criado' | 'convite_pendente' | 'ja_tem_acesso';
+  convite: { id: number; email: string; expira_em: string; token: string } | null;
+}
+export interface NovaEmpresaPropria {
+  cnpj: string;
+  razao_social: string;
+  email_admin: string;
+}
+export interface EmpresaPropriaCadastrada {
+  contrato: { id: number; ativo: boolean; proprio: boolean };
+  tomador: { id: number; cnpj: string; nome: string };
+  prestador: { id: number; cnpj: string; nome: string };
   acesso: 'convite_criado' | 'convite_pendente' | 'ja_tem_acesso';
   convite: { id: number; email: string; expira_em: string; token: string } | null;
 }
@@ -944,6 +958,18 @@ export const apiService = {
     });
     if (!response.ok) {
       throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar terceirizada'));
+    }
+    return response.json();
+  },
+
+  cadastrarEmpresaPropria: async (dados: NovaEmpresaPropria): Promise<EmpresaPropriaCadastrada> => {
+    const response = await authFetch(`/empresas-proprias`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar empresa própria'));
     }
     return response.json();
   },

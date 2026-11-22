@@ -81,6 +81,7 @@ class ContratoOut(BaseModel):
     vigencia_fim: date | None
     criado_em: DataHora
     perfil_jornada: str  # perfil de jornada usado na análise de ponto dos lotes do contrato
+    proprio: bool  # empresa solo: tomador e prestador são a mesma empresa (sem terceirização)
     tomador_nome: str
     tomador_ativo: bool
     prestador_razao_social: str

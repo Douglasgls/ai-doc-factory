@@ -228,3 +228,67 @@ def documento_para_escrita(documento_id: int, usuario: UsuarioContexto = Depends
 
 # Dependências que fecham o acesso por recurso; a varredura de rotas exige uma delas em toda rota com id na URL.
 DEPENDENCIAS_DE_RECURSO = (lote_para_leitura, lote_para_escrita, documento_para_leitura, documento_para_escrita)
+
+
+# ---------- perfil de jornada da empresa própria (empresa solo) ----------
+
+_NEGADO_PERFIL = "apenas a plataforma ou o administrador de uma empresa própria"
+
+
+def _eh_admin_de_prestador(usuario: UsuarioContexto) -> bool:
+    return usuario.nivel == "prestador" and usuario.papel == "admin" and usuario.prestador_id is not None
+
+
+def contrato_proprio_do_admin(session: Session, usuario: UsuarioContexto, contrato_id: int) -> None:
+    """Quem pode escolher o perfil de jornada de um contrato: a plataforma, ou o ADMIN de nível prestador cujo contrato
+    (ativo, no seu escopo) é `proprio`. Todo o resto recebe o mesmo 403: membro, tomador, contrato de outro, contrato
+    não próprio e contrato inexistente (assim a resposta não revela se o id existe)."""
+    if usuario.nivel == "plataforma":
+        return
+    if not _eh_admin_de_prestador(usuario) or not _id_valido(contrato_id) or session.execute(
+            select(Contrato.id).join(Tomador, Tomador.id == Contrato.tomador_id)
+            .join(Prestador, Prestador.id == Contrato.prestador_id)
+            .where(Contrato.id == contrato_id, Contrato.proprio, filtro_contrato(usuario))).first() is None:
+        raise HTTPException(403, _NEGADO_PERFIL)
+
+
+def leitura_de_perfis_permitida(session: Session, usuario: UsuarioContexto) -> None:
+    """Perfis são só leitura fora da plataforma: o admin de uma empresa própria os lê para escolher um (403 aos demais)."""
+    if usuario.nivel == "plataforma":
+        return
+    if not _eh_admin_de_prestador(usuario) or session.execute(
+            select(Contrato.id).join(Tomador, Tomador.id == Contrato.tomador_id)
+            .join(Prestador, Prestador.id == Contrato.prestador_id)
+            .where(Contrato.proprio, filtro_contrato(usuario)).limit(1)).first() is None:
+        raise HTTPException(403, _NEGADO_PERFIL)
+
+
+def perfil_de_contrato_proprio(contrato_id: str, usuario: UsuarioContexto = Depends(exigir_usuario),
+                               session: Session = Depends(get_session)) -> str:
+    """Dependência de PUT /contratos/{id}/perfil-jornada: plataforma ou admin do contrato próprio. O id chega como
+    texto para o 403 de quem não pode vir antes da validação do caminho (id malformado = 403, como inexistente)."""
+    try:
+        id_ = int(contrato_id)
+    except ValueError:
+        id_ = 0
+    contrato_proprio_do_admin(session, usuario, id_)
+    session.commit()
+    return contrato_id
+
+
+def leitura_de_perfis(usuario: UsuarioContexto = Depends(exigir_usuario),
+                      session: Session = Depends(get_session)) -> UsuarioContexto:
+    """Dependência de GET /perfis-jornada e GET /perfis-jornada/{perfil}."""
+    leitura_de_perfis_permitida(session, usuario)
+    session.commit()
+    return usuario
+
+
+def exigir_prestador_sem_empresa_propria(session: Session, prestador_id: int) -> None:
+    """409 se o prestador tem contrato próprio: um contrato com outro tomador faria o admin da empresa própria ver
+    os lotes dele. Trava a linha do prestador (a mesma trava do cadastro de empresa própria), então a checagem vale
+    até o commit de quem chama, mesmo com criação simultânea."""
+    session.execute(select(Prestador.id).where(Prestador.id == prestador_id).with_for_update(key_share=True)).all()
+    if session.execute(select(Contrato.id).where(Contrato.prestador_id == prestador_id, Contrato.proprio).limit(1)
+                       ).first():
+        raise HTTPException(409, "prestador é uma empresa própria; não aceita contrato com outro tomador")

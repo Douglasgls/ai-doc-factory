@@ -149,7 +149,7 @@ def test_contrato_cria_e_lista_com_dados_para_seletor(criar):
     assert r.status_code == 201
     corpo = r.json()
     assert set(corpo) == {"id", "tomador_id", "prestador_id", "ativo", "vigencia_inicio", "vigencia_fim", "criado_em",
-                          "perfil_jornada", "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj",
+                          "perfil_jornada", "proprio", "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj",
                           "prestador_ativo", "acesso_prestador"}
     assert corpo["ativo"] is True and corpo["vigencia_inicio"] == "2026-01-01"
     assert corpo["vigencia_fim"] == "2026-12-31"

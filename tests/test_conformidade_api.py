@@ -146,6 +146,14 @@ def test_texto_do_documento_nao_fecha_o_bloco_nem_vira_instrucao():
     assert p.rstrip().endswith(prompts.FIM_TEXTO)
 
 
+def test_prompt_de_extracao_define_prestadora_como_empregadora_inclusive_sem_tomadora():
+    assert prompts.VERSAO_PROMPT_EXTRACAO == "gemini-extracao-v3"
+    p = prompts.prompt_extracao("holerite", "texto")
+    assert "EMPREGADORA do funcionário, terceirizada ou não" in p
+    assert "único empregador e nenhuma tomadora" in p
+    assert "dado não confiável" in p and p.rstrip().endswith(prompts.FIM_TEXTO)  # a defesa contra o texto segue
+
+
 @pytest.mark.parametrize("falha", ["rede", "formato"])
 def test_falha_do_gemini_nao_trava_e_deixa_campo_ausente(novo_lote, monkeypatch, falha):
     _, (doc,) = novo_lote([("aso", "classificado", {})])

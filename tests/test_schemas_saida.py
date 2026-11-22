@@ -30,6 +30,8 @@ from app.routers.convites.schemas import ConviteCriadoOut, ConviteOut, ConvitePu
 from app.routers.documentos import actions as doc_actions
 from app.routers.documentos.schemas import AnalisePontoOut, DocumentoOut, DocumentosAgrupadosOut
 from app.routers.empresas import actions as emp_actions
+from app.routers.empresas_proprias import actions as propria_actions
+from app.routers.empresas_proprias.schemas import EmpresaPropriaOut
 from app.routers.empresas.schemas import ConformidadeEmpresaOut, ConformidadeLoteOut, EmpresaResumoOut
 from app.routers.lotes import actions as lote_actions
 from app.routers.lotes.schemas import LoteCriadoOut, LoteOut, LotesListadosOut
@@ -388,6 +390,11 @@ def test_analise_ponto(cenario, monkeypatch, sessao):
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto
 
 
+def _contratos(sessao, *filtros):
+    """O que GET /contratos devolve: a listagem das actions."""
+    return org_actions.listar_contratos(sessao, *filtros, usuario=PLATAFORMA)
+
+
 def test_organizacoes(orgs, sessao):
     def achar(itens, id_):
         return next(i for i in itens if i["id"] == id_)
@@ -409,10 +416,10 @@ def test_organizacoes(orgs, sessao):
                                         "vigencia_inicio": "2026-01-01"})
     contrato = r.json()["id"]
     orgs.registrar("contrato", contrato)
-    _confere_resposta("POST /contratos", r, achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut, status=201)
-    _confere("GET /contratos", "/contratos", ContratoOut, org_actions.listar_contratos(sessao, usuario=PLATAFORMA))
+    _confere_resposta("POST /contratos", r, achar(_contratos(sessao), contrato), ContratoOut, status=201)
+    _confere("GET /contratos", "/contratos", ContratoOut, _contratos(sessao))
     filtrados = _confere("GET /contratos", f"/contratos?tomador_id={tomador}&prestador_id={prestador}", ContratoOut,
-                         org_actions.listar_contratos(sessao, tomador, prestador, usuario=PLATAFORMA))
+                         _contratos(sessao, tomador, prestador))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
     # ativar/desativar (PATCH {ativo}); a resposta tem o formato da listagem
@@ -440,9 +447,9 @@ def test_organizacoes(orgs, sessao):
                  perfil_actions.obter_perfil(sessao, "clt_padrao"))
         r = client.put(f"/contratos/{contrato}/perfil-jornada", json={"perfil": perfil})
         _confere_resposta("PUT /contratos/{contrato_id}/perfil-jornada", r,
-                          achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut)
+                          achar(_contratos(sessao), contrato), ContratoOut)
         assert r.json()["perfil_jornada"] == perfil
-        _confere("GET /perfis-jornada", "/perfis-jornada", PerfilResumoOut, perfil_actions.listar_perfis(sessao))
+        _confere("GET /perfis-jornada", "/perfis-jornada", PerfilResumoOut, perfil_actions.listar_perfis(sessao, PLATAFORMA))
     finally:
         orgs.db.execute("DELETE FROM perfil_jornada WHERE perfil = %s", (perfil,))
 
@@ -500,6 +507,32 @@ def test_convites(auth_real, sessao):
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email,))
             conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
+
+
+def test_empresas_proprias(auth_real, orgs, monkeypatch):
+    sufixo = uuid.uuid4().hex[:8]
+    email_plat, email_admin = f"schemas-plat-{sufixo}@exemplo.invalid", f"schemas-solo-{sufixo}@exemplo.invalid"
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        uid = conn.execute("INSERT INTO usuario (email, nome, nivel, papel) VALUES (%s, 'Plat Schemas', 'plataforma', "
+                           "'admin') RETURNING id", (email_plat,)).fetchone()[0]
+    h = {"Authorization": "Bearer " + auth_actions.emitir_token(auth_actions.UsuarioContexto(
+        id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
+        prestador_id=None))["access_token"]}
+    gravado = []
+    real = propria_actions.cadastrar
+    monkeypatch.setattr(propria_actions, "cadastrar", lambda *a, **k: gravado.append(real(*a, **k)) or gravado[-1])
+    try:
+        r = client.post("/empresas-proprias", headers=h, json={
+            "cnpj": "11.222.333/0001-81", "razao_social": "Schemas " + sufixo, "email_admin": email_admin})
+        orgs.registrar("tomador", r.json()["tomador"]["id"])
+        orgs.registrar("prestador", r.json()["prestador"]["id"])
+        orgs.registrar("contrato", r.json()["contrato"]["id"])
+        corpo = _confere_resposta("POST /empresas-proprias", r, gravado[0], EmpresaPropriaOut, status=201)
+        assert corpo["acesso"] == "convite_criado" and corpo["convite"]["token"] and corpo["contrato"]["proprio"]
+    finally:
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email_admin,))
+            conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
 
 
 def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch, sessao):
@@ -583,6 +616,7 @@ COMPARACOES = {
     "GET /perfis-jornada/{perfil}": ["test_organizacoes"],
     "PUT /perfis-jornada/{perfil}": ["test_organizacoes"],
     "PUT /contratos/{contrato_id}/perfil-jornada": ["test_organizacoes"],
+    "POST /empresas-proprias": ["test_empresas_proprias"],
     "GET /usuarios": ["test_terceirizadas_e_usuarios"],
     "PATCH /usuarios/{usuario_id}": ["test_terceirizadas_e_usuarios"],
     "PATCH /tomadores/{tomador_id}": ["test_organizacoes"],

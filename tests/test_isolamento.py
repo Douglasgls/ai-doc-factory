@@ -42,10 +42,12 @@ EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas n
     ("POST", "/tomadores"): "plataforma", ("GET", "/tomadores"): "plataforma",
     ("POST", "/prestadores"): "plataforma", ("GET", "/prestadores"): "plataforma",
     ("POST", "/contratos"): "plataforma",
+    ("POST", "/empresas-proprias"): "plataforma", ("PUT", "/perfis-jornada/{perfil}"): "plataforma",
     ("PATCH", "/tomadores/{tomador_id}"): "plataforma", ("PATCH", "/prestadores/{prestador_id}"): "plataforma",
     ("PATCH", "/contratos/{contrato_id}"): "plataforma",
-    ("GET", "/perfis-jornada"): "plataforma", ("GET", "/perfis-jornada/{perfil}"): "plataforma",
-    ("PUT", "/perfis-jornada/{perfil}"): "plataforma", ("PUT", "/contratos/{contrato_id}/perfil-jornada"): "plataforma",
+    # plataforma ou admin de empresa própria (escopo.leitura_de_perfis / perfil_de_contrato_proprio)
+    ("GET", "/perfis-jornada"): "perfil", ("GET", "/perfis-jornada/{perfil}"): "perfil",
+    ("PUT", "/contratos/{contrato_id}/perfil-jornada"): "perfil",
     # Autenticadas; a action decide por nível e papel (admin da própria organização), fora do bloqueio de escrita do
     # tomador de propósito: o admin do tomador gerencia terceirizadas e convites (testes em tests/test_terceirizadas.py).
     ("GET", "/convites"): "organizacao", ("GET", "/usuarios"): "organizacao", ("POST", "/terceirizadas"): "organizacao",
@@ -95,7 +97,7 @@ def test_toda_rota_esta_classificada():
     inexistentes = [k for k in EXPLICITAS if k not in set(todas)]
     assert not inexistentes, f"EXPLICITAS cita rota que não existe mais: {inexistentes}"
     tipos = {classificar(m, c) for m, c in todas}
-    assert {"aberta", "qualquer", "plataforma", "lista", "upload", "lote", "documento", "organizacao"} <= tipos
+    assert {"aberta", "qualquer", "plataforma", "lista", "upload", "lote", "documento", "organizacao", "perfil"} <= tipos
 
 
 def test_estrutura_das_dependencias_de_cada_rota():
@@ -109,6 +111,8 @@ def test_estrutura_das_dependencias_de_cada_rota():
         assert exigir_usuario in chamadas, f"{metodo} {caminho} sem autenticação"
         if tipo == "plataforma":
             assert exigir_plataforma in chamadas, f"{metodo} {caminho} deveria ser só da plataforma"
+        if tipo == "perfil":  # a dependência de escopo decide; não é só da plataforma nem passa por acesso_a_dados
+            assert acesso_a_dados not in chamadas and exigir_plataforma not in chamadas, (metodo, caminho)
         if tipo == "organizacao":  # a action decide por nível e papel; o bloqueio de escrita do tomador não vale aqui
             assert acesso_a_dados not in chamadas and exigir_plataforma not in chamadas, (metodo, caminho)
         if tipo in ("lista", "upload", "lote", "documento"):
@@ -491,8 +495,9 @@ def test_usuario_inativo_nao_acessa_nada(cen):
 
 @pytest.mark.parametrize("nome", NIVEIS)
 @pytest.mark.parametrize("metodo,modelo", [(m, c) for m, c, _ in _rotas()
-                                           if c not in ABERTAS and classificar(m, c) == "plataforma"])
+                                           if c not in ABERTAS and classificar(m, c) in ("plataforma", "perfil")])
 def test_rotas_so_da_plataforma(cen, nome, metodo, modelo):
+    """Inclui as rotas de perfil (plataforma ou admin de empresa própria): ninguém do cenário tem contrato próprio."""
     caminho = _caminho(modelo, cen.lote["c11"], cen.doc["c11"]).replace("{cnpj:path}", cnpj_valido(1))
     resp = _req(metodo, caminho, _h(cen, nome))
     if nome == "plat":

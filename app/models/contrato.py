@@ -24,6 +24,8 @@ class Contrato(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     # nome do perfil em perfil_jornada (sem FK: o perfil é um conjunto de linhas); usado na análise de ponto
     perfil_jornada: Mapped[str] = mapped_column(Text, server_default="clt_padrao")
+    # empresa solo: contrato entre o tomador e o prestador de MESMO CNPJ (POST /empresas-proprias)
+    proprio: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
     tomador: Mapped["Tomador"] = relationship(back_populates="contratos")
     prestador: Mapped["Prestador"] = relationship(back_populates="contratos")

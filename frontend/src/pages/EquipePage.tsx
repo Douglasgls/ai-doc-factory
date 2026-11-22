@@ -14,7 +14,7 @@ import {
   extrairIniciais,
   formatDataHoraCurta,
   formatDataHoraPorExtenso,
-  NIVEL_ROTULO,
+  rotuloNivel,
   PAPEL_ROTULO,
   validarEmail,
 } from '../utils/convites'
@@ -24,6 +24,8 @@ import { ConviteLink } from '../components/ConviteLink'
 interface EquipePageProps {
   usuario: UsuarioAtual
   onBack: () => void
+  /** Empresa solo: o nível prestador aparece como "Empresa". */
+  empresaPropria?: boolean
 }
 
 const TH_COMPACT = 'px-2.5 py-2.5 text-[10px] sm:text-[11px] font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider'
@@ -36,7 +38,7 @@ function conviteParaColega(usuario: UsuarioAtual, email: string, papel: 'admin' 
   return { email, nivel: 'plataforma', papel }
 }
 
-const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
+const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria = false }) => {
   const [usuarios, setUsuarios] = useState<UsuarioListado[]>([])
   const [convites, setConvites] = useState<ConviteListado[]>([])
   const [loading, setLoading] = useState(true)
@@ -275,7 +277,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
                             {u.email}
                           </span>
                         </td>
-                        <td className={TD_COMPACT}>{NIVEL_ROTULO[u.nivel] ?? u.nivel}</td>
+                        <td className={TD_COMPACT}>{rotuloNivel(u.nivel, empresaPropria)}</td>
                         <td className={TD_COMPACT}>{PAPEL_ROTULO[u.papel] ?? u.papel}</td>
                         <td className={TD_COMPACT}>
                           <Selo tom={u.ativo ? 'verde' : 'cinza'}>
@@ -345,9 +347,9 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
                         <td className={TD_COMPACT}>
                           <span
                             className="block max-w-[75px] sm:max-w-[90px] truncate text-[#6e6378] dark:text-[#a093a8]"
-                            title={c.organizacao_nome ?? NIVEL_ROTULO[c.nivel] ?? c.nivel}
+                            title={c.organizacao_nome ?? rotuloNivel(c.nivel, empresaPropria)}
                           >
-                            {c.organizacao_nome ?? NIVEL_ROTULO[c.nivel] ?? c.nivel}
+                            {c.organizacao_nome ?? rotuloNivel(c.nivel, empresaPropria)}
                           </span>
                         </td>
                         <td className={TD_COMPACT}>{PAPEL_ROTULO[c.papel] ?? c.papel}</td>
@@ -417,7 +419,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
                 <div>
                   <span className="text-[#877991] dark:text-[#95849f] font-medium block mb-0.5">Organização:</span>
                   <span className="text-[#2d0a33] dark:text-[#f8f5fc] font-medium">
-                    {conviteDetalhes.organizacao_nome ?? NIVEL_ROTULO[conviteDetalhes.nivel] ?? conviteDetalhes.nivel}
+                    {conviteDetalhes.organizacao_nome ?? rotuloNivel(conviteDetalhes.nivel, empresaPropria)}
                   </span>
                 </div>
                 <div>
@@ -495,7 +497,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack }) => {
                 <div>
                   <span className="text-[#877991] dark:text-[#95849f] font-medium block mb-0.5">Nível:</span>
                   <span className="text-[#2d0a33] dark:text-[#f8f5fc]">
-                    {NIVEL_ROTULO[usuarioDetalhes.nivel] ?? usuarioDetalhes.nivel}
+                    {rotuloNivel(usuarioDetalhes.nivel, empresaPropria)}
                   </span>
                 </div>
                 <div>
