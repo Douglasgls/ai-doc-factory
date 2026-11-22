@@ -26,16 +26,18 @@ def listar_documentos(contrato_id: Annotated[IdBanco | None, Query()] = None, fa
 
 @router.patch("/documentos/{documento_id}/tipo", response_model=DocumentoOut,
               dependencies=[Depends(documento_para_escrita)])
-def atualizar_tipo(documento_id: int, corpo: Revisao, session: Session = Depends(get_session)):
+def atualizar_tipo(documento_id: int, corpo: Revisao, usuario: UsuarioContexto = Depends(exigir_usuario),
+                   session: Session = Depends(get_session)):
     """Corrige o tipo (documento fora de 'segmentado' e 'erro'); vira 'revisado'."""
-    return actions.atualizar_tipo(session, documento_id, corpo)
+    return actions.atualizar_tipo(session, documento_id, corpo, usuario.email)
 
 
 @router.put("/documentos/{documento_id}/campos", response_model=DocumentoOut,
             dependencies=[Depends(documento_para_escrita)])
-def atualizar_campos(documento_id: int, corpo: AtualizacaoCampos, session: Session = Depends(get_session)):
+def atualizar_campos(documento_id: int, corpo: AtualizacaoCampos, usuario: UsuarioContexto = Depends(exigir_usuario),
+                     session: Session = Depends(get_session)):
     """Corrige campos extraídos: string não vazia grava com origem 'humano'; null remove. Devolve o documento."""
-    return actions.atualizar_campos(session, documento_id, corpo)
+    return actions.atualizar_campos(session, documento_id, corpo, usuario.email)
 
 
 @router.delete("/documentos/{documento_id}", status_code=204, dependencies=[Depends(documento_para_escrita)])

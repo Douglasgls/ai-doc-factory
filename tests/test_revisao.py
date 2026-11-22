@@ -96,14 +96,28 @@ def test_revisao_preserva_tipo_original_e_aceita_confirmacao(criar):
         classificar_documento({"documento_id": i})
     r1 = client.post(f"/documentos/{a}/revisao", json={"tipo": "aso", "revisor": " ana "}).json()
     assert (r1["estado"], r1["tipo"], r1["tipo_original"], r1["revisor"]) == (
-        "revisado", "aso", config.TIPO_DESCONHECIDO, "ana") and r1["revisado_em"]
+        "revisado", "aso", config.TIPO_DESCONHECIDO, "admin-falso@exemplo.invalid") and r1["revisado_em"]
     r2 = client.post(f"/documentos/{a}/revisao", json={"tipo": "holerite", "revisor": "bia"}).json()
-    assert (r2["tipo"], r2["tipo_original"], r2["revisor"]) == ("holerite", config.TIPO_DESCONHECIDO, "bia")
+    assert (r2["tipo"], r2["tipo_original"], r2["revisor"]) == ("holerite", config.TIPO_DESCONHECIDO, "admin-falso@exemplo.invalid")
     r3 = client.post(f"/documentos/{b}/revisao", json={"tipo": "holerite", "revisor": "ana"}).json()
     assert (r3["estado"], r3["tipo"], r3["tipo_original"]) == ("revisado", "holerite", "holerite")  # confirmou
     d = client.get(f"/documentos/{a}").json()
-    assert d["tipo_original"] == config.TIPO_DESCONHECIDO and d["revisor"] == "bia" and d["revisado_em"]
+    assert d["tipo_original"] == config.TIPO_DESCONHECIDO and d["revisor"] == "admin-falso@exemplo.invalid" and d["revisado_em"]
     assert d["motivo_revisao"] == "confianca_baixa" and set(d["probabilidades"]) == set(config.TIPOS)
+
+
+def test_revisao_ignora_revisor_do_corpo(criar):
+    _, (a,) = criar([(SEM_PALAVRA, False)])
+    classificar_documento({"documento_id": a})
+    r = client.post(f"/documentos/{a}/revisao", json={"tipo": "aso", "revisor": "impostor@exemplo.invalid"})
+    assert r.status_code == 200 and r.json()["revisor"] == "admin-falso@exemplo.invalid"
+    assert client.get(f"/documentos/{a}").json()["revisor"] == "admin-falso@exemplo.invalid"
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        assert conn.execute("SELECT revisor FROM documento WHERE id = %s", (a,)).fetchone()[0] == "admin-falso@exemplo.invalid"
+        assert conn.execute("SELECT count(*) FROM documento WHERE revisor = 'impostor@exemplo.invalid'").fetchone()[0] == 0
+    # sem revisor no corpo também funciona
+    r = client.post(f"/documentos/{a}/revisao", json={"tipo": "holerite"})
+    assert r.status_code == 200 and r.json()["revisor"] == "admin-falso@exemplo.invalid"
 
 
 def test_revisao_erros(criar):
@@ -117,8 +131,7 @@ def test_revisao_erros(criar):
     assert client.post(f"/documentos/{rev}/revisao", json={"tipo": "xyz", "revisor": "ana"}).status_code == 422
     assert client.post(f"/documentos/{rev}/revisao",
                        json={"tipo": config.TIPO_DESCONHECIDO, "revisor": "ana"}).status_code == 422
-    assert client.post(f"/documentos/{rev}/revisao", json={"tipo": "aso", "revisor": "  "}).status_code == 422
-    assert client.post(f"/documentos/{rev}/revisao", json={"tipo": "aso"}).status_code == 422
+    assert client.post(f"/documentos/{rev}/revisao", json={}).status_code == 422  # tipo é obrigatório
     assert _doc(rev)[0] == "em_revisao"  # nada mudou
 
 
