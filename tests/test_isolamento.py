@@ -38,8 +38,7 @@ ABERTAS = {"/health", "/auth/login", "/docs", "/redoc", "/openapi.json", "/docs/
            "/convites/{token}", "/convites/{token}/aceitar"}
 EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas não seguem a regra geral
     ("GET", "/auth/me"): "qualquer", ("GET", "/tipos"): "qualquer",
-    ("GET", "/empresas"): "plataforma", ("GET", "/empresas/{cnpj:path}/conformidade"): "plataforma",
-    ("GET", "/lotes/{lote_id}/conformidade"): "plataforma",
+    ("GET", "/empresas"): "lista", ("GET", "/empresas/{cnpj:path}/conformidade"): "lista",
     ("POST", "/tomadores"): "plataforma", ("GET", "/tomadores"): "plataforma",
     ("POST", "/prestadores"): "plataforma", ("GET", "/prestadores"): "plataforma",
     ("POST", "/contratos"): "plataforma",

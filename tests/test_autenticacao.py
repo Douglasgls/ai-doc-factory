@@ -302,7 +302,7 @@ def test_nivel_do_banco_vale_mais_que_o_do_token(banco):
     """Token com claims de plataforma, mas o banco diz tomador: vale o banco."""
     uid = banco.usuario(nivel="tomador", papel="membro", tomador_id=banco.tomador())
     forjado = _jwt(uid, nivel="plataforma", papel="admin", tomador_id=None)
-    assert client.get("/empresas", headers=_com(forjado)).status_code == 403
+    assert client.get("/tomadores", headers=_com(forjado)).status_code == 403
     assert client.get("/auth/me", headers=_com(forjado)).json()["nivel"] == "tomador"
 
 
@@ -327,7 +327,7 @@ def test_login_nao_depende_de_auth_usuario_e_auth_senha(banco, monkeypatch):
 
 
 @pytest.mark.parametrize("nivel", ["tomador", "prestador"])
-def test_tomador_e_prestador_veem_me_e_tipos_mas_nao_a_conformidade(banco, nivel):
+def test_tomador_e_prestador_veem_me_tipos_e_conformidade_no_proprio_escopo(banco, nivel):
     vinculo = {"tomador_id": banco.tomador()} if nivel == "tomador" else {"prestador_id": banco.prestador()}
     uid = banco.usuario(nivel=nivel, papel="membro", **vinculo)
     token = _token()
@@ -337,8 +337,8 @@ def test_tomador_e_prestador_veem_me_e_tipos_mas_nao_a_conformidade(banco, nivel
     assert corpo["id"] == uid and corpo["nivel"] == nivel
     assert corpo[f"{nivel}_id"] == vinculo[f"{nivel}_id"]
     assert client.get("/tipos", headers=_com(token)).status_code == 200
-    r = client.get("/empresas", headers=_com(token))
-    assert r.status_code == 403 and "plataforma" in r.json()["detail"]
+    assert client.get("/empresas", headers=_com(token)).json() == []  # conformidade liberada, sem documentos no escopo
+    assert client.get("/tomadores", headers=_com(token)).status_code == 403
 
 
 def test_health_e_docs_ficam_abertos():
@@ -395,8 +395,7 @@ def test_varredura_toda_rota_exige_token():
 
 # Rotas só da plataforma: tomador e prestador recebem 403. As demais rotas de dados são abertas aos dois níveis,
 # filtradas pelo escopo (a matriz completa e o isolamento estão em tests/test_isolamento.py).
-SO_PLATAFORMA = {("GET", "/empresas"), ("GET", "/empresas/{cnpj:path}/conformidade"),
-                 ("GET", "/lotes/{lote_id}/conformidade"), ("POST", "/tomadores"), ("GET", "/tomadores"),
+SO_PLATAFORMA = {("POST", "/tomadores"), ("GET", "/tomadores"),
                  ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos"),
                  ("GET", "/perfis-jornada"), ("GET", "/perfis-jornada/{perfil}"), ("PUT", "/perfis-jornada/{perfil}"),
                  ("PUT", "/contratos/{contrato_id}/perfil-jornada")}
