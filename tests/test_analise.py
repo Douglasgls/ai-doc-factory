@@ -195,6 +195,45 @@ def test_documento_que_nao_e_folha_de_ponto_ou_nao_decidido_e_ignorado(rede):
         conn.execute("DELETE FROM lote WHERE id IN (%s, %s)", (lote, lote2))
 
 
+
+def test_tipo_muda_durante_a_analise_nao_deixa_linha_orfa(doc, rede, monkeypatch):
+    real = analise.analisar
+
+    def analisar_e_trocar_tipo(*a, **k):
+        resultado = real(*a, **k)
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:  # a revisão commita no meio
+            conn.execute("UPDATE documento SET tipo = 'holerite', estado = 'revisado' WHERE id = %s", (doc,))
+        return resultado
+    monkeypatch.setattr(analise, "analisar", analisar_e_trocar_tipo)
+    rede["gemini"].append(_gemini(IRREGULAR, GEM_OK_DIVS))
+    rede["jev"].append(lambda corpo: _jev(corpo, {"horas_extras": 2, "intervalos": 1}))
+    analise.analisar_documento({"documento_id": doc})
+    assert _linhas(doc) == []
+
+
+def test_marcar_erro_com_tipo_mudado_nao_grava(doc):
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("UPDATE documento SET tipo = 'holerite' WHERE id = %s", (doc,))
+    analise.marcar_erro_analise({"documento_id": doc})
+    assert _linhas(doc) == []
+
+
+def test_revisao_de_folha_com_analise_concluida_nao_reenfileira(doc, monkeypatch):
+    from app.routers.revisao import actions as revisao_actions
+    pedidas = []
+    monkeypatch.setattr(revisao_actions, "enfileirar_analise", lambda d, cli=None, forcar=False: pedidas.append(d))
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("UPDATE documento SET estado = 'em_revisao' WHERE id = %s", (doc,))
+        conn.execute("INSERT INTO analise_ponto (documento_id, estado) VALUES (%s, 'concluida')", (doc,))
+    resp = client.post(f"/documentos/{doc}/revisao", json={"tipo": "folha_ponto", "revisor": "ana"})
+    assert resp.status_code == 200 and pedidas == []
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("DELETE FROM analise_ponto WHERE documento_id = %s", (doc,))
+        conn.execute("UPDATE documento SET estado = 'em_revisao' WHERE id = %s", (doc,))
+    client.post(f"/documentos/{doc}/revisao", json={"tipo": "folha_ponto", "revisor": "ana"})
+    assert pedidas == [doc]  # sem análise concluída, enfileira
+
+
 @pytest.fixture
 def fila_analise(monkeypatch):
     nome = f"teste_analise_{uuid.uuid4().hex[:8]}"
@@ -209,7 +248,7 @@ def test_correcao_humana_para_folha_ponto_enfileira_a_analise(fila_analise):
     lote, d = _doc(tipo="desconhecido", estado="em_revisao")
     resp = client.post(f"/documentos/{d}/revisao", json={"tipo": "folha_ponto", "revisor": "ana"})
     assert resp.status_code == 200 and cli.llen(fila) == 1
-    assert json.loads(cli.lrange(fila, 0, 0)[0])["payload"] == {"documento_id": d}
+    assert json.loads(cli.lrange(fila, 0, 0)[0])["payload"] == {"documento_id": d, "forcar": True}
     client.post(f"/documentos/{d}/revisao", json={"tipo": "holerite", "revisor": "ana"})
     assert cli.llen(fila) == 1  # outro tipo não enfileira
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:

@@ -11,7 +11,6 @@ from app import config
 from app.anonimizacao import mascarar_campos, mascarar_documentos, mascarar_estrutura
 from app.analise import enfileirar_analise
 from app.escopo import filtro_contrato, filtro_lote
-from app.eventos import limpar_cancelado
 from app.extracao import enfileirar_extracao
 from app.models import AnalisePonto, Contrato, Documento, DocumentoCampo, Lote, Pagina, Prestador, Tomador
 from app.renomeacao import atualizar_nome_padronizado_sessao, gerar_nome_padronizado
@@ -89,10 +88,10 @@ def obter_analise_ponto(session: Session, documento_id: int) -> dict:
         raise HTTPException(404, "documento não encontrado")
     row = session.execute(select(*(getattr(AnalisePonto, c) for c in _COLUNAS_ANALISE))
                           .where(AnalisePonto.documento_id == documento_id)).first()
-    if row is None:
-        if doc[0] == "folha_ponto":
-            return {"documento_id": documento_id, "estado": "pendente"}
+    if doc[0] != "folha_ponto":  # mesmo que sobre uma linha antiga, o tipo atual manda
         raise HTTPException(404, "documento não é uma folha de ponto analisada")
+    if row is None:
+        return {"documento_id": documento_id, "estado": "pendente"}
     return mascarar_estrutura({"documento_id": documento_id, **dict(zip(_COLUNAS_ANALISE, row))})
 
 
@@ -146,11 +145,19 @@ def atualizar_tipo(session: Session, documento_id: int, revisao: Revisao, reviso
         tipo=revisao.tipo, revisor=revisor, revisado_em=func.now()
     ).execution_options(synchronize_session=False))
     atualizar_nome_padronizado_sessao(session, documento_id)
+    analisar = False
+    if revisao.tipo != "folha_ponto":  # análise de ponto obsoleta: o documento deixou de ser folha de ponto
+        session.execute(delete(AnalisePonto).where(AnalisePonto.documento_id == documento_id)
+                        .execution_options(synchronize_session=False))
+    else:  # enfileira se ainda não há análise concluída (ex.: em_revisao com sugestão folha_ponto)
+        analisar = session.execute(
+            select(AnalisePonto.documento_id).where(AnalisePonto.documento_id == documento_id,
+                                                    AnalisePonto.estado == "concluida")).first() is None
     session.commit()  # antes de enfileirar: o worker precisa enxergar o estado novo
-    limpar_cancelado(atual[2], r)  # revisão humana vale mesmo após um cancelamento do lote; nunca levanta
-    if revisao.tipo == "folha_ponto" and atual[1] != "folha_ponto":
-        enfileirar_analise(documento_id, r)  # nunca levanta
-    enfileirar_extracao(documento_id, r)  # depois do commit; nunca levanta
+    # forcar=True: a revisão humana vale mesmo com o lote cancelado (a marca de cancelamento continua)
+    if analisar:
+        enfileirar_analise(documento_id, r, forcar=True)  # nunca levanta
+    enfileirar_extracao(documento_id, r, forcar=True)  # depois do commit; nunca levanta
     return obter_documento(session, documento_id)
 
 
