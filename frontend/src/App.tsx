@@ -505,7 +505,7 @@ export function App() {
     dismiss: dismissLote,
     dismissAcaoErro: dismissAcaoErroLote,
     clearFinished: clearFinishedLotes,
-  } = useLotePolling(refreshSilently)
+  } = useLotePolling(refreshSilently, isAuthenticated && usuario !== null)
 
   const handleNavigateCategoryBySlug = (slug: string) => {
     const matched = categories.find((c) => c.slug === slug || c.id === slug)

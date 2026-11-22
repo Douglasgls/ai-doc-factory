@@ -32,7 +32,7 @@ from app.routers.documentos.schemas import AnalisePontoOut, DocumentoOut, Docume
 from app.routers.empresas import actions as emp_actions
 from app.routers.empresas.schemas import ConformidadeEmpresaOut, ConformidadeLoteOut, EmpresaResumoOut
 from app.routers.lotes import actions as lote_actions
-from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.lotes.schemas import LoteCriadoOut, LoteOut, LotesListadosOut
 from app.routers.organizacoes import actions as org_actions
 from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
 from app.routers.perfis_jornada import actions as perfil_actions
@@ -226,6 +226,23 @@ def test_lote_com_e_sem_eventos(cenario, limpar_eventos, sessao):
     assert [e["etapa"] for e in com["historico_eventos"]] == ["ocr", "classificando", "concluido"]
     assert com["ultimo_evento"]["etapa"] == "concluido" and com["ultimo_evento"]["extra_desconhecido"] == "preservado"
     assert com["historico_eventos"][0]["pagina_atual"] == 1 and "docs_pendentes" not in com["historico_eventos"][0]
+
+
+def _lotes_utc(resumo):
+    """criado_em: o pydantic serializa UTC como 'Z' e o jsonable_encoder como '+00:00'; é só a grafia."""
+    return {**resumo, "itens": [{**i, "criado_em": i["criado_em"].isoformat().replace("+00:00", "Z")}
+                                for i in resumo["itens"]]}
+
+
+def test_lista_de_lotes(cenario, sessao):
+    lote, _ = cenario
+    corpo = _confere("GET /lotes", "/lotes?limite=5", LotesListadosOut,
+                     _lotes_utc(lote_actions.listar_lotes(sessao, usuario=PLATAFORMA, limite=5)))
+    assert corpo["itens"] and len(corpo["itens"]) <= 5
+    item = next(i for i in _confere("GET /lotes", "/lotes?limite=100", LotesListadosOut,
+                                    _lotes_utc(lote_actions.listar_lotes(sessao, usuario=PLATAFORMA, limite=100))
+                                    )["itens"] if i["id"] == lote)
+    assert item["total_documentos"] >= 1
 
 
 def test_lote_busca_documentos(cenario, sessao):
@@ -523,6 +540,7 @@ COMPARACOES = {
     "GET /health": ["test_saude_e_tipos"],
     "GET /tipos": ["test_saude_e_tipos"],
     "POST /lotes": ["test_upload_de_lote", "test_reenvio_de_lote_em_erro_devolve_reprocessando"],
+    "GET /lotes": ["test_lista_de_lotes"],
     "GET /lotes/{lote_id}": ["test_lote_com_e_sem_eventos", "test_lote_busca_documentos"],
     "GET /busca": ["test_lote_busca_documentos"],
     "GET /documentos": ["test_lote_busca_documentos"],

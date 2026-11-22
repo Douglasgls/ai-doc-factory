@@ -199,6 +199,23 @@ export interface LoteStatusResponse {
   historico_eventos?: LoteEventoProgresso[];
 }
 
+export interface LoteResumoResponse {
+  id: number;
+  nome_arquivo: string;
+  estado: string;
+  docs_pendentes: number;
+  contrato_id: number | null;
+  criado_em: string;
+  total_documentos: number;
+  em_revisao: number;
+  com_erro: number;
+}
+
+export interface LotesListadosResponse {
+  itens: LoteResumoResponse[];
+  proximo_cursor: number | null;
+}
+
 export interface RevisaoItemResponse {
   id: number;
   lote_id: number;
@@ -495,6 +512,27 @@ export const apiService = {
 
     if (!response.ok) {
       throw new Error(await parseErrorMessage(response, 'Erro ao obter status do lote'));
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Histórico de lotes do escopo do usuário (resumo), do mais novo para o mais antigo.
+   */
+  listLotes: async (
+    opcoes: { limite?: number; antesDe?: number; estado?: string; contratoId?: number } = {}
+  ): Promise<LotesListadosResponse> => {
+    const params = new URLSearchParams();
+    if (opcoes.limite !== undefined) params.set('limite', String(opcoes.limite));
+    if (opcoes.antesDe !== undefined) params.set('antes_de', String(opcoes.antesDe));
+    if (opcoes.estado !== undefined) params.set('estado', opcoes.estado);
+    if (opcoes.contratoId !== undefined) params.set('contrato_id', String(opcoes.contratoId));
+    const consulta = params.toString();
+    const response = await authFetch(`/lotes${consulta ? `?${consulta}` : ''}`);
+
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar lotes'));
     }
 
     return response.json();
