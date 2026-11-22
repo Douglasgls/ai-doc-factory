@@ -24,6 +24,7 @@ class ValorComparadoOut(BaseModel):
     documento: int
     tipo: str | None
     valor: str
+    cnpj_contrato: str | None = None  # só em cnpj_diferente_do_contrato
 
 
 class DescontoOut(BaseModel):
@@ -37,6 +38,8 @@ class DescontoOut(BaseModel):
     conferir: bool | None = None
     valores: list[ValorComparadoOut] | None = None
     cpf: str | None = None  # mascarado; só em divergência entre documentos do mesmo CPF
+    cnpj_extraido: str | None = None  # só em cnpj_diferente_do_contrato
+    cnpj_contrato: str | None = None
 
 
 class PendenciaOut(BaseModel):
@@ -55,6 +58,7 @@ class NivelConformidadeOut(BaseModel):
     criterios: CriteriosOut
     descontos: list[DescontoOut]
     pendencias: list[PendenciaOut]
+    origem_empresa: str | None = None  # só em por_documento: "extraido" (CNPJ do documento) ou "contrato" (do lote)
 
 
 class EmpresaResumoOut(BaseModel):

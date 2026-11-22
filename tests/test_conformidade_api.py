@@ -207,3 +207,75 @@ def test_classificacao_enfileira_extracao_para_classificado_e_em_revisao(novo_lo
     finally:
         with psycopg.connect(config.DATABASE_URL) as conn:
             conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
+
+
+# --- contrato do lote ------------------------------------------------------------------------------
+@pytest.fixture
+def lote_com_contrato(orgs):
+    """Cria um lote ligado a um contrato (novo, se não for dado). Devolve (lote_id, ids, cnpj_do_prestador)."""
+    criados = []
+
+    def _f(docs, contrato=None):
+        contrato = contrato or orgs.contrato()
+        cnpj = orgs.db.execute("SELECT p.cnpj FROM contrato c JOIN prestador p ON p.id = c.prestador_id "
+                               "WHERE c.id = %s", (contrato,)).fetchone()[0]
+        lote = orgs.db.execute(
+            "INSERT INTO lote (sha256, nome_arquivo, estado, contrato_id) VALUES (%s, 't.pdf', 'concluido', %s) "
+            "RETURNING id", (uuid.uuid4().hex + uuid.uuid4().hex, contrato)).fetchone()[0]
+        ids = []
+        for n, (t, e, campos) in enumerate(docs(cnpj) if callable(docs) else docs, start=1):
+            i = orgs.db.execute("INSERT INTO documento (lote_id, ordem, pagina_ini, pagina_fim, tipo, estado) "
+                                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id", (lote, n, n, n, t, e)).fetchone()[0]
+            orgs.db.execute("INSERT INTO pagina (lote_id, numero, documento_id, texto) VALUES (%s, %s, %s, 'x')",
+                            (lote, n, i))
+            for k, v in campos.items():
+                gravar_campo(orgs.db, i, k, v, "teste")
+            ids.append(i)
+        criados.append(lote)
+        return lote, ids, cnpj
+    yield _f
+    for l in criados:
+        orgs.db.execute("DELETE FROM lote WHERE id = %s", (l,))
+
+
+TIPOS5 = ["aso", "contrato_trabalho", "holerite", "folha_pagamento", "folha_ponto"]
+
+
+def test_contrato_igual_sem_cnpj_e_diferente(lote_com_contrato):
+    def docs(cnpj):
+        return [("aso", "classificado", campos_pessoa(cnpj, CPF1)),
+                ("holerite", "classificado", campos_pessoa("", CPF1, distingue_prestadora="false")),
+                ("folha_ponto", "classificado", campos_pessoa(CNPJ_B, CPF1))]
+    lote, ids, cnpj = lote_com_contrato(docs)
+    j = client.get(f"/lotes/{lote}/conformidade").json()
+    assert [e["cnpj"] for e in j["empresas"]] == [cnpj] and j["empresas"][0]["documentos"] == sorted(ids)
+    assert j["sem_empresa"] == []
+    r = client.get(f"/empresas/{cnpj}/conformidade").json()
+    origens = {int(k): v["origem_empresa"] for k, v in r["por_documento"].items()}
+    assert origens == {ids[0]: "extraido", ids[1]: "contrato", ids[2]: "contrato"}
+    d = [x for x in r["geral"]["descontos"] if x["regra"] == "cnpj_diferente_do_contrato"]
+    assert len(d) == 1 and d[0]["documento"] == ids[2] and d[0]["criterio"] == "consistencia"
+    assert d[0]["cnpj_extraido"] == CNPJ_B and d[0]["cnpj_contrato"] == cnpj and d[0]["pontos"] > 0
+    assert r["geral"]["criterios"]["consistencia"]["nota"] < 1
+    assert client.get(f"/empresas/{CNPJ_B}/conformidade").status_code == 404  # não virou empresa
+
+
+def test_lote_sem_contrato_mantem_regra_antiga_no_banco(novo_lote):
+    lote, ids = novo_lote([("holerite", "classificado", campos_pessoa("", CPF1))])
+    j = client.get(f"/lotes/{lote}/conformidade").json()
+    assert j["empresas"] == [] and j["sem_empresa"][0]["motivo"] == "CNPJ da prestadora ausente"
+
+
+def test_dois_prestadores_em_contratos_diferentes_tem_scores_separados(lote_com_contrato):
+    def sem_cnpj(n):
+        return lambda cnpj: [(t, "classificado", campos_pessoa("", CPF1, distingue_prestadora="false"))
+                             for t in TIPOS5[:n]]
+    l1, ids1, c1 = lote_com_contrato(sem_cnpj(5))
+    l2, ids2, c2 = lote_com_contrato(sem_cnpj(2))  # outro contrato, faltam obrigatórios
+    assert c1 != c2
+    r1 = client.get(f"/empresas/{c1}/conformidade").json()
+    r2 = client.get(f"/empresas/{c2}/conformidade").json()
+    assert r1["geral"]["criterios"]["completude"]["nota"] == 1.0
+    assert r2["geral"]["criterios"]["completude"]["nota"] == 0.4
+    assert r1["geral"]["score"] > r2["geral"]["score"]
+    assert {e["cnpj"] for e in client.get(f"/lotes/{l2}/conformidade").json()["empresas"]} == {c2}
