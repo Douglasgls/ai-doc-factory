@@ -1,6 +1,6 @@
 import psycopg
 from fastapi import HTTPException
-from sqlalchemy import case, exists, func, insert, select
+from sqlalchemy import case, exists, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -122,3 +122,35 @@ def listar_contratos(session: Session, tomador_id: int | None = None, prestador_
     if prestador_id is not None:
         consulta = consulta.where(Contrato.prestador_id == prestador_id)
     return [_contrato(l) for l in session.execute(consulta.order_by(Contrato.id))]
+
+
+def _nao_encontrado(entidade: str, id_: int) -> HTTPException:
+    return HTTPException(404, f"{entidade} {id_} não encontrado")
+
+
+def definir_ativo_tomador(session: Session, id_: int, ativo: bool) -> dict:
+    """Idempotente: repetir o valor devolve o recurso. Os dados ligados (lotes, usuários) não são tocados."""
+    linha = session.execute(update(Tomador).where(Tomador.id == id_).values(ativo=ativo)
+                            .returning(*_COLUNAS_TOMADOR)).first()
+    if linha is None:
+        raise _nao_encontrado("tomador", id_)
+    session.commit()
+    return _tomador(linha)
+
+
+def definir_ativo_prestador(session: Session, id_: int, ativo: bool) -> dict:
+    linha = session.execute(update(Prestador).where(Prestador.id == id_).values(ativo=ativo)
+                            .returning(*_COLUNAS_PRESTADOR)).first()
+    if linha is None:
+        raise _nao_encontrado("prestador", id_)
+    session.commit()
+    return _prestador(linha)
+
+
+def definir_ativo_contrato(session: Session, id_: int, ativo: bool) -> dict:
+    if session.execute(update(Contrato).where(Contrato.id == id_).values(ativo=ativo)
+                       .returning(Contrato.id)).first() is None:
+        raise _nao_encontrado("contrato", id_)
+    linha = session.execute(_select_contrato().where(Contrato.id == id_)).one()
+    session.commit()
+    return _contrato(linha)

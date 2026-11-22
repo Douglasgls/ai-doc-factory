@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -48,3 +50,20 @@ class LoteOut(BaseModel):
     documentos: list[DocumentoDoLoteOut]
     ultimo_evento: EventoProgressoOut | None = None  # None sem eventos no Redis (TTL ou lote antigo)
     historico_eventos: list[EventoProgressoOut] = []
+
+
+class LoteResumoOut(BaseModel):
+    id: int
+    nome_arquivo: str
+    estado: str
+    docs_pendentes: int
+    contrato_id: int | None
+    criado_em: datetime
+    total_documentos: int
+    em_revisao: int
+    com_erro: int
+
+
+class LotesListadosOut(BaseModel):
+    itens: list[LoteResumoOut]
+    proximo_cursor: int | None  # id para `antes_de` na próxima página; None quando acabou

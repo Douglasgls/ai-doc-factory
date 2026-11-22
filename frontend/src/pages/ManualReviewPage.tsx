@@ -2,7 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Check, X, Plus, ZoomIn, ChevronLeft } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
-import { OFFICIAL_CATEGORY_OPTIONS, type CategoryOption } from './reviewCategories'
+import {
+  OFFICIAL_CATEGORY_OPTIONS,
+  initialReviewCategory,
+  type CategoryOption,
+} from './reviewCategories'
 
 const VALID_CATEGORY_SLUGS = new Set(OFFICIAL_CATEGORY_OPTIONS.map((c) => c.slug))
 
@@ -39,16 +43,14 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   onConfirm,
 }) => {
   const isValidSuggestion = VALID_CATEGORY_SLUGS.has(doc.suggestedType)
-  const [chosenCategory, setSelectedCategory] = useState(
-    isValidSuggestion
-      ? doc.suggestedType
-      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
+  const [chosenCategory, setSelectedCategory] = useState(() =>
+    initialReviewCategory(doc.suggestedType)
   )
+  // Vazio = nenhum tipo escolhido (sugestão desconhecida): confirmar fica bloqueado
   const selectedCategory = VALID_CATEGORY_SLUGS.has(chosenCategory)
     ? chosenCategory
-    : isValidSuggestion
-      ? doc.suggestedType
-      : availableCategories[0]?.slug || OFFICIAL_CATEGORY_OPTIONS[0].slug
+    : ''
+  const hasCategory = selectedCategory !== ''
   const [personName, setPersonName] = useState(doc.personName)
   const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
   const [currentPage, setCurrentPage] = useState(0)
@@ -75,6 +77,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
       }
       if (e.key.toLowerCase() === 'a') {
         e.preventDefault()
+        if (!selectedCategory) return
         onConfirm(
           doc.id,
           selectedCategory,
@@ -314,12 +317,22 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#150c18] text-[#2d0a33] dark:text-white text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#9333ea] cursor-pointer"
             >
+              {!hasCategory && (
+                <option value="" disabled>
+                  Selecione o tipo…
+                </option>
+              )}
               {availableCategories.map((cat) => (
                 <option key={cat.slug} value={cat.slug}>
                   {cat.name}
                 </option>
               ))}
             </select>
+            {!hasCategory && (
+              <p className="mt-1.5 text-xs text-[#b45309] dark:text-[#fbbf24]">
+                Tipo não identificado: escolha o tipo documental para confirmar.
+              </p>
+            )}
           </div>
 
           <div>
@@ -340,6 +353,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
         <div className="flex flex-wrap items-center gap-3 pt-3">
           <button
             type="button"
+            disabled={!hasCategory}
             onClick={() =>
               onConfirm(
                 doc.id,
@@ -349,7 +363,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
                 doc.initialCampos
               )
             }
-            className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
+            className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] flex items-center gap-2 shadow-2xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Check className="w-4 h-4 stroke-[2.5]" />
             <span>Confirmar classificação</span>

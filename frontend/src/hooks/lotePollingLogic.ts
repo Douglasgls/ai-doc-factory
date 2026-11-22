@@ -1,4 +1,4 @@
-import type { DocumentoResponse, LoteEventoProgresso } from '../services/api'
+import type { DocumentoResponse, LoteEventoProgresso, LoteResumoResponse } from '../services/api'
 
 /** Lógica pura do acompanhamento de lotes (sem React), isolada para ser testável. */
 
@@ -85,4 +85,37 @@ export const trackedStatus = (lote: TrackedLote): LoteTrackedStatus => {
     return isEtapaEmAndamento(lote.etapaAtual) ? 'processando' : 'concluido'
   }
   return 'processando'
+}
+
+/**
+ * Lotes do histórico do servidor que ainda não estão na lista local, prontos para entrar nela. Os que já estão
+ * (cache do sessionStorage ou envio desta aba) ficam como estão: o acompanhamento deles já cuida da atualização.
+ */
+export const lotesNovosDoServidor = (existentes: TrackedLote[], resumos: LoteResumoResponse[]): TrackedLote[] => {
+  const conhecidos = new Set(existentes.map((l) => l.id))
+  return resumos
+    .filter((r) => !conhecidos.has(r.id))
+    .map(
+      (r): TrackedLote => ({
+        id: r.id,
+        nome: r.nome_arquivo,
+        estado: r.estado,
+        docsPendentes: r.docs_pendentes,
+        timedOut: false,
+        networkError: null,
+        etapaAtual: r.estado,
+        mensagemAtual: null,
+        totalDocumentos: r.total_documentos,
+        documentos: [],
+        historicoEventos: [],
+        cancelado: false,
+        sseAtivo: false,
+        horarioEnvio: new Date(r.criado_em).toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      })
+    )
 }

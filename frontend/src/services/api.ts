@@ -199,6 +199,23 @@ export interface LoteStatusResponse {
   historico_eventos?: LoteEventoProgresso[];
 }
 
+export interface LoteResumoResponse {
+  id: number;
+  nome_arquivo: string;
+  estado: string;
+  docs_pendentes: number;
+  contrato_id: number | null;
+  criado_em: string;
+  total_documentos: number;
+  em_revisao: number;
+  com_erro: number;
+}
+
+export interface LotesListadosResponse {
+  itens: LoteResumoResponse[];
+  proximo_cursor: number | null;
+}
+
 export interface RevisaoItemResponse {
   id: number;
   lote_id: number;
@@ -515,6 +532,27 @@ export const apiService = {
   },
 
   /**
+   * Histórico de lotes do escopo do usuário (resumo), do mais novo para o mais antigo.
+   */
+  listLotes: async (
+    opcoes: { limite?: number; antesDe?: number; estado?: string; contratoId?: number } = {}
+  ): Promise<LotesListadosResponse> => {
+    const params = new URLSearchParams();
+    if (opcoes.limite !== undefined) params.set('limite', String(opcoes.limite));
+    if (opcoes.antesDe !== undefined) params.set('antes_de', String(opcoes.antesDe));
+    if (opcoes.estado !== undefined) params.set('estado', opcoes.estado);
+    if (opcoes.contratoId !== undefined) params.set('contrato_id', String(opcoes.contratoId));
+    const consulta = params.toString();
+    const response = await authFetch(`/lotes${consulta ? `?${consulta}` : ''}`);
+
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar lotes'));
+    }
+
+    return response.json();
+  },
+
+  /**
    * Cancela o processamento de um lote em andamento
    */
   cancelLote: async (loteId: number): Promise<LoteStatusResponse> => {
@@ -654,11 +692,11 @@ export const apiService = {
   /**
    * Submete a revisão de um documento (estado 'em_revisao' ou 'revisado')
    */
-  submitReview: async (documentoId: number, tipo: string, revisor: string): Promise<RevisaoResultResponse> => {
+  submitReview: async (documentoId: number, tipo: string): Promise<RevisaoResultResponse> => {
     const response = await authFetch(`/documentos/${documentoId}/revisao`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo, revisor }),
+      body: JSON.stringify({ tipo }),
     });
 
     if (!response.ok) {
@@ -671,11 +709,11 @@ export const apiService = {
   /**
    * Atualiza o tipo de um documento em qualquer estado exceto 'segmentado' e 'erro'
    */
-  updateDocumentTipo: async (documentoId: number, tipo: string, revisor: string): Promise<DocumentoResponse> => {
+  updateDocumentTipo: async (documentoId: number, tipo: string): Promise<DocumentoResponse> => {
     const response = await authFetch(`/documentos/${documentoId}/tipo`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo, revisor }),
+      body: JSON.stringify({ tipo }),
     });
 
     if (!response.ok) {
@@ -690,13 +728,12 @@ export const apiService = {
    */
   updateDocumentCampos: async (
     documentoId: number,
-    campos: Record<string, string | null>,
-    revisor: string
+    campos: Record<string, string | null>
   ): Promise<DocumentoResponse> => {
     const response = await authFetch(`/documentos/${documentoId}/campos`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campos, revisor }),
+      body: JSON.stringify({ campos }),
     });
 
     if (!response.ok) {

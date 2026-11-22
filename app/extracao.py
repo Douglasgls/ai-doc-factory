@@ -47,12 +47,15 @@ def _remover_pendencia_por_doc(documento_id: int, prefixo: str, r: redis.Redis |
         pass
 
 
-def enfileirar_extracao(documento_id: int, r: redis.Redis | None = None) -> bool:
+def enfileirar_extracao(documento_id: int, r: redis.Redis | None = None, forcar: bool = False) -> bool:
     """Nunca levanta: falha ao enfileirar não pode derrubar a classificação nem a revisão.
     Se falhar, remove a pendência de extração do lote no Redis para não travar o acompanhamento."""
     try:
         cli = r or redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-        enfileirar(cli, config.FILA_EXTRAIR, {"documento_id": documento_id})
+        payload = {"documento_id": documento_id}
+        if forcar:  # revisão humana: o handler ignora a marca de cancelamento do lote
+            payload["forcar"] = True
+        enfileirar(cli, config.FILA_EXTRAIR, payload)
         return True
     except Exception:
         log.warning("não foi possível enfileirar a extração do documento %s", documento_id)
@@ -101,7 +104,7 @@ def _apurar_pendencias_lote(conn, lote_id: int) -> tuple[int, bool]:
         conn.execute(
             "SELECT 1 FROM documento d "
             "LEFT JOIN analise_ponto ap ON ap.documento_id = d.id "
-            "WHERE d.lote_id = %s AND d.estado = 'classificado' AND d.tipo = 'folha_ponto' "
+            "WHERE d.lote_id = %s AND d.estado IN ('classificado', 'revisado') AND d.tipo = 'folha_ponto' "
             "AND (ap.estado IS NULL OR ap.estado NOT IN ('concluida', 'erro')) "
             "LIMIT 1",
             (lote_id,),
@@ -124,11 +127,16 @@ def _resolver_etapa_pos_extracao(lote_id: int, doc_id: int, docs_pendentes: int,
 
 def extrair_campos(payload: dict) -> None:
     doc_id = payload["documento_id"]
+    forcar = bool(payload.get("forcar"))  # revisão humana vale mesmo com o lote cancelado
+
+    def cancelado(lote: int) -> bool:
+        return not forcar and lote_cancelado(lote)
+
     with psycopg.connect(config.DATABASE_URL) as conn:
         doc = conn.execute("SELECT estado, lote_id, pagina_ini, tipo FROM documento WHERE id = %s", (doc_id,)).fetchone()
         if doc is None or doc[0] not in ("classificado", "revisado", "em_revisao"):
             return
-        if lote_cancelado(doc[1]):
+        if cancelado(doc[1]):
             concluir_tarefa_pos(doc[1], f"extracao:{doc_id}")
             return
         textos = [t for (t,) in conn.execute("SELECT texto FROM pagina WHERE documento_id = %s ORDER BY numero", (doc_id,))]
@@ -144,7 +152,7 @@ def extrair_campos(payload: dict) -> None:
         dados = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, doc[2])))
     except llm.LLMErro as e:
         log.warning("extração do documento %s indisponível: %s", doc_id, e)
-        if lote_cancelado(lote_id):
+        if cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
             return
         with psycopg.connect(config.DATABASE_URL) as conn:
@@ -157,7 +165,7 @@ def extrair_campos(payload: dict) -> None:
             documento_id=doc_id,
         )
         return
-    if lote_cancelado(lote_id):
+    if cancelado(lote_id):
         concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
         return
     if not isinstance(dados, dict):
@@ -175,7 +183,7 @@ def extrair_campos(payload: dict) -> None:
     origem = f"gemini:{prompts.VERSAO_PROMPT_EXTRACAO}"
     campos_limpos = limpar(dados)
     with psycopg.connect(config.DATABASE_URL) as conn:  # substitui o que o Gemini gravou antes; correção humana fica
-        if lote_cancelado(lote_id):
+        if cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")
             return
         conn.execute("DELETE FROM documento_campos WHERE documento_id = %s AND origem LIKE 'gemini:%%'", (doc_id,))
@@ -204,6 +212,11 @@ def extrair_campos(payload: dict) -> None:
 def marcar_erro_extracao(payload: dict) -> None:
     """ao_esgotar: job de extração foi para a dlq. Remove a pendência pós-classificação para não travar o lote."""
     doc_id = payload["documento_id"]
+    forcar = bool(payload.get("forcar"))
+
+    def cancelado(lote: int) -> bool:
+        return not forcar and lote_cancelado(lote)
+
     lote_id = None
     docs_pend = 0
     ap_pend = False
@@ -212,7 +225,7 @@ def marcar_erro_extracao(payload: dict) -> None:
         if row is not None:
             lote_id = row[0]
             docs_pend, ap_pend = _apurar_pendencias_lote(conn, lote_id)
-    if lote_id is not None and not lote_cancelado(lote_id):
+    if lote_id is not None and not cancelado(lote_id):
         etapa = _resolver_etapa_pos_extracao(lote_id, doc_id, docs_pend, ap_pend)
         publicar_evento(
             lote_id,

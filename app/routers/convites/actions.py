@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import config, senhas
-from app.escopo import motivo_recusa_convite, prestador_tem_usuario_ativo
+from app.escopo import filtro_convite_gerenciavel, motivo_recusa_convite, prestador_tem_usuario_ativo
 from app.models import Convite, Prestador, Tomador, Usuario
 from app.routers.auth.actions import UsuarioContexto, emitir_token
 from app.routers.convites.schemas import AceiteIn, NovoConvite
@@ -86,16 +86,9 @@ def criar_na_transacao(session: Session, email: str, nivel: str, papel: str, tom
 
 def listar(session: Session, usuario: UsuarioContexto) -> list[dict]:
     """Plataforma: todos. Admin de tomador/prestador: os criados por usuários da própria organização. Membro: 403."""
-    if usuario.nivel == "plataforma":
-        onde = true()
-    elif usuario.papel != "admin":
+    onde = filtro_convite_gerenciavel(usuario)
+    if onde is None:
         raise HTTPException(403, "apenas administradores listam convites")
-    elif usuario.nivel == "tomador" and usuario.tomador_id is not None:
-        onde = Convite.criado_por.in_(select(Usuario.id).where(Usuario.tomador_id == usuario.tomador_id))
-    elif usuario.nivel == "prestador" and usuario.prestador_id is not None:
-        onde = Convite.criado_por.in_(select(Usuario.id).where(Usuario.prestador_id == usuario.prestador_id))
-    else:
-        raise HTTPException(403, "sem permissão para listar convites")
     estado = case((Convite.usado_em.is_not(None), "usado"), (Convite.expira_em <= func.now(), "expirado"),
                   else_="pendente")
     linhas = session.execute(
@@ -105,6 +98,25 @@ def listar(session: Session, usuario: UsuarioContexto) -> list[dict]:
     chaves = ("id", "email", "nivel", "papel", "tomador_id", "prestador_id", "organizacao_nome", "estado",
               "criado_por", "criado_em", "expira_em", "usado_em", "usuario_id")
     return [dict(zip(chaves, l)) for l in linhas]
+
+
+def revogar(session: Session, usuario: UsuarioContexto, convite_id: int) -> None:
+    """Revoga um convite pendente: marca como expirado (`expira_em = now()`), sem apagar a linha. É o mais simples:
+    `_UTILIZAVEL`, `prestador_tem_convite_pendente`, o `acesso_prestador` dos contratos e o `estado` da listagem já
+    tratam `expira_em <= now()` como convite não pendente, e a linha segue como registro de quem convidou.
+    Mesmo escopo da listagem (GET /convites); fora dele, 404. Convite usado: 409. Já expirado/revogado: sem efeito."""
+    onde = filtro_convite_gerenciavel(usuario)
+    if onde is None:
+        raise HTTPException(403, "apenas administradores revogam convites")
+    linha = session.execute(select(Convite.usado_em).where(Convite.id == convite_id, onde).with_for_update()).first()
+    if linha is None:
+        raise HTTPException(404, "convite não encontrado")
+    if linha[0] is not None:
+        raise HTTPException(409, "convite já usado")
+    session.execute(update(Convite).where(Convite.id == convite_id)
+                    .values(expira_em=func.least(Convite.expira_em, func.now()))
+                    .execution_options(synchronize_session=False))
+    session.commit()
 
 
 def consultar(session: Session, token: str) -> dict:

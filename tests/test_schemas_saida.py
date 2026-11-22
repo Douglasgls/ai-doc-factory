@@ -34,7 +34,7 @@ from app.routers.empresas_proprias import actions as propria_actions
 from app.routers.empresas_proprias.schemas import EmpresaPropriaOut
 from app.routers.empresas.schemas import ConformidadeEmpresaOut, ConformidadeLoteOut, EmpresaResumoOut
 from app.routers.lotes import actions as lote_actions
-from app.routers.lotes.schemas import LoteCriadoOut, LoteOut
+from app.routers.lotes.schemas import LoteCriadoOut, LoteOut, LotesListadosOut
 from app.routers.organizacoes import actions as org_actions
 from app.routers.organizacoes.schemas import ContratoOut, PrestadorOut, TomadorOut
 from app.routers.perfis_jornada import actions as perfil_actions
@@ -230,6 +230,23 @@ def test_lote_com_e_sem_eventos(cenario, limpar_eventos, sessao):
     assert com["historico_eventos"][0]["pagina_atual"] == 1 and "docs_pendentes" not in com["historico_eventos"][0]
 
 
+def _lotes_utc(resumo):
+    """criado_em: o pydantic serializa UTC como 'Z' e o jsonable_encoder como '+00:00'; é só a grafia."""
+    return {**resumo, "itens": [{**i, "criado_em": i["criado_em"].isoformat().replace("+00:00", "Z")}
+                                for i in resumo["itens"]]}
+
+
+def test_lista_de_lotes(cenario, sessao):
+    lote, _ = cenario
+    corpo = _confere("GET /lotes", "/lotes?limite=5", LotesListadosOut,
+                     _lotes_utc(lote_actions.listar_lotes(sessao, usuario=PLATAFORMA, limite=5)))
+    assert corpo["itens"] and len(corpo["itens"]) <= 5
+    item = next(i for i in _confere("GET /lotes", "/lotes?limite=100", LotesListadosOut,
+                                    _lotes_utc(lote_actions.listar_lotes(sessao, usuario=PLATAFORMA, limite=100))
+                                    )["itens"] if i["id"] == lote)
+    assert item["total_documentos"] >= 1
+
+
 def test_lote_busca_documentos(cenario, sessao):
     lote, ids = cenario
     corpo = _confere("GET /lotes/{lote_id}", f"/lotes/{lote}", LoteOut, lote_actions.obter_lote(sessao, lote))
@@ -405,6 +422,18 @@ def test_organizacoes(orgs, sessao):
                          _contratos(sessao, tomador, prestador))
     assert [c["id"] for c in filtrados] == [contrato] and filtrados[0]["vigencia_fim"] is None
 
+    # ativar/desativar (PATCH {ativo}); a resposta tem o formato da listagem
+    r = client.patch(f"/tomadores/{tomador}", json={"ativo": False})
+    _confere_resposta("PATCH /tomadores/{tomador_id}", r, achar(org_actions.listar_tomadores(sessao), tomador), TomadorOut)
+    r = client.patch(f"/prestadores/{prestador}", json={"ativo": False})
+    _confere_resposta("PATCH /prestadores/{prestador_id}", r, achar(org_actions.listar_prestadores(sessao), prestador),
+                      PrestadorOut)
+    r = client.patch(f"/contratos/{contrato}", json={"ativo": False})
+    _confere_resposta("PATCH /contratos/{contrato_id}", r,
+                      achar(org_actions.listar_contratos(sessao, usuario=PLATAFORMA), contrato), ContratoOut)
+    for rota, ident in (("tomadores", tomador), ("prestadores", prestador), ("contratos", contrato)):
+        assert client.patch(f"/{rota}/{ident}", json={"ativo": True}).json()["ativo"] is True
+
     # perfis de jornada e a associação ao contrato
     perfil = "teste_" + uuid.uuid4().hex[:12]
     try:
@@ -532,10 +561,18 @@ def test_terceirizadas_e_usuarios(auth_real, orgs, monkeypatch, sessao):
             id=uid, email=email_plat, nome="x", nivel="plataforma", papel="admin", tomador_id=None,
             prestador_id=None)), UsuarioListadoOut)
         assert "senha_hash" not in r.text and uid in [u["id"] for u in r.json()]
+        with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+            alvo = conn.execute("INSERT INTO usuario (email, nome, nivel, papel, tomador_id) VALUES (%s, 'Alvo Schemas', "
+                                "'tomador', 'membro', %s) RETURNING id", (f"schemas-alvo-{sufixo}@exemplo.invalid", tomador)
+                                ).fetchone()[0]
+        r = client.patch(f"/usuarios/{alvo}", headers=h, json={"ativo": False})
+        listado = next(u for u in usu_actions.listar(sessao, PLATAFORMA) if u["id"] == alvo)
+        _confere_resposta("PATCH /usuarios/{usuario_id}", r, listado, UsuarioListadoOut)
+        assert r.json()["ativo"] is False
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email_conv,))
-            conn.execute("DELETE FROM usuario WHERE id = %s", (uid,))
+            conn.execute("DELETE FROM usuario WHERE id = %s OR lower(email) = %s", (uid, f"schemas-alvo-{sufixo}@exemplo.invalid"))
 
 
 def test_openapi_expoe_os_modelos():
@@ -556,6 +593,7 @@ COMPARACOES = {
     "GET /health": ["test_saude_e_tipos"],
     "GET /tipos": ["test_saude_e_tipos"],
     "POST /lotes": ["test_upload_de_lote", "test_reenvio_de_lote_em_erro_devolve_reprocessando"],
+    "GET /lotes": ["test_lista_de_lotes"],
     "GET /lotes/{lote_id}": ["test_lote_com_e_sem_eventos", "test_lote_busca_documentos"],
     "GET /busca": ["test_lote_busca_documentos"],
     "GET /documentos": ["test_lote_busca_documentos"],
@@ -580,6 +618,10 @@ COMPARACOES = {
     "PUT /contratos/{contrato_id}/perfil-jornada": ["test_organizacoes"],
     "POST /empresas-proprias": ["test_empresas_proprias"],
     "GET /usuarios": ["test_terceirizadas_e_usuarios"],
+    "PATCH /usuarios/{usuario_id}": ["test_terceirizadas_e_usuarios"],
+    "PATCH /tomadores/{tomador_id}": ["test_organizacoes"],
+    "PATCH /prestadores/{prestador_id}": ["test_organizacoes"],
+    "PATCH /contratos/{contrato_id}": ["test_organizacoes"],
     "POST /terceirizadas": ["test_terceirizadas_e_usuarios"],
     "POST /auth/login": ["test_auth_login_e_me"],
     "GET /auth/me": ["test_auth_login_e_me"],

@@ -9,14 +9,14 @@ from pathlib import Path
 import psycopg
 from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import config
 from app.database import SessionLocal
-from app.escopo import exigir_contrato_de_upload
+from app.escopo import exigir_contrato_de_upload, filtro_contrato, filtro_lote
 from app.eventos import (
     canal_lote,
     limpar_cancelado,
@@ -54,21 +54,37 @@ def validar_contrato(session: Session, contrato_id: int | None, usuario: Usuario
         raise HTTPException(409, f"contrato {contrato_id} inativo (ou de tomador/prestador inativo)")
 
 
+def _lote_tem_revisao(session: Session, lote_id: int) -> bool:
+    """True se o lote tem documento 'revisado' (revisão humana que um reprocessamento apagaria)."""
+    return session.execute(
+        select(1).where(Documento.lote_id == lote_id, Documento.estado == "revisado").limit(1)).first() is not None
+
+
+def _erro_lote_revisado(lote_id: int) -> HTTPException:
+    return HTTPException(409, f"lote {lote_id} possui documentos revisados e não pode ser reprocessado")
+
+
 def _reenvio(session: Session, sha: str, pdf: bytes, contrato_id: int | None) -> tuple[dict, bool]:
     """Mesmo arquivo já enviado NESTE contrato (ou, sem contrato, já enviado sem contrato): devolve o lote existente
     e diz se precisa enfileirar a segmentação. Lote em 'erro' volta para 'recebido' (reprocessa); 'ocr',
-    'classificando' e 'concluido' ficam como estão. O lote nunca troca de contrato."""
+    'classificando' e 'concluido' ficam como estão. O lote nunca troca de contrato.
+    Lote em 'erro' com documento revisado não reprocessa (409), para não apagar a revisão humana."""
     id_, estado = session.execute(
         select(Lote.id, Lote.estado).where(Lote.sha256 == sha, Lote.contrato_id.is_not_distinct_from(contrato_id))
     ).one()
     reprocessando = False
     if estado == "erro":
         # atômico: de dois reenvios simultâneos, só um enxerga 'erro' e enfileira
+        # (a ausência de documento revisado é checada no mesmo UPDATE, sem janela entre checagem e escrita)
+        sem_revisao = ~select(1).where(Documento.lote_id == id_, Documento.estado == "revisado").exists()
         reprocessando = session.execute(
-            update(Lote).where(Lote.id == id_, Lote.estado == "erro").values(estado="recebido").returning(Lote.id)
-            .execution_options(synchronize_session=False)).first() is not None
+            update(Lote).where(Lote.id == id_, Lote.estado == "erro", sem_revisao).values(estado="recebido")
+            .returning(Lote.id).execution_options(synchronize_session=False)).first() is not None
         if reprocessando:
             estado = "recebido"
+        elif _lote_tem_revisao(session, id_):
+            session.rollback()
+            raise _erro_lote_revisado(id_)
     # em 'recebido' o enfileirar original pode ter falhado; job duplicado é aceitável (handlers idempotentes)
     reenfileirar = estado == "recebido"
     if reenfileirar:
@@ -142,6 +158,38 @@ def _serializar_pacote(pacote: dict, sort_keys: bool = False) -> str:
     )
 
 
+def listar_lotes(session: Session, *, usuario: UsuarioContexto, limite: int = 20, antes_de: int | None = None,
+                 estado: str | None = None, contrato_id: int | None = None) -> dict:
+    """Resumo dos lotes no escopo do usuário, do mais novo para o mais antigo (uma consulta, com agregação).
+    `antes_de` é o cursor por id (id do último item da página anterior). `contrato_id` fora do escopo é 404."""
+    if contrato_id is not None and session.execute(
+            select(Contrato.id).join(Tomador, Tomador.id == Contrato.tomador_id)
+            .join(Prestador, Prestador.id == Contrato.prestador_id)
+            .where(Contrato.id == contrato_id, filtro_contrato(usuario))).first() is None:
+        raise HTTPException(404, "contrato não encontrado")
+    docs = (select(Documento.lote_id.label("lote_id"), func.count().label("total"),
+                   func.count().filter(Documento.estado == "em_revisao").label("em_revisao"),
+                   func.count().filter(Documento.estado == "erro").label("com_erro"))
+            .group_by(Documento.lote_id).subquery())
+    consulta = (select(Lote.id, Lote.nome_arquivo, Lote.estado, Lote.docs_pendentes, Lote.contrato_id, Lote.criado_em,
+                       func.coalesce(docs.c.total, 0), func.coalesce(docs.c.em_revisao, 0),
+                       func.coalesce(docs.c.com_erro, 0))
+                .outerjoin(docs, docs.c.lote_id == Lote.id).where(filtro_lote(usuario)))
+    if estado is not None:
+        consulta = consulta.where(Lote.estado == estado)
+    if contrato_id is not None:
+        consulta = consulta.where(Lote.contrato_id == contrato_id)
+    if antes_de is not None:
+        # cursor por id: criado_em é monótono com o id (now() na inserção); a ordem é a mesma de (criado_em, id) DESC
+        ref = select(Lote.criado_em).where(Lote.id == antes_de).scalar_subquery()
+        consulta = consulta.where(or_(Lote.criado_em < ref, and_(Lote.criado_em == ref, Lote.id < antes_de)))
+    linhas = session.execute(consulta.order_by(Lote.criado_em.desc(), Lote.id.desc()).limit(limite + 1)).all()
+    pagina = linhas[:limite]
+    itens = [{"id": l[0], "nome_arquivo": l[1], "estado": l[2], "docs_pendentes": l[3], "contrato_id": l[4],
+              "criado_em": l[5], "total_documentos": l[6], "em_revisao": l[7], "com_erro": l[8]} for l in pagina]
+    return {"itens": itens, "proximo_cursor": pagina[-1][0] if len(linhas) > limite else None}
+
+
 def obter_lote(session: Session, lote_id: int) -> dict:
     lote = session.execute(
         select(Lote.id, Lote.nome_arquivo, Lote.estado, Lote.docs_pendentes, Lote.contrato_id).where(Lote.id == lote_id)
@@ -189,7 +237,7 @@ def _ha_pos_processamento_pendente(session: Session, lote_id: int, docs_pendente
         select(1).select_from(Documento).outerjoin(AnalisePonto, AnalisePonto.documento_id == Documento.id)
         .where(Documento.lote_id == lote_id,
                or_(Documento.estado == "segmentado",
-                   and_(Documento.estado == "classificado", Documento.tipo == "folha_ponto",
+                   and_(Documento.estado.in_(("classificado", "revisado")), Documento.tipo == "folha_ponto",
                         or_(AnalisePonto.estado.is_(None), AnalisePonto.estado.not_in(("concluida", "erro"))))))
         .limit(1)).first()
     return pendente_db is not None
@@ -243,10 +291,8 @@ def reprocessar_lote(session: Session, lote_id: int) -> dict:
         raise HTTPException(404, "lote não encontrado")
     if lote[1] != "erro":
         raise HTTPException(409, f"lote {lote_id} em estado '{lote[1]}' não pode ser reprocessado")
-    tem_revisao = session.execute(
-        select(1).where(Documento.lote_id == lote_id, Documento.estado == "revisado").limit(1)).first()
-    if tem_revisao is not None:
-        raise HTTPException(409, f"lote {lote_id} possui documentos revisados e não pode ser reprocessado")
+    if _lote_tem_revisao(session, lote_id):
+        raise _erro_lote_revisado(lote_id)
     original = Path(config.DATA_DIR) / f"lote_{lote_id}" / "original.pdf"
     if not original.is_file():
         raise HTTPException(400, "arquivo original do lote não está disponível para reprocessamento")
