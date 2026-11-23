@@ -5,12 +5,12 @@ import { AlertCircle, CheckCircle2 } from 'lucide-react'
 export const CARD =
   'rounded-2xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-sm'
 export const INPUT =
-  'w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#150c18] border border-[#dcd4e2] dark:border-[#3d2948] text-[#2d0a33] dark:text-white placeholder-[#8f8298] focus:outline-none focus:ring-1 focus:ring-[#9333ea] read-only:opacity-70'
+  'w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#150c18] border border-[#dcd4e2] dark:border-[#3d2948] text-[#2d0a33] dark:text-white placeholder-[#8f8298] focus:outline-none focus:ring-2 focus:ring-[#9333ea] read-only:opacity-70'
 export const LABEL = 'block text-xs font-semibold text-[#2d0a33] dark:text-white mb-1'
 export const BTN =
-  'px-5 py-2 rounded-xl text-sm font-bold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer'
+  'px-5 py-2 rounded-xl text-sm font-bold text-white bg-[#3e0b48] hover:bg-[#52105e] dark:bg-[#9917a2] dark:hover:bg-[#b01ebb] disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea]'
 export const BTN_SEC =
-  'px-3 py-1.5 rounded-lg text-xs font-bold text-[#5c1363] dark:text-[#f38df9] bg-[#f4e8f7] dark:bg-[#34163d] hover:opacity-80 disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer'
+  'px-3 py-1.5 rounded-lg text-xs font-bold text-[#5c1363] dark:text-[#f38df9] bg-[#f4e8f7] dark:bg-[#34163d] hover:opacity-80 disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea]'
 export const TH =
   'px-5 py-3 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider'
 /** Cabeçalho de tabela em minúscula (primeira letra maiúscula), sem uppercase nem tracking. */
