@@ -8,11 +8,11 @@ import {
   type Prestador,
 } from '../services/api'
 import { BTN, ErroBox } from '../components/formUi'
-import { ConvencaoContratos } from '../components/ConvencaoContratos'
-import { ConvencaoDetalhe } from '../components/ConvencaoDetalhe'
-import { ConvencoesLista } from '../components/ConvencoesLista'
-import { ConvencaoForm } from '../components/ConvencaoForm'
-import { rotuloEscopo } from '../utils/convencoes'
+import { PerfilJornadaContratos } from '../components/PerfilJornadaContratos'
+import { DetalhePerfilJornada } from '../components/DetalhePerfilJornada'
+import { PerfisJornadaLista } from '../components/PerfisJornadaLista'
+import { PerfilJornadaForm } from '../components/PerfilJornadaForm'
+import { rotuloEscopo } from '../utils/perfisJornadaFormato'
 import { PERFIL_PADRAO } from '../utils/perfisJornada'
 
 type Tela = { tipo: 'lista' } | { tipo: 'ver'; perfil: string } | { tipo: 'form'; perfil: string | null }
@@ -173,7 +173,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
         </div>
       ) : tela.tipo === 'lista' ? (
         <>
-          <ConvencoesLista
+          <PerfisJornadaLista
             perfis={perfis}
             detalhes={detalhes}
             escopoDe={escopoDe}
@@ -181,12 +181,12 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
             onNova={() => setTela({ tipo: 'form', perfil: null })}
             onVer={(perfil) => setTela({ tipo: 'ver', perfil })}
           />
-          <ConvencaoContratos contratos={contratos} perfis={perfis} onTrocar={trocarContrato} modoEscolha={modoEscolha} />
+          <PerfilJornadaContratos contratos={contratos} perfis={perfis} onTrocar={trocarContrato} modoEscolha={modoEscolha} />
         </>
       ) : tela.tipo === 'ver' ? (
         detalhe &&
         padrao && (
-          <ConvencaoDetalhe
+          <DetalhePerfilJornada
             key={detalhe.perfil}
             detalhe={detalhe}
             padrao={padrao}
@@ -200,7 +200,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
         )
       ) : tela.perfil === null ? (
         padrao && (
-          <ConvencaoForm
+          <PerfilJornadaForm
             existente={null}
             padrao={padrao}
             plataforma={!modoEscolha}
@@ -212,7 +212,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
       ) : (
         detalhe &&
         padrao && (
-          <ConvencaoForm
+          <PerfilJornadaForm
             existente={detalhe}
             padrao={padrao}
             plataforma={!modoEscolha}

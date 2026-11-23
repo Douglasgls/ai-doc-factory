@@ -15,7 +15,7 @@ import {
   fraseValor,
   frasePorData,
   type DefParametro,
-} from '../utils/convencoes'
+} from '../utils/perfisJornadaFormato'
 import {
   BASE_LEGAL_MAX,
   NOME_MAX,
@@ -35,7 +35,7 @@ import {
   type Entrada,
   type Escopo,
   type EstadoForm,
-} from '../utils/convencaoForm'
+} from '../utils/perfilJornadaForm'
 
 const SUAVE = 'text-[#6e6378] dark:text-[#a093a8]'
 
@@ -59,7 +59,7 @@ interface Props {
   onSalvo: (perfil: string) => void
 }
 
-export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, prestadores, onCancelar, onSalvo }) => {
+export const PerfilJornadaForm: React.FC<Props> = ({ existente, padrao, plataforma, prestadores, onCancelar, onSalvo }) => {
   const inicial = useMemo(() => estadoInicial(existente, 'geral'), [existente])
   const [estado, setEstado] = useState<EstadoForm>(inicial)
   const [erros, setErros] = useState<Record<string, string>>({})
@@ -161,7 +161,7 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
     }
   }
 
-  const idTitulo = 'form-convencao-titulo'
+  const idTitulo = 'form-perfil-jornada-titulo'
   const contagemErros = errosPorAba(erros)
   const contagemAlt = alteracoesPorGrupo(estado.alteracoes)
   const abas: AbaDef[] = GRUPOS.map((g) => ({ id: g.id, rotulo: g.titulo, contagem: contagemAlt[g.id], erro: contagemErros[g.id] > 0 }))

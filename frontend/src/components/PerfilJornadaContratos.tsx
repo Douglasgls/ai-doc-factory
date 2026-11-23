@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import type { Contrato, PerfilJornadaResumo } from '../services/api'
 import { BTN_SEC, CARD, ErroBox, TD, TH_PLANO } from './formUi'
-import { descreverVigencia, hojeIso } from '../utils/convencoes'
+import { descreverVigencia, hojeIso } from '../utils/perfisJornadaFormato'
 
 const SUAVE = 'text-[#6e6378] dark:text-[#a093a8]'
 
@@ -14,7 +14,7 @@ interface Props {
   modoEscolha?: boolean
 }
 
-export const ConvencaoContratos: React.FC<Props> = ({ contratos, perfis, onTrocar, modoEscolha = false }) => {
+export const PerfilJornadaContratos: React.FC<Props> = ({ contratos, perfis, onTrocar, modoEscolha = false }) => {
   const [pendente, setPendente] = useState<{ id: number; perfil: string } | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -45,9 +45,9 @@ export const ConvencaoContratos: React.FC<Props> = ({ contratos, perfis, onTroca
   }
 
   return (
-    <section className={`${CARD} overflow-hidden`} aria-labelledby="convencao-contratos">
+    <section className={`${CARD} overflow-hidden`} aria-labelledby="perfil-jornada-contratos">
       <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-        <h2 id="convencao-contratos" className="text-sm font-bold text-[#2d0a33] dark:text-white">
+        <h2 id="perfil-jornada-contratos" className="text-sm font-bold text-[#2d0a33] dark:text-white">
           {modoEscolha ? 'Convenção da sua empresa' : 'Convenção de cada contrato'}
         </h2>
         <p className={`text-xs mt-0.5 ${SUAVE}`}>
