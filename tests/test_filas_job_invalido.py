@@ -14,7 +14,7 @@ def r():
     cli = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
     fila = f"teste_{uuid.uuid4().hex[:8]}"
     yield cli, fila
-    cli.delete(fila, f"{fila}:proc")
+    cli.delete(fila, f"{fila}:proc", f"{fila}:atrasados")
     for x in cli.lrange(DLQ, 0, -1):
         try:
             if json.loads(x).get("fila") == fila:
@@ -47,8 +47,8 @@ def test_sem_tentativas_conta_como_zero(r):
         raise RuntimeError("boom")
 
     assert processar_um(cli, fila, falha, timeout=1) is True
-    # primeira falha: volta para a fila com tentativas=1
-    assert json.loads(cli.lrange(fila, 0, -1)[0])["tentativas"] == 1
+    # primeira falha: vai para atrasados com tentativas=1
+    assert json.loads(cli.zrange(f"{fila}:atrasados", 0, -1)[0])["tentativas"] == 1
     assert cli.llen(f"{fila}:proc") == 0
 
 

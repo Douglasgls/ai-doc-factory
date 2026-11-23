@@ -39,6 +39,8 @@ FILA_CLASSIFICAR = "classificar_documento"
 FILA_ANALISAR = "analisar_folha_ponto"
 FILA_EXTRAIR = "extrair_campos"  # Goal 7: fora do fan-in do lote
 MAX_TENTATIVAS = 3
+# Espera (segundos) antes de cada nova tentativa de um job que falhou: 1ª falha, 2ª falha (a 3ª vai para a dlq).
+ESPERAS_TENTATIVA = tuple(float(x) for x in os.getenv("FILA_ESPERAS", "5,30,120").split(","))
 
 # Segmentação: similaridade TF-IDF (cosseno) entre páginas consecutivas.
 # Abaixo de SEG_SIM_BAIXO abre documento; a partir de SEG_SIM_ALTO continua; entre os dois é ambíguo.
