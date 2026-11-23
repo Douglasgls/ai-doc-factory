@@ -5,6 +5,7 @@ import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
 import { extraEmailClasses, validarEmail } from '../utils/convites'
 import { CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL } from './formUi'
 import { ConviteLink } from './ConviteLink'
+import { explicarErro } from '../utils/errosCadastro'
 
 /** Resultado do cadastro, conforme o `acesso` devolvido pela API. */
 export const ResultadoTerceirizada: React.FC<{ resultado: TerceirizadaCadastrada }> = ({ resultado }) => (
@@ -90,7 +91,7 @@ export const CadastroTerceirizadaForm: React.FC<CadastroTerceirizadaFormProps> =
       setEmail('')
       await onCadastrada()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Erro ao cadastrar terceirizada')
+      setFormError(err instanceof Error ? explicarErro(err.message) : 'Erro ao cadastrar terceirizada')
     } finally {
       setSaving(false)
     }

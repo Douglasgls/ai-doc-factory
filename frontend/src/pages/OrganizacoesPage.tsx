@@ -21,6 +21,7 @@ import {
   ReenvioLinha,
 } from '../components/ReenvioConvite'
 import { useReenvioConvite } from '../hooks/useReenvioConvite'
+import { explicarErro } from '../utils/errosCadastro'
 
 type Aba = 'contratos' | 'tomadores' | 'prestadores'
 
@@ -107,7 +108,7 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
       await acao()
       await carregar()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Erro ao salvar')
+      setFormError(err instanceof Error ? explicarErro(err.message) : 'Erro ao salvar')
     } finally {
       setSaving(false)
     }
@@ -145,7 +146,7 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
       )
       setConvEmail('')
     } catch (err) {
-      setConvError(err instanceof Error ? err.message : 'Erro ao criar convite')
+      setConvError(err instanceof Error ? explicarErro(err.message) : 'Erro ao criar convite')
     } finally {
       setConvSaving(false)
     }

@@ -981,6 +981,22 @@ export const apiService = {
     return response.json();
   },
 
+  /** Troca o link de um convite não usado: o antigo deixa de valer e o novo vem só nesta resposta. */
+  reemitirConvite: async (id: number): Promise<ConviteCriado> => {
+    const response = await authFetch(`/convites/${id}/reemitir`, { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao gerar novo link'));
+    }
+    return response.json();
+  },
+
+  revogarConvite: async (id: number): Promise<void> => {
+    const response = await authFetch(`/convites/${id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao revogar convite'));
+    }
+  },
+
   getConvites: async (): Promise<ConviteListado[]> => {
     const response = await authFetch(`/convites`);
     if (!response.ok) {

@@ -119,6 +119,40 @@ def revogar(session: Session, usuario: UsuarioContexto, convite_id: int) -> None
     session.commit()
 
 
+def reemitir(session: Session, usuario: UsuarioContexto, convite_id: int) -> dict:
+    """Troca o link de um convite NÃO usado: revoga o antigo e cria outro para o mesmo e-mail, nível, papel e
+    organização, na mesma transação (se a criação falhar, o antigo continua valendo). Mesmo escopo de
+    GET/DELETE /convites (fora dele, 404, igual a inexistente) e a mesma checagem de `motivo_recusa_convite` de
+    quem criaria o convite do zero (403). O novo convite herda `criado_por` do original: a regra de aceite que depende
+    de quem convidou (cliente convidando prestador) e o escopo de quem o enxerga não mudam por quem reemitiu.
+    O token novo só existe nesta resposta."""
+    onde = filtro_convite_gerenciavel(usuario)
+    if onde is None:
+        raise HTTPException(403, "apenas administradores gerenciam convites")
+    # Ordem de locks igual à de `aceitar` (convite, depois prestador): evita deadlock. A linha do convite fica travada
+    # até o fim, então um aceite simultâneo espera e a reemissão o enxerga como usado (409).
+    linha = session.execute(
+        select(Convite.email, Convite.nivel, Convite.papel, Convite.tomador_id, Convite.prestador_id,
+               Convite.criado_por, Convite.usado_em).where(Convite.id == convite_id, onde)
+        .with_for_update(of=Convite)).first()
+    if linha is None:
+        raise HTTPException(404, "convite não encontrado")
+    email, nivel, papel, tomador_id, prestador_id, criado_por, usado_em = linha
+    if usado_em is not None:
+        raise HTTPException(409, "convite já usado")
+    if prestador_id is not None:
+        travar_prestador(session, prestador_id)
+    motivo = motivo_recusa_convite(session, usuario, nivel, papel, tomador_id, prestador_id)
+    if motivo is not None:
+        raise HTTPException(403, motivo)
+    session.execute(update(Convite).where(Convite.id == convite_id)
+                    .values(expira_em=func.least(Convite.expira_em, func.now()))
+                    .execution_options(synchronize_session=False))
+    novo = criar_na_transacao(session, email, nivel, papel, tomador_id, prestador_id, criado_por)
+    session.commit()
+    return novo
+
+
 def consultar(session: Session, token: str) -> dict:
     if len(token) > TOKEN_MAX:
         raise _nao_encontrado()

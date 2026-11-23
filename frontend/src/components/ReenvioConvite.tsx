@@ -7,13 +7,25 @@ import type { ReenvioConvite } from '../hooks/useReenvioConvite'
 import { BTN, BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo, TD } from './formUi'
 import { ConviteLink } from './ConviteLink'
 
-export const ConviteGeradoCard: React.FC<{ reenvio: ReenvioConvite }> = ({ reenvio }) =>
-  reenvio.link ? (
-    <div className={`${CARD} p-5 space-y-3`}>
-      <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">Convite para {reenvio.link.titulo}</h3>
-      <ConviteLink token={reenvio.link.token} expiraEm={reenvio.link.expiraEm} />
-    </div>
-  ) : null
+export const ConviteGeradoCard: React.FC<{ reenvio: ReenvioConvite }> = ({ reenvio }) => (
+  <>
+    <ErroBox message={reenvio.erroAcao} />
+    {reenvio.aviso && (
+      <p role="status" className="text-sm font-medium text-emerald-700 dark:text-emerald-400">{reenvio.aviso}</p>
+    )}
+    {reenvio.link && (
+      <div className={`${CARD} p-5 space-y-3`}>
+        <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">Convite para {reenvio.link.titulo}</h3>
+        <ConviteLink
+          token={reenvio.link.token}
+          expiraEm={reenvio.link.expiraEm}
+          email={reenvio.link.email}
+          papel={reenvio.link.papel}
+        />
+      </div>
+    )}
+  </>
+)
 
 export const AcessoSelo: React.FC<{ contrato: Contrato }> = ({ contrato }) => (
   <Selo tom={contrato.acesso_prestador === 'ativo' ? 'verde' : contrato.acesso_prestador === 'convite_pendente' ? 'ambar' : 'cinza'}>
@@ -21,12 +33,28 @@ export const AcessoSelo: React.FC<{ contrato: Contrato }> = ({ contrato }) => (
   </Selo>
 )
 
-export const ReenvioBotao: React.FC<{ contrato: Contrato; reenvio: ReenvioConvite }> = ({ contrato, reenvio }) =>
-  contrato.acesso_prestador === 'sem_acesso' && contrato.ativo ? (
-    <button type="button" className={BTN_SEC} onClick={() => reenvio.abrir(contrato)}>
-      Enviar novo convite
-    </button>
-  ) : null
+export const ReenvioBotao: React.FC<{ contrato: Contrato; reenvio: ReenvioConvite }> = ({ contrato, reenvio }) => {
+  if (!contrato.ativo) return null
+  if (contrato.acesso_prestador === 'sem_acesso') {
+    return (
+      <button type="button" className={BTN_SEC} onClick={() => reenvio.abrir(contrato)}>
+        Enviar novo convite
+      </button>
+    )
+  }
+  if (contrato.acesso_prestador !== 'convite_pendente') return null
+  const ocupado = reenvio.ocupado === contrato.prestador_id
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className={BTN_SEC} disabled={ocupado} onClick={() => void reenvio.gerarNovoLink(contrato)}>
+        {ocupado && <Loader2 className="w-3.5 h-3.5 animate-spin" />}Gerar novo link
+      </button>
+      <button type="button" className={BTN_SEC} disabled={ocupado} onClick={() => void reenvio.revogar(contrato)}>
+        Revogar convite
+      </button>
+    </div>
+  )
+}
 
 /** Linha extra da tabela, com o formulário de e-mail, enquanto o reenvio estiver aberto para este contrato. */
 export const ReenvioLinha: React.FC<{ contrato: Contrato; reenvio: ReenvioConvite; colSpan: number }> = ({
