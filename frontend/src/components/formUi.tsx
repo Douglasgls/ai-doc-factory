@@ -13,6 +13,8 @@ export const BTN_SEC =
   'px-3 py-1.5 rounded-lg text-xs font-bold text-[#5c1363] dark:text-[#f38df9] bg-[#f4e8f7] dark:bg-[#34163d] hover:opacity-80 disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer'
 export const TH =
   'px-5 py-3 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider'
+/** Cabeçalho de tabela em minúscula (primeira letra maiúscula), sem uppercase nem tracking. */
+export const TH_PLANO = 'px-5 py-3 text-xs font-semibold text-[#6e6378] dark:text-[#a093a8]'
 export const TD = 'px-5 py-3 text-sm text-[#2d0a33] dark:text-[#f8f5fc]'
 
 export const ErroBox: React.FC<{ message: string | null }> = ({ message }) =>

@@ -16,7 +16,7 @@ interface HeaderProps {
   onSelectTab: (tab: 'documentos' | 'revisao' | 'organizacoes' | 'perfis' | 'terceirizadas' | 'equipe') => void
   /** Só o nível plataforma vê a tela de Organizações. */
   showOrganizacoes?: boolean
-  /** Perfis de jornada (análise de ponto): também só a plataforma. */
+  /** Convenções coletivas (perfis de jornada da análise de ponto). */
   showPerfis?: boolean
   /** Administrador do cliente (tomador) cadastra terceirizadas. */
   showTerceirizadas?: boolean
@@ -118,8 +118,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('perfis')}
-                title="Perfis de jornada"
-                aria-label="Perfis de jornada"
+                title="Convenções coletivas"
+                aria-label="Convenções coletivas"
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
                   activeTab === 'perfis'
                     ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
@@ -127,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Clock className="w-4 h-4" />
-                <span className="hidden lg:inline">Jornada</span>
+                <span className="hidden lg:inline">Convenções</span>
               </button>
             )}
 
