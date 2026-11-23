@@ -65,7 +65,7 @@ export function App() {
     return true // Default dark mode
   })
 
-  // Autenticação: o token fica em sessionStorage; sem ele só o login aparece e nenhuma chamada de dados é feita
+  // Autenticação: o token fica em sessionStorage (ou em localStorage, se marcou "Manter conectado"); sem ele só o login aparece e nenhuma chamada de dados é feita
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authToken.get() !== null)
 
   // Navigation view state: 'home' | 'categoria' | 'revisao'

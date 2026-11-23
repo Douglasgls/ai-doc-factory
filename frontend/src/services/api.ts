@@ -10,10 +10,20 @@ const TOKEN_KEY = 'auth_token';
 /** Disparado em qualquer 401: o App limpa o estado e mostra o login. */
 export const AUTH_EXPIRED_EVENT = 'auth:expired';
 
+/**
+ * O token fica em sessionStorage (some ao fechar a aba) ou, se a pessoa marcou "Manter conectado neste dispositivo",
+ * em localStorage (sobrevive ao fechar o navegador). Lê de um e do outro; grava em só um; limpa os dois.
+ */
 export const authToken = {
-  get: (): string | null => sessionStorage.getItem(TOKEN_KEY),
-  set: (token: string) => sessionStorage.setItem(TOKEN_KEY, token),
-  clear: () => sessionStorage.removeItem(TOKEN_KEY),
+  get: (): string | null => sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY),
+  set: (token: string, manterConectado = false) => {
+    authToken.clear();
+    (manterConectado ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
+  },
+  clear: () => {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+  },
 };
 
 /**
@@ -68,7 +78,7 @@ export interface LoginResponse {
 }
 
 /** Login: não passa por authFetch, porque um 401 aqui é senha errada e não sessão expirada. */
-export const login = async (usuario: string, senha: string): Promise<LoginResponse> => {
+export const login = async (usuario: string, senha: string, manterConectado = false): Promise<LoginResponse> => {
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}/auth/login`, {
@@ -84,7 +94,7 @@ export const login = async (usuario: string, senha: string): Promise<LoginRespon
     throw new Error(typeof error.detail === 'string' ? error.detail : 'Erro ao entrar.');
   }
   const data: LoginResponse = await response.json();
-  authToken.set(data.access_token);
+  authToken.set(data.access_token, manterConectado);
   return data;
 };
 

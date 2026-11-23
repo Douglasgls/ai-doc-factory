@@ -568,7 +568,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                   {/* Card Expandido de Detalhes */}
                   {isExpanded && (
                     <div className="mt-3 ml-12 rounded-xl bg-[#f8f5fa] dark:bg-[#1b1220] border border-[#e6dfec] dark:border-[#2c1f35] p-3.5">
-                      {/* Topo: Documentos identificados (+ Categoria se concluído) + Protocolo #id */}
+                      {/* Topo: Documentos identificados (+ Categoria se concluído) */}
                       <div className="flex items-center justify-between gap-2 text-xs text-[#7e7287] dark:text-[#9e92a8] mb-3 flex-wrap">
                         <div className="flex items-center gap-2 min-w-0 flex-wrap">
                           <span className="flex items-center gap-1.5">
@@ -595,9 +595,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
                           )}
                         </div>
 
-                        <span className="text-[#8e8296] shrink-0">
-                          {lote.id > 0 ? `Protocolo #${lote.id}` : 'Enviando...'}
-                        </span>
+                        {lote.id <= 0 && <span className="text-[#8e8296] shrink-0">Enviando...</span>}
                       </div>
 
                       {/* 4 Etapas com Check: Leitura | Classificação | Extração | Validação */}

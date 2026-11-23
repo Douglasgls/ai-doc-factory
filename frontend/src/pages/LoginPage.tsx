@@ -11,7 +11,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
   const [usuario, setUsuario] = useState('')
   const [senha, setSenha] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [manterConectado, setManterConectado] = useState(true)
+  const [manterConectado, setManterConectado] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [showEsqueciAviso, setShowEsqueciAviso] = useState(false)
@@ -26,7 +26,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
     setError(null)
     setIsLoading(true)
     try {
-      await login(usuario, senha)
+      await login(usuario, senha, manterConectado)
       onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao entrar.')
@@ -74,7 +74,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
                 type="text"
                 autoComplete="username"
                 required
-                placeholder="Digite seu usuário"
+                placeholder="Digite seu usuário ou e-mail"
                 value={usuario}
                 onChange={(e) => {
                   setUsuario(e.target.value)
