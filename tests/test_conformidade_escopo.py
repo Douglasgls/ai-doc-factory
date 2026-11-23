@@ -155,15 +155,43 @@ def test_nome_divergente_do_mesmo_cpf_em_outro_contrato_nao_desconta_o_tomador(c
     assert [d for d in _geral(cen, "P")["geral"]["descontos"] if d["regra"] == "campo_divergente"]
 
 
+def _razao_cadastrada(cen, prestador_id):
+    return cen.orgs.db.execute("SELECT razao_social FROM prestador WHERE id = %s", (prestador_id,)).fetchone()[0]
+
+
+def test_razao_social_de_empresa_com_prestador_cadastrado_mostra_o_nome_cadastrado(cen):
+    cadastrada = _razao_cadastrada(cen, cen.p)
+    assert cadastrada != "Alfa Ltda"  # os documentos trazem outro nome extraído
+    assert _geral(cen, "A")["razao_social"] == cadastrada
+    extra = [("holerite", "classificado", {**campos_pessoa(cen.cnpj_p, CPF2), "razao_social_prestadora": "Beta SA"})
+             for _ in range(5)]  # maioria "Beta SA" extraída: o nome cadastrado continua valendo
+    cen_lote = cen.lote_do_contrato(cen.contrato_bp, extra)
+    assert _geral(cen, "A")["razao_social"] == _geral(cen, "P")["razao_social"] == cadastrada
+    lista = {e["cnpj"]: e for e in client.get("/empresas", headers=cen.h["P"]).json()}
+    assert lista[cen.cnpj_p]["razao_social"] == cadastrada
+    lote_id = cen_lote[0]
+    no_lote = client.get(f"/lotes/{lote_id}/conformidade", headers=cen.h["P"]).json()["empresas"]
+    assert [e["razao_social"] for e in no_lote] == [cadastrada]
+
+
+def test_razao_social_de_empresa_so_extraida_continua_sendo_a_extraida(cen):
+    cnpj = cnpj_valido(uuid.uuid4().int)  # sem Prestador cadastrado
+    cen.novo_lote([("holerite", "classificado", campos_pessoa(cnpj, CPF1))])
+    j = client.get(f"/empresas/{cnpj}/conformidade", headers=cen.h["plat"]).json()
+    assert j["razao_social"] == "Alfa Ltda"
+    lista = {e["cnpj"]: e for e in client.get("/empresas", headers=cen.h["plat"]).json()}
+    assert lista[cnpj]["razao_social"] == "Alfa Ltda"
+
+
 def test_razao_social_de_outro_contrato_nao_muda_a_vista_pelo_tomador(cen):
     antes = _geral(cen, "A")
-    assert antes["razao_social"] == "Alfa Ltda"
+    cadastrada = _razao_cadastrada(cen, cen.p)
+    assert antes["razao_social"] == cadastrada
     extra = [("holerite", "classificado", {**campos_pessoa(cen.cnpj_p, CPF2), "razao_social_prestadora": "Beta SA"})
-             for _ in range(5)]  # maioria no contrato B-P, para a razão social de P mudar se vazar
+             for _ in range(5)]
     cen.lote_do_contrato(cen.contrato_bp, extra)
-    assert _geral(cen, "A")["razao_social"] == "Alfa Ltda"
     assert _geral(cen, "A") == antes
-    assert _geral(cen, "P")["razao_social"] == "Beta SA"
+    assert _geral(cen, "P")["razao_social"] == cadastrada
 
 
 def test_404_de_empresa_fora_do_escopo_igual_ao_de_cnpj_inexistente(cen):

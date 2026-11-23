@@ -365,10 +365,11 @@ def _avaliar(escopo, campos, ref, grupos, faltas, completude=(), validade=True, 
     return res
 
 
-def calcular_empresa(todos: list[dict], campos: dict, ref: date) -> dict:
+def calcular_empresa(todos: list[dict], campos: dict, ref: date, razao_cadastrada: str | None = None) -> dict:
     """todos: documentos da empresa (analisados e em_revisao). Só os da PRÓPRIA empresa tornam pendente um
     obrigatório faltante: em_revisao com tipo sugerido conhecido cobre só esse tipo; com tipo desconhecido,
-    qualquer faltante. Fora disso o faltante é ausente. Documento sem empresa não entra aqui."""
+    qualquer faltante. Fora disso o faltante é ausente. Documento sem empresa não entra aqui.
+    razao_cadastrada: razão social do Prestador cadastrado com o CNPJ (se houver); só exibição, vale sobre a extraída."""
     docs = [d for d in todos if analisado(d)]
     pendentes = [{**d, "motivo": f"documento não analisado (estado '{d.get('estado')}', tipo '{d.get('tipo')}')"}
                  for d in todos if not analisado(d)]
@@ -386,6 +387,6 @@ def calcular_empresa(todos: list[dict], campos: dict, ref: date) -> dict:
     por_doc = {d["id"]: {**_avaliar([d], campos, ref, grupos, faltas, (), d["tipo"] in VALIDADE),
                          "origem_empresa": d.get("origem_empresa")} for d in docs}
     razoes = Counter(campos.get(d["id"], {}).get("razao_social_prestadora") for d in docs)
-    razao = next((r for r, _ in razoes.most_common() if r), None)
+    razao = razao_cadastrada or next((r for r, _ in razoes.most_common() if r), None)
     return {"razao_social": razao, "documentos_por_tipo": dict(Counter(str(d["tipo"]) for d in todos)), "data_referencia": ref.isoformat(), "geral": geral, "por_tipo": por_tipo,
             "por_documento": por_doc}

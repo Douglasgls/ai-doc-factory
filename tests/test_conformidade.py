@@ -358,3 +358,12 @@ def test_cnpj_divergente_so_pune_os_documentos_divergentes():
     assert {v["cnpj_contrato"] for v in d[0]["valores"]} == {CNPJ_A}
     assert r["por_documento"][2]["descontos"] and r["por_documento"][3]["descontos"]
     assert r["por_documento"][1]["descontos"] == []  # coerente numa empresa com divergência: não é punido
+
+
+def test_razao_social_cadastrada_vale_sobre_a_extraida_sem_mexer_na_consistencia():
+    docs, campos = lote(OBRIG, pessoa())
+    empresas, _ = agrupar_empresas(docs, campos)
+    assert calcular_empresa(empresas[CNPJ_A], campos, REF)["razao_social"] == "Alfa Serviços Ltda"
+    r = calcular_empresa(empresas[CNPJ_A], campos, REF, "Prestador Cadastrado Ltda")
+    assert r["razao_social"] == "Prestador Cadastrado Ltda"
+    assert r["geral"] == calcular_empresa(empresas[CNPJ_A], campos, REF)["geral"]
