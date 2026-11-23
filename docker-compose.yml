@@ -20,6 +20,7 @@ x-app: &app
     AUTH_SENHA: ${AUTH_SENHA:-}
     AUTH_SEGREDO: ${AUTH_SEGREDO:-}
     AUTH_EXPIRA_MIN: ${AUTH_EXPIRA_MIN:-480}
+    CONVITE_VALIDADE_DIAS: ${CONVITE_VALIDADE_DIAS:-7}
     CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
   volumes:
     - dados:/data
