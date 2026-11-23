@@ -37,8 +37,8 @@ export const AbasTema: React.FC<Props> = ({ base, rotulo, abas, ativa, onChange 
   }
 
   return (
-    <div className="max-w-full min-w-0 overflow-x-auto overscroll-x-contain border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-      <div role="tablist" aria-label={rotulo} className="flex flex-nowrap gap-1 w-max min-w-full px-2">
+    <div className="max-w-full min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:thin] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
+      <div role="tablist" aria-label={rotulo} className="flex flex-nowrap gap-1 w-max min-w-full px-2 pb-px">
         {abas.map((a, i) => {
           const sel = a.id === ativa
           return (
