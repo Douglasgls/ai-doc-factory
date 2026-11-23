@@ -42,7 +42,7 @@ export function useReenvioConvite(aoEnviar: () => void | Promise<void>) {
       await acao(pendente.id)
       await aoEnviar()
     } catch (err) {
-      setErroAcao(err instanceof Error ? err.message : 'Não foi possível concluir. Tente de novo.')
+      setErroAcao(err instanceof Error ? explicarErro(err.message) : 'Não foi possível concluir. Tente de novo.')
     } finally {
       setOcupado(null)
     }

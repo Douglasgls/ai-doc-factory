@@ -431,3 +431,56 @@ def test_reemitir_falhando_na_criacao_preserva_o_convite_antigo(mundo):
     assert _reemitir(mundo.h, convite["id"]).status_code == 404  # organização desativada
     mundo.db.execute("UPDATE tomador SET ativo = true WHERE id = %s", (mundo.t1,))
     assert _vale(convite["token"])  # a transação voltou: o link antigo segue valendo
+
+
+def test_reemitir_convite_expirado_por_tempo_gera_novo(mundo):
+    c1 = _convidar(mundo.h, tomador_id=mundo.t1)
+    mundo.db.execute("UPDATE convite SET expira_em = now() - interval '1 hour' WHERE id = %s", (c1["id"],))
+    r = _reemitir(mundo.h, c1["id"])
+    assert r.status_code == 201, r.text
+    assert not _vale(c1["token"]) and _vale(r.json()["token"])
+
+
+def test_duas_reemissoes_simultaneas_deixam_so_um_convite_pendente(mundo):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    c1 = _convidar(mundo.h, nivel="prestador", papel="admin", prestador_id=mundo.p1)
+    barreira = threading.Barrier(2, timeout=10)
+
+    def chamar(_):
+        barreira.wait()
+        return _reemitir(mundo.h, c1["id"])
+    with ThreadPoolExecutor(2) as pool:
+        respostas = list(pool.map(chamar, range(2)))
+    assert sorted(r.status_code for r in respostas) == [201, 409]
+    pendentes = mundo.db.execute("SELECT count(*) FROM convite WHERE lower(email) = %s AND usado_em IS NULL "
+                                 "AND expira_em > now()", (c1["email"],)).fetchone()[0]
+    assert pendentes == 1
+    assert not _vale(c1["token"])
+
+
+def test_reemitir_e_aceitar_simultaneos_nao_dao_500_nem_deixam_dois_links(mundo):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    for _ in range(5):
+        c1 = _convidar(mundo.h, nivel="prestador", papel="admin", prestador_id=mundo.p1)
+        barreira = threading.Barrier(2, timeout=10)
+
+        def reemite():
+            barreira.wait()
+            return _reemitir(mundo.h, c1["id"])
+
+        def aceita():
+            barreira.wait()
+            return client.post(f"/convites/{c1['token']}/aceitar",
+                               json={"nome": "Fulano de Tal", "senha": "senha-falsa-longa"})
+        with ThreadPoolExecutor(2) as pool:
+            fr, fa = pool.submit(reemite), pool.submit(aceita)
+            r, a = fr.result(), fa.result()
+        assert (r.status_code, a.status_code) in {(409, 200), (201, 404)}, (r.status_code, a.status_code)
+        usuarios = mundo.db.execute("SELECT count(*) FROM usuario WHERE lower(email) = %s", (c1["email"],)).fetchone()[0]
+        pendentes = mundo.db.execute("SELECT count(*) FROM convite WHERE lower(email) = %s AND usado_em IS NULL "
+                                     "AND expira_em > now()", (c1["email"],)).fetchone()[0]
+        assert (usuarios, pendentes) == ((1, 0) if a.status_code == 200 else (0, 1))
+        mundo.db.execute("DELETE FROM usuario WHERE lower(email) = %s", (c1["email"],))
+        mundo.db.execute("DELETE FROM convite WHERE lower(email) = %s", (c1["email"],))

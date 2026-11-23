@@ -129,9 +129,12 @@ def reemitir(session: Session, usuario: UsuarioContexto, convite_id: int) -> dic
     onde = filtro_convite_gerenciavel(usuario)
     if onde is None:
         raise HTTPException(403, "apenas administradores gerenciam convites")
+    # Ordem de locks igual à de `aceitar` (convite, depois prestador): evita deadlock. A linha do convite fica travada
+    # até o fim, então um aceite simultâneo espera e a reemissão o enxerga como usado (409).
     linha = session.execute(
         select(Convite.email, Convite.nivel, Convite.papel, Convite.tomador_id, Convite.prestador_id,
-               Convite.criado_por, Convite.usado_em).where(Convite.id == convite_id, onde)).first()
+               Convite.criado_por, Convite.usado_em).where(Convite.id == convite_id, onde)
+        .with_for_update(of=Convite)).first()
     if linha is None:
         raise HTTPException(404, "convite não encontrado")
     email, nivel, papel, tomador_id, prestador_id, criado_por, usado_em = linha
@@ -142,9 +145,6 @@ def reemitir(session: Session, usuario: UsuarioContexto, convite_id: int) -> dic
     motivo = motivo_recusa_convite(session, usuario, nivel, papel, tomador_id, prestador_id)
     if motivo is not None:
         raise HTTPException(403, motivo)
-    # Trava a linha e reconfere `usado_em`: um aceite simultâneo não pode ser desfeito pela reemissão.
-    if session.execute(select(Convite.usado_em).where(Convite.id == convite_id).with_for_update()).scalar_one()             is not None:
-        raise HTTPException(409, "convite já usado")
     session.execute(update(Convite).where(Convite.id == convite_id)
                     .values(expira_em=func.least(Convite.expira_em, func.now()))
                     .execution_options(synchronize_session=False))

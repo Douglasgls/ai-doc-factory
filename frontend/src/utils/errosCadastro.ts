@@ -35,7 +35,7 @@ const EXPLICACOES: [RegExp, string][] = [
   ],
   [
     /já existe convite pendente para este e-mail/i,
-    'Já existe um convite aguardando resposta para este e-mail. Para enviar outro, gere um novo link na lista de convites.',
+    'Já existe um convite pendente para este e-mail. Se ele não aparece na sua lista de convites, peça a quem convidou que gere um novo link.',
   ],
 ]
 

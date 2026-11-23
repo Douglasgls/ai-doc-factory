@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronRight, Eye, FileText, Link2, Loader2, Mail, Send, ShieldCheck, User, Users, X } from 'lucide-react'
 import {
   apiService,
@@ -55,10 +55,12 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
 
   // Ações do modal de detalhes: novo link (revoga e recria) e revogar
   const [acaoOcupada, setAcaoOcupada] = useState(false)
+  const detalheAbertoId = useRef<number | null>(null) // convite do modal aberto agora (descarta resposta de outro)
   const [acaoErro, setAcaoErro] = useState<string | null>(null)
   const [novoLink, setNovoLink] = useState<ConviteCriado | null>(null)
 
   const abrirDetalhes = (c: ConviteListado) => {
+    detalheAbertoId.current = c.id
     setConviteDetalhes(c)
     setAcaoErro(null)
     setNovoLink(null)
@@ -68,7 +70,13 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
     setAcaoErro(null)
     setAcaoOcupada(true)
     try {
-      setNovoLink(await apiService.reemitirConvite(c.id))
+      const novo = await apiService.reemitirConvite(c.id)
+      if (detalheAbertoId.current === c.id) {
+        // O modal passa a mostrar o convite novo: o antigo ficou expirado.
+        detalheAbertoId.current = novo.id
+        setConviteDetalhes({ ...c, id: novo.id, estado: 'pendente', expira_em: novo.expira_em })
+        setNovoLink(novo)
+      }
       await carregar()
     } catch (err) {
       setAcaoErro(err instanceof Error ? explicarErro(err.message) : 'Não foi possível gerar o novo link. Tente de novo.')
@@ -83,10 +91,13 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
     setAcaoOcupada(true)
     try {
       await apiService.revogarConvite(c.id)
-      setConviteDetalhes(null)
+      if (detalheAbertoId.current === c.id) {
+        detalheAbertoId.current = null
+        setConviteDetalhes(null)
+      }
       await carregar()
     } catch (err) {
-      setAcaoErro(err instanceof Error ? err.message : 'Não foi possível revogar o convite. Tente de novo.')
+      setAcaoErro(err instanceof Error ? explicarErro(err.message) : 'Não foi possível revogar o convite. Tente de novo.')
     } finally {
       setAcaoOcupada(false)
     }
@@ -440,7 +451,8 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
               <button
                 type="button"
                 onClick={() => setConviteDetalhes(null)}
-                className="p-1 rounded-lg text-[#877991] hover:text-[#2d0a33] dark:hover:text-white hover:bg-[#f4e8f7] dark:hover:bg-[#34163d] transition-colors cursor-pointer"
+                disabled={acaoOcupada}
+                className="p-1 disabled:opacity-40 rounded-lg text-[#877991] hover:text-[#2d0a33] dark:hover:text-white hover:bg-[#f4e8f7] dark:hover:bg-[#34163d] transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -513,7 +525,8 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
               <button
                 type="button"
                 onClick={() => setConviteDetalhes(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-[#5c1363] dark:text-[#f38df9] bg-[#f4e8f7] dark:bg-[#34163d] hover:opacity-80 transition-all cursor-pointer"
+                disabled={acaoOcupada}
+                className="px-4 py-2 disabled:opacity-40 rounded-xl text-xs font-semibold text-[#5c1363] dark:text-[#f38df9] bg-[#f4e8f7] dark:bg-[#34163d] hover:opacity-80 transition-all cursor-pointer"
               >
                 Fechar
               </button>
