@@ -64,6 +64,11 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
     void carregar()
   }, [carregar])
 
+  const chaveTela = tela.tipo === 'lista' ? 'lista' : `${tela.tipo}:${tela.perfil}`
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [chaveTela])
+
   const nomePrestador = useCallback(
     (id: number) => prestadores.find((p) => p.id === id)?.razao_social,
     [prestadores],

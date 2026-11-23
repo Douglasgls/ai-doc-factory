@@ -66,7 +66,7 @@ export const ReguaDoDia: React.FC<Props> = ({ atual, padrao }) => {
           role="img"
           aria-label={aria}
           viewBox="0 0 640 92"
-          className="w-full min-w-[520px] h-auto"
+          className="w-full min-w-[520px] max-w-[760px] h-auto"
           xmlns="http://www.w3.org/2000/svg"
         >
           <rect x={X0} y={Y_TRILHA} width={LARGURA} height={ALTURA} rx={3} className="fill-[#f4e8f7] dark:fill-[#2a1733]" />
