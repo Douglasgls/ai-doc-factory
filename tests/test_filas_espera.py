@@ -111,3 +111,28 @@ def test_atrasado_nao_e_perdido_por_recuperar_presos(r):
     relogio[0] += 10
     assert liberar_atrasados(cli, fila, agora=relogio[0]) == 1
     assert cli.llen(fila) == 1
+
+
+def test_falha_de_job_ja_recuperado_nao_cria_copia(r):
+    cli, fila, _ = r
+    enfileirar(cli, fila, {"lote_id": 4})
+
+    def handler(p):
+        # outra replica reiniciou e devolveu o job de :proc para a fila durante o processamento
+        recuperar_presos(cli, fila)
+        raise RuntimeError("falha")
+
+    assert processar_um(cli, fila, handler, timeout=1)
+    assert cli.zcard(f"{fila}:atrasados") == 0  # sem copia
+    assert cli.llen(fila) == 1 and cli.llen(f"{fila}:proc") == 0  # so a copia recuperada
+
+
+@pytest.mark.parametrize("valor,esperado", [("", (5.0, 30.0)), (" , ", (5.0, 30.0)), ("1, 2,,3", (1.0, 2.0, 3.0))])
+def test_filas_esperas_vazio_usa_padrao(monkeypatch, valor, esperado):
+    import importlib
+    monkeypatch.setenv("FILA_ESPERAS", valor)
+    try:
+        assert importlib.reload(config).ESPERAS_TENTATIVA == esperado
+    finally:
+        monkeypatch.delenv("FILA_ESPERAS")
+        importlib.reload(config)

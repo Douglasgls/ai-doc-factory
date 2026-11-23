@@ -83,3 +83,29 @@ def test_segmentar_lote_repetido_em_concluido_nao_faz_nada(lote, monkeypatch):
     monkeypatch.setattr(ocr, "_enfileirar_classificacao", lambda ids: pytest.fail("nada a enfileirar"))
     ocr.processar_lote({"lote_id": lote})
     assert _lote(lote) == ("concluido", 0)
+
+
+def test_falha_no_ocr_so_marca_erro_ao_esgotar_as_tentativas(lote, monkeypatch):
+    from app.filas import enfileirar, processar_um
+    import redis
+    eventos = []
+    monkeypatch.setattr(ocr, "publicar_evento", lambda lid, etapa, *a, **k: eventos.append(etapa))
+
+    def quebra(*_):
+        raise RuntimeError("pdf ilegivel")
+
+    monkeypatch.setattr(ocr, "pdfinfo_from_path", quebra)
+    cli = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+    fila = f"teste_{uuid.uuid4().hex[:8]}"
+    try:
+        enfileirar(cli, fila, {"lote_id": lote})
+        for tentativa in range(1, config.MAX_TENTATIVAS + 1):
+            assert processar_um(cli, fila, ocr.processar_lote, timeout=1, ao_esgotar=ocr.marcar_erro_lote)
+            if tentativa < config.MAX_TENTATIVAS:
+                assert _lote(lote)[0] == "ocr" and "erro" not in eventos
+        assert _lote(lote)[0] == "erro" and eventos.count("erro") == 1
+    finally:
+        cli.delete(fila, f"{fila}:proc", f"{fila}:atrasados")
+        for x in cli.lrange("dlq", 0, -1):
+            if f'"{fila}"' in x:
+                cli.lrem("dlq", 0, x)

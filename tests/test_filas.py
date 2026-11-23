@@ -14,7 +14,7 @@ def r():
     cli = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
     fila = f"teste_{uuid.uuid4().hex[:8]}"
     yield cli, fila
-    cli.delete(fila, f"{fila}:proc")
+    cli.delete(fila, f"{fila}:proc", f"{fila}:atrasados")
     for x in cli.lrange(DLQ, 0, -1):  # remove só os mortos desta fila de teste
         if json.loads(x)["fila"] == fila:
             cli.lrem(DLQ, 0, x)

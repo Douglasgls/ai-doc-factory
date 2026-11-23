@@ -117,6 +117,16 @@ def segmentar_e_gravar(lote_id: int) -> list[int]:
     return ids
 
 
+def marcar_erro_lote(payload: dict) -> None:
+    """ao_esgotar: o job foi para a dlq. Marca o lote como 'erro' (só se ainda estiver em 'ocr') e avisa."""
+    lote_id = payload["lote_id"]
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        row = conn.execute("UPDATE lote SET estado = 'erro' WHERE id = %s AND estado = 'ocr' RETURNING id",
+                           (lote_id,)).fetchone()
+    if row is not None:
+        publicar_evento(lote_id, "erro", "Falha no processamento de OCR/segmentação.")
+
+
 def processar_lote(payload: dict) -> None:
     lote_id = payload["lote_id"]
     if lote_cancelado(lote_id):
@@ -170,8 +180,8 @@ def processar_lote(payload: dict) -> None:
         )
         ids = segmentar_e_gravar(lote_id)
     except Exception:
-        _estado(lote_id, "erro")  # o retry da fila volta o lote para 'ocr'
-        publicar_evento(lote_id, "erro", "Falha no processamento de OCR/segmentação.")
+        # 'erro' só ao esgotar as tentativas (marcar_erro_lote, via ao_esgotar); entre elas o lote segue em 'ocr'
+        publicar_evento(lote_id, "ocr", "Falha temporária no OCR/segmentação; tentando de novo em instantes.")
         raise
     if lote_cancelado(lote_id):
         _marcar_lote_cancelado_db(lote_id)

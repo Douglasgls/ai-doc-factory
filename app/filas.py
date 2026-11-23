@@ -17,12 +17,14 @@ DLQ = "dlq"
 # Falha -> atrasados: tira de :proc e põe no ZSET em um único passo atômico (nunca perde nem duplica).
 _LUA_ATRASAR = """
 local removidos = redis.call('LREM', KEYS[1], 1, ARGV[1])
-redis.call('ZADD', KEYS[2], ARGV[3], ARGV[2])
+if removidos == 1 then
+  redis.call('ZADD', KEYS[2], ARGV[3], ARGV[2])
+end
 return removidos
 """
 # Libera os vencidos: ZREM só conta para quem de fato removeu, então dois workers nunca liberam o mesmo job.
 _LUA_LIBERAR = """
-local vencidos = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, 100)
+local vencidos = redis.call('ZRANGE', KEYS[1], '-inf', ARGV[1], 'BYSCORE', 'LIMIT', 0, 100)
 local n = 0
 for _, job in ipairs(vencidos) do
   if redis.call('ZREM', KEYS[1], job) == 1 then
@@ -96,8 +98,11 @@ def processar_um(r: redis.Redis, fila: str, handler: Callable[[dict], None], tim
             # espera crescente; sai de :proc e entra em atrasados de forma atômica (já faz o ack)
             # uid evita que dois jobs idênticos virem o mesmo membro do ZSET (e um deles se perca)
             job["uid"] = uuid.uuid4().hex
-            r.eval(_LUA_ATRASAR, 2, proc, f"{fila}:atrasados", bruto, json.dumps(job),
-                   time.time() + _espera(job["tentativas"]))
+            removidos = r.eval(_LUA_ATRASAR, 2, proc, f"{fila}:atrasados", bruto, json.dumps(job),
+                               time.time() + _espera(job["tentativas"]))
+            if not removidos:
+                # outra réplica já recuperou este job de :proc: a cópia da fila é a válida, não cria outra
+                log.warning("job de %s não estava mais em :proc (já recuperado); não atrasa de novo", fila)
             return True
     r.lrem(proc, 1, bruto)
     return True
