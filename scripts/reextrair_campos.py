@@ -71,9 +71,11 @@ def main(argv=None) -> int:
 
     from app.extracao import enfileirar_extracao
     cli = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-    ok = sum(enfileirar_extracao(i, cli) for i, _ in docs)
-    print(f"enfileirados: {ok} de {len(docs)} na fila {config.FILA_EXTRAIR}")
-    return 0 if ok == len(docs) else 1
+    falhas = [i for i, _ in docs if enfileirar_extracao(i, cli) is False]  # só False é falha explícita
+    print(f"enfileirados: {len(docs) - len(falhas)} de {len(docs)} na fila {config.FILA_EXTRAIR}")
+    if falhas:
+        print("falhou ao enfileirar:", ", ".join(map(str, falhas)))
+    return 1 if falhas else 0
 
 
 if __name__ == "__main__":

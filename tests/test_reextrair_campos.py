@@ -67,13 +67,9 @@ def test_dry_run_nao_enfileira(lote, capsys):
     assert r.llen(config.FILA_EXTRAIR) == antes
 
 
-def test_executar_enfileira_com_o_payload_de_sempre(lote):
+def test_executar_enfileira_pela_funcao_de_sempre(lote, extracoes):
     with psycopg.connect(config.DATABASE_URL) as conn:
         doc = _doc(conn, lote, 1, "classificado", "gemini:gemini-extracao-v3")
-    r = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
-    r.delete(config.FILA_EXTRAIR)
+        _doc(conn, lote, 2, "classificado", f"gemini:{ATUAL}")
     assert reextrair_campos.main(["--lote", str(lote), "--executar"]) == 0
-    import json
-    itens = [json.loads(x) for x in r.lrange(config.FILA_EXTRAIR, 0, -1)]
-    assert [i["payload"] for i in itens] == [{"documento_id": doc}]
-    r.delete(config.FILA_EXTRAIR)
+    assert list(extracoes) == [doc] and extracoes.forcadas == []  # mesmo caminho e payload do sistema
