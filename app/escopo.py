@@ -9,11 +9,12 @@ declaram a dependência (por rota) ou passam o usuário às listagens.
 Listagens filtram na consulta SQL (`filtro_lote`, `filtro_contrato`, expressões SQLAlchemy); recurso por id passa pelas dependências
 `lote_para_leitura`/`lote_para_escrita`/`documento_para_leitura`/`documento_para_escrita`."""
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import ColumnElement, and_, exists, false, func, select, true
+from sqlalchemy import ColumnElement, and_, exists, false, func, or_, select, true
 from sqlalchemy.orm import Session, aliased
 
 from app.database import get_session
-from app.models import Contrato, Convite, Documento, Lote, Prestador, Tomador, Usuario
+from app.models import Contrato, Convite, Documento, Lote, PerfilJornadaCadastro, Prestador, Tomador, Usuario
+from app.ponto import PERFIL_PADRAO
 from app.routers.auth.actions import ID_MAX, UsuarioContexto, exigir_plataforma, exigir_usuario  # noqa: F401
 
 METODOS_LEITURA = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -278,10 +279,68 @@ def perfil_de_contrato_proprio(contrato_id: str, usuario: UsuarioContexto = Depe
 
 def leitura_de_perfis(usuario: UsuarioContexto = Depends(exigir_usuario),
                       session: Session = Depends(get_session)) -> UsuarioContexto:
-    """Dependência de GET /perfis-jornada e GET /perfis-jornada/{perfil}."""
+    """Dependência de GET /perfis-jornada e GET /perfis-jornada/{perfil}. Quais perfis cada um vê: `filtro_perfil`."""
     leitura_de_perfis_permitida(session, usuario)
     session.commit()
     return usuario
+
+
+def escrita_de_perfis(usuario: UsuarioContexto = Depends(exigir_usuario),
+                      session: Session = Depends(get_session)) -> UsuarioContexto:
+    """Dependência de POST /perfis-jornada e PUT /perfis-jornada/{perfil}: plataforma ou admin de empresa própria
+    (mesmo critério da leitura). Em quais perfis cada um escreve: `exigir_perfil_editavel`."""
+    leitura_de_perfis_permitida(session, usuario)
+    session.commit()
+    return usuario
+
+
+# ---------- escopo dos perfis de jornada (geral ou de um prestador) ----------
+# - plataforma: vê e edita tudo; cria perfis gerais ou de um prestador; marca/desmarca geral.
+# - admin de empresa própria: vê o Padrão, os gerais e os do próprio prestador; cria perfis (nascem dele, nunca
+#   gerais) e edita só os dele. Perfil fora do escopo = 404, igual a inexistente; visível mas não editável = 403.
+# - Perfil sem linha de cadastro, ou "não geral e sem dono" (os que existiam antes): só a plataforma.
+
+_NEGADO_EDICAO_PERFIL = "apenas a plataforma ou o dono do perfil o edita"
+
+
+def filtro_perfil(usuario: UsuarioContexto, c=PerfilJornadaCadastro) -> ColumnElement[bool]:
+    """Condição sobre o cadastro de perfil `c` (entidade ou alias): o perfil está no escopo de leitura do usuário."""
+    if usuario.nivel == "plataforma":
+        return true()
+    if _eh_admin_de_prestador(usuario):
+        return or_(c.perfil == PERFIL_PADRAO, c.geral, c.prestador_id == usuario.prestador_id)
+    return false()  # os demais nem leem perfis (leitura_de_perfis); falha fechada
+
+
+def perfil_nao_encontrado(perfil: str) -> HTTPException:
+    return HTTPException(404, f"perfil '{perfil}' não encontrado")
+
+
+def exigir_perfil_no_escopo(session: Session, usuario: UsuarioContexto, perfil: str) -> None:
+    """404 (o mesmo de um perfil inexistente) se o perfil não está no escopo de leitura do usuário. A plataforma
+    passa sempre: se o perfil não existe, quem chama responde o 404 pelo próprio caminho."""
+    if usuario.nivel == "plataforma":
+        return
+    if session.execute(select(PerfilJornadaCadastro.perfil).where(
+            PerfilJornadaCadastro.perfil == perfil, filtro_perfil(usuario))).first() is None:
+        raise perfil_nao_encontrado(perfil)
+
+
+def perfil_editavel(usuario: UsuarioContexto, cadastro: PerfilJornadaCadastro | None) -> bool:
+    """O Padrão nunca é editável pela API; fora isso, a plataforma edita tudo e o admin só os do próprio prestador."""
+    if cadastro is not None and cadastro.perfil == PERFIL_PADRAO:
+        return False
+    if usuario.nivel == "plataforma":
+        return True
+    return (_eh_admin_de_prestador(usuario) and cadastro is not None
+            and cadastro.prestador_id == usuario.prestador_id)
+
+
+def exigir_perfil_editavel(session: Session, usuario: UsuarioContexto, perfil: str) -> None:
+    """404 fora do escopo; 403 se o perfil é visível mas de outro dono (geral ou do Padrão)."""
+    exigir_perfil_no_escopo(session, usuario, perfil)
+    if usuario.nivel != "plataforma" and not perfil_editavel(usuario, session.get(PerfilJornadaCadastro, perfil)):
+        raise HTTPException(403, _NEGADO_EDICAO_PERFIL)
 
 
 def exigir_prestador_sem_empresa_propria(session: Session, prestador_id: int) -> None:

@@ -1,7 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, Numeric, Text, UniqueConstraint
+from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, ForeignKey, Index, Numeric, Text,
+                        UniqueConstraint, text)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -30,10 +31,14 @@ class PerfilJornadaCadastro(Base):
     __table_args__ = (
         CheckConstraint("btrim(nome) <> ''", name="perfil_jornada_cadastro_nome_check"),
         CheckConstraint("vigencia_inicio IS NULL OR vigencia_fim IS NULL OR vigencia_fim >= vigencia_inicio",
-                        name="perfil_jornada_cadastro_vigencia_check"),)
+                        name="perfil_jornada_cadastro_vigencia_check"),
+        Index("perfil_jornada_cadastro_prestador_idx", "prestador_id"))
 
     perfil: Mapped[str] = mapped_column(Text, primary_key=True)
     nome: Mapped[str] = mapped_column(Text)
     sindicato: Mapped[str | None] = mapped_column(Text)
     vigencia_inicio: Mapped[date | None] = mapped_column(Date)
     vigencia_fim: Mapped[date | None] = mapped_column(Date)
+    # Escopo: o Padrão não usa estas colunas. Perfil geral = visível a todos que leem perfis; prestador_id = dono.
+    geral: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    prestador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("prestador.id", ondelete="SET NULL"))

@@ -18,7 +18,6 @@ from app.routers.empresas.routers import router as empresas
 from app.routers.lotes.routers import router as lotes
 from app.routers.organizacoes.routers import router as organizacoes
 from app.routers.organizacoes.routers import router_leitura as contratos_leitura
-from app.routers.perfis_jornada.routers import router as perfis_jornada
 from app.routers.perfis_jornada.routers import router_empresa_propria as perfis_jornada_empresa_propria
 from app.routers.revisao.routers import router as revisao
 from app.routers.saude.routers import router as saude
@@ -53,9 +52,10 @@ app.add_middleware(
 #   - tipos: qualquer usuário logado;
 #   - POST /terceirizadas (admin do tomador ou plataforma), GET /usuarios e GET /convites (admin da organização):
 #     autenticadas, decididas na action; fora de acesso_a_dados de propósito (o admin do tomador escreve aqui);
-#   - leitura de perfis de jornada e troca do perfil do contrato: plataforma ou admin de empresa própria
-#     (escopo.perfil_de_contrato_proprio / leitura_de_perfis, 403 aos demais);
-#   - criação de tomador/prestador/contrato, POST /empresas-proprias e gravação de perfis de jornada: só plataforma.
+#   - perfis de jornada (leitura, criação e edição) e troca do perfil do contrato: plataforma ou admin de empresa própria
+#     (escopo.leitura_de_perfis / escrita_de_perfis / perfil_de_contrato_proprio, 403 aos demais; o escopo por perfil
+#     fica em escopo.filtro_perfil e exigir_perfil_editavel);
+#   - criação de tomador/prestador/contrato e POST /empresas-proprias: só plataforma.
 # Router novo SEM dependência fica aberto: a varredura de tests/test_autenticacao.py e tests/test_isolamento.py cobra isso.
 app.include_router(saude)
 app.include_router(auth)
@@ -67,5 +67,5 @@ app.include_router(tipos, dependencies=[Depends(exigir_usuario)])
 for router in (terceirizadas, usuarios):  # a action decide por nível e papel (admin do tomador / admin da organização)
     app.include_router(router, dependencies=[Depends(exigir_usuario)])
 app.include_router(perfis_jornada_empresa_propria)  # sem dependência de grupo: cada rota declara a sua (escopo.py)
-for router in (organizacoes, perfis_jornada, empresas_proprias):
+for router in (organizacoes, empresas_proprias):
     app.include_router(router, dependencies=[Depends(exigir_plataforma)])

@@ -70,7 +70,8 @@ def test_cria_consulta_e_lista_perfil_com_heranca(nome):
     lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
     assert lista[nome] == {"perfil": nome, "padrao": False, "parametros_proprios": 2, "contratos": 0,
                            "nome": _nome_do_slug(nome), "sindicato": None, "vigencia_inicio": None,
-                           "vigencia_fim": None, "vigente": True}
+                           "vigencia_fim": None, "vigente": True, "geral": False,
+                           "prestador_id": None, "editavel": True}
     assert lista[PERFIL_PADRAO]["padrao"] is True and lista[PERFIL_PADRAO]["parametros_proprios"] == 17
 
 

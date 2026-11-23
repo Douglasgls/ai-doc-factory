@@ -81,6 +81,8 @@ class ContratoOut(BaseModel):
     vigencia_fim: date | None
     criado_em: DataHora
     perfil_jornada: str  # perfil de jornada usado na análise de ponto dos lotes do contrato
+    perfil_jornada_nome: str | None  # nome do perfil; null se o usuário não vê o perfil (fora do escopo dele)
+    perfil_jornada_visivel: bool  # o usuário vê os detalhes do perfil (GET /perfis-jornada/{perfil}); false = só o slug
     proprio: bool  # empresa solo: tomador e prestador são a mesma empresa (sem terceirização)
     tomador_nome: str
     tomador_ativo: bool

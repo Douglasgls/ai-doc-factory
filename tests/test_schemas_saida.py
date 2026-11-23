@@ -440,16 +440,16 @@ def test_organizacoes(orgs, sessao):
         r = client.put(f"/perfis-jornada/{perfil}", json={"parametros": [
             {"parametro": "extras_max_dia_min", "valor": 90, "base_legal": "ACT de teste"},
             {"parametro": "extras_max_dia_min", "valor": 60, "base_legal": "ACT de teste", "vigente_desde": "2027-01-01"}]})
-        _confere_resposta("PUT /perfis-jornada/{perfil}", r, perfil_actions.obter_perfil(sessao, perfil), PerfilOut)
+        _confere_resposta("PUT /perfis-jornada/{perfil}", r, perfil_actions.obter_perfil(sessao, perfil, PLATAFORMA), PerfilOut)
         _confere("GET /perfis-jornada/{perfil}", f"/perfis-jornada/{perfil}", PerfilOut,
-                 perfil_actions.obter_perfil(sessao, perfil))
+                 perfil_actions.obter_perfil(sessao, perfil, PLATAFORMA))
         _confere("GET /perfis-jornada/{perfil}", "/perfis-jornada/clt_padrao", PerfilOut,
-                 perfil_actions.obter_perfil(sessao, "clt_padrao"))
+                 perfil_actions.obter_perfil(sessao, "clt_padrao", PLATAFORMA))
         r = client.post("/perfis-jornada", json={"nome": "Teste de Schema", "sindicato": "Sindicato X"})
         assert r.status_code == 201, r.text
         slug_novo = r.json()["perfil"]
         try:
-            _confere_resposta("POST /perfis-jornada", r, perfil_actions.obter_perfil(sessao, slug_novo), PerfilOut,
+            _confere_resposta("POST /perfis-jornada", r, perfil_actions.obter_perfil(sessao, slug_novo, PLATAFORMA), PerfilOut,
                               status=201)
         finally:
             orgs.db.execute("DELETE FROM perfil_jornada_cadastro WHERE perfil = %s", (slug_novo,))
