@@ -1,11 +1,11 @@
 import psycopg
 from fastapi import HTTPException
-from sqlalchemy import case, exists, func, insert, select, update
+from sqlalchemy import and_, case, exists, false, func, insert, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.escopo import exigir_prestador_sem_empresa_propria, filtro_contrato
-from app.models import Contrato, Convite, Prestador, Tomador, Usuario
+from app.escopo import exigir_prestador_sem_empresa_propria, filtro_contrato, filtro_perfil
+from app.models import Contrato, Convite, PerfilJornadaCadastro, Prestador, Tomador, Usuario
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.organizacoes.schemas import NovoContrato, NovoPrestador, NovoTomador
 
@@ -13,16 +13,24 @@ _COLUNAS_TOMADOR = (Tomador.id, Tomador.nome, Tomador.cnpj, Tomador.ativo, Tomad
 _COLUNAS_PRESTADOR = (Prestador.id, Prestador.cnpj, Prestador.razao_social, Prestador.ativo, Prestador.criado_em)
 
 
-def _select_contrato():
+def _select_contrato(usuario: UsuarioContexto | None = None):
+    """`usuario`: quem lê, para `perfil_jornada_visivel` e `perfil_jornada_nome` (o perfil do contrato pode estar fora
+    do escopo dele: o contrato mostra que o perfil existe, sem o nome). None = chamador só da plataforma."""
     tem_usuario = exists().where(Usuario.prestador_id == Prestador.id, Usuario.ativo)
     tem_convite = exists().where(Convite.prestador_id == Prestador.id, Convite.usado_em.is_(None),
                                  Convite.expira_em > func.now())
     acesso = case((tem_usuario, "ativo"), (tem_convite, "convite_pendente"), else_="sem_acesso")
+    if usuario is None or usuario.nivel == "plataforma":
+        visivel = true()
+    else:  # só o admin de empresa própria lê perfis (o contrato dele é o `proprio`); os demais nem o slug detalham
+        visivel = func.coalesce(and_(Contrato.proprio, filtro_perfil(usuario)), false())
     return (select(Contrato.id, Contrato.tomador_id, Contrato.prestador_id, Contrato.ativo, Contrato.vigencia_inicio,
                    Contrato.vigencia_fim, Contrato.criado_em, Contrato.perfil_jornada, Contrato.proprio, Tomador.nome, Tomador.ativo, Prestador.razao_social,
-                   Prestador.cnpj, Prestador.ativo, acesso)
+                   Prestador.cnpj, Prestador.ativo, acesso, case((visivel, PerfilJornadaCadastro.nome), else_=None),
+                   visivel)
             .join(Tomador, Tomador.id == Contrato.tomador_id)
-            .join(Prestador, Prestador.id == Contrato.prestador_id))
+            .join(Prestador, Prestador.id == Contrato.prestador_id)
+            .outerjoin(PerfilJornadaCadastro, PerfilJornadaCadastro.perfil == Contrato.perfil_jornada))
 
 
 def _tomador(l) -> dict:
@@ -36,7 +44,7 @@ def _prestador(l) -> dict:
 def _contrato(l) -> dict:
     return dict(zip(("id", "tomador_id", "prestador_id", "ativo", "vigencia_inicio", "vigencia_fim", "criado_em",
                      "perfil_jornada", "proprio", "tomador_nome", "tomador_ativo", "prestador_razao_social", "prestador_cnpj", "prestador_ativo",
-                     "acesso_prestador"), l))
+                     "acesso_prestador", "perfil_jornada_nome", "perfil_jornada_visivel"), l))
 
 
 def _existente(session: Session, consulta) -> int | None:
@@ -116,7 +124,7 @@ def criar_contrato(session: Session, corpo: NovoContrato) -> dict:
 def listar_contratos(session: Session, tomador_id: int | None = None, prestador_id: int | None = None, *,
                      usuario: UsuarioContexto) -> list[dict]:
     """Contratos no escopo de `usuario` (obrigatório), com filtros opcionais por tomador e prestador."""
-    consulta = _select_contrato().where(filtro_contrato(usuario))
+    consulta = _select_contrato(usuario).where(filtro_contrato(usuario))
     if tomador_id is not None:
         consulta = consulta.where(Contrato.tomador_id == tomador_id)
     if prestador_id is not None:

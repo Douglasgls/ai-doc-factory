@@ -1,5 +1,6 @@
 """Perfil de jornada por contrato: herança de clt_padrao, API (só plataforma) e worker de análise usando o perfil do
 contrato do lote. Contra o Postgres e o Redis; o Gemini e o Jev são mockados (fixture `rede`)."""
+import re
 import uuid
 from datetime import date, timedelta
 
@@ -70,7 +71,8 @@ def test_cria_consulta_e_lista_perfil_com_heranca(nome):
     lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
     assert lista[nome] == {"perfil": nome, "padrao": False, "parametros_proprios": 2, "contratos": 0,
                            "nome": _nome_do_slug(nome), "sindicato": None, "vigencia_inicio": None,
-                           "vigencia_fim": None, "vigente": True}
+                           "vigencia_fim": None, "vigente": True, "geral": False,
+                           "prestador_id": None, "editavel": True}
     assert lista[PERFIL_PADRAO]["padrao"] is True and lista[PERFIL_PADRAO]["parametros_proprios"] == 17
 
 
@@ -230,27 +232,36 @@ def test_padrao_tem_nome_padrao_e_e_vigente():
     assert {x["perfil"]: x["nome"] for x in client.get("/perfis-jornada").json()}[PERFIL_PADRAO] == "Padrão"
 
 
-def test_post_gera_slug_sem_acento_e_sufixo_na_colisao(slugs):
+def test_post_gera_slug_sem_acento_com_sufixo_aleatorio(slugs):
     nome = "Acordo Coletivo Ação 2026/27"
     r = _criar(slugs, {"nome": nome, "sindicato": " Sindicato dos Vigilantes ", "vigencia_inicio": "2026-01-01",
                        "vigencia_fim": "2026-12-31"})
     assert r.status_code == 201, r.text
     corpo = r.json()
     base = corpo["perfil"]
-    assert base == "acordo_coletivo_acao_2026_27"
+    assert re.fullmatch(r"acordo_coletivo_acao_2026_27_[a-z0-9]{6}", base), base
     assert (corpo["nome"], corpo["sindicato"], corpo["vigencia_inicio"], corpo["vigencia_fim"]) == (
         nome, "Sindicato dos Vigilantes", "2026-01-01", "2026-12-31")
     assert corpo["padrao"] is False and corpo["proprios"] == []
     assert corpo["efetivo"] == client.get(f"/perfis-jornada/{PERFIL_PADRAO}").json()["efetivo"]  # herda tudo
     assert client.get(f"/perfis-jornada/{base}").json() == corpo
-    assert _criar(slugs, {"nome": nome}).json()["perfil"] == base + "_2"
-    assert _criar(slugs, {"nome": nome}).json()["perfil"] == base + "_3"
-    assert _criar(slugs, {"nome": "clt padrao"}).json()["perfil"] == "clt_padrao_2"  # não colide com o Padrão
-    assert _criar(slugs, {"nome": "!!!"}).json()["perfil"] == "perfil"
+    outro = _criar(slugs, {"nome": nome}).json()["perfil"]  # mesmo nome: slug diferente, sem contador
+    assert outro != base and re.fullmatch(r"acordo_coletivo_acao_2026_27_[a-z0-9]{6}", outro)
+    assert re.fullmatch(r"clt_padrao_[a-z0-9]{6}", _criar(slugs, {"nome": "clt padrao"}).json()["perfil"])
+    assert re.fullmatch(r"perfil_[a-z0-9]{6}", _criar(slugs, {"nome": "!!!"}).json()["perfil"])
     longo = _criar(slugs, {"nome": "a" * 100}).json()["perfil"]
-    assert len(longo) <= 50 and _criar(slugs, {"nome": "a" * 100}).json()["perfil"] == longo + "_2"
+    assert re.fullmatch(r"^[a-z0-9_]{1,50}$", longo) and len(longo) == 47
     lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
     assert lista[base]["parametros_proprios"] == 0 and lista[base]["nome"] == nome
+
+
+def test_post_repete_o_sorteio_se_o_sufixo_colidir(slugs, monkeypatch):
+    from app.routers.perfis_jornada import actions
+    primeiro = _criar(slugs, {"nome": "Colide"}).json()["perfil"]
+    sorteios = iter([primeiro, primeiro, primeiro + "x"[:0] + "", "colide_zzzzzz"])
+    monkeypatch.setattr(actions, "gerar_slug_unico", lambda nome: next(sorteios))
+    r = _criar(slugs, {"nome": "Colide"})
+    assert r.status_code == 201 and r.json()["perfil"] == "colide_zzzzzz"
 
 
 def test_post_valida_nome_e_vigencia(slugs):
@@ -266,12 +277,13 @@ def test_vigente_calculado_pela_data_de_hoje(slugs):
     d = lambda n: (hoje + timedelta(days=n)).isoformat()  # noqa: E731
     casos = {"passado": (d(-30), d(-1), False), "futuro": (d(1), d(30), False), "hoje_inicio": (d(0), None, True),
              "hoje_fim": (None, d(0), True), "aberto": (None, None, True), "dentro": (d(-5), d(5), True)}
-    lista = None
+    criados = {}
     for nome, (ini, fim, esperado) in casos.items():
         r = _criar(slugs, {"nome": "vig " + nome, "vigencia_inicio": ini, "vigencia_fim": fim})
         assert r.status_code == 201 and r.json()["vigente"] is esperado, (nome, r.text)
+        criados[nome] = r.json()["perfil"]
     lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
-    assert {n: lista["vig_" + n]["vigente"] for n in casos} == {n: v[2] for n, v in casos.items()}
+    assert {n: lista[slug]["vigente"] for n, slug in criados.items()} == {n: v[2] for n, v in casos.items()}
 
 
 def test_vigente_funcao_pura():

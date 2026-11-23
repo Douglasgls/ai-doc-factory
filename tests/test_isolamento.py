@@ -42,7 +42,7 @@ EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas n
     ("POST", "/tomadores"): "plataforma", ("GET", "/tomadores"): "plataforma",
     ("POST", "/prestadores"): "plataforma", ("GET", "/prestadores"): "plataforma",
     ("POST", "/contratos"): "plataforma",
-    ("POST", "/empresas-proprias"): "plataforma", ("PUT", "/perfis-jornada/{perfil}"): "plataforma", ("POST", "/perfis-jornada"): "plataforma",
+    ("POST", "/empresas-proprias"): "plataforma", ("PUT", "/perfis-jornada/{perfil}"): "perfil", ("POST", "/perfis-jornada"): "perfil",
     ("PATCH", "/tomadores/{tomador_id}"): "plataforma", ("PATCH", "/prestadores/{prestador_id}"): "plataforma",
     ("PATCH", "/contratos/{contrato_id}"): "plataforma",
     # plataforma ou admin de empresa própria (escopo.leitura_de_perfis / perfil_de_contrato_proprio)

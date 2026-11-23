@@ -344,8 +344,11 @@ def perfil():
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         conn.execute("INSERT INTO perfil_jornada (perfil, parametro, valor, unidade, base_legal) "
                      "VALUES (%s, 'jornada_diaria_min', 420, 'min', 'acordo de teste')", (nome,))
+        conn.execute("INSERT INTO perfil_jornada_cadastro (perfil, nome, geral) VALUES (%s, 'Perfil geral de teste', true)",
+                     (nome,))  # perfil geral: o admin de empresa própria o vê
         yield nome
         conn.execute("DELETE FROM perfil_jornada WHERE perfil = %s", (nome,))
+        conn.execute("DELETE FROM perfil_jornada_cadastro WHERE perfil = %s", (nome,))
 
 
 def test_admin_da_empresa_propria_troca_o_perfil_do_proprio_contrato(mundo, criar, perfil):
@@ -356,13 +359,13 @@ def test_admin_da_empresa_propria_troca_o_perfil_do_proprio_contrato(mundo, cria
     assert r.status_code == 200 and r.json()["perfil_jornada"] == perfil and r.json()["proprio"] is True
     assert mundo.db.execute("SELECT perfil_jornada FROM contrato WHERE id = %s", (cid,)).fetchone()[0] == perfil
     assert client.put(f"/contratos/{cid}/perfil-jornada", headers=h, json={"perfil": "nao_existe"}).status_code == 404
-    # leitura dos perfis liberada; escrita de perfil continua só da plataforma
+    # leitura dos perfis liberada; o perfil geral não é editável por ele (403) e perfil inexistente dá 404
     nomes = {p["perfil"]: p for p in client.get("/perfis-jornada", headers=h).json()}
     assert nomes[perfil]["contratos"] == 1 and "clt_padrao" in nomes  # `contratos` conta só o escopo dele
     assert client.get(f"/perfis-jornada/{perfil}", headers=h).status_code == 200
     corpo = {"parametros": [{"parametro": "jornada_diaria_min", "valor": 1, "base_legal": "x"}]}
     assert client.put(f"/perfis-jornada/{perfil}", headers=h, json=corpo).status_code == 403
-    assert client.put("/perfis-jornada/criado_pelo_prestador", headers=h, json=corpo).status_code == 403
+    assert client.put("/perfis-jornada/criado_pelo_prestador", headers=h, json=corpo).status_code == 404
 
 
 def test_membro_e_contrato_nao_proprio_nao_trocam_o_perfil(mundo, criar, perfil):

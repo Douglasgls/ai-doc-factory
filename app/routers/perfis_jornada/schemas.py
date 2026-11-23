@@ -2,9 +2,10 @@ import math
 from datetime import date
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 from app.routers.documentos.schemas import ParametroPerfilOut
+from app.routers.organizacoes.schemas import IdBanco
 
 # Nome do perfil: minúsculas, dígitos e sublinhado (vai no caminho da URL e em contrato.perfil_jornada).
 NomePerfil = Annotated[str, Field(pattern=r"^[a-z0-9_]{1,50}$")]
@@ -32,11 +33,14 @@ def vigencia_coerente(inicio: date | None, fim: date | None) -> None:
 
 
 class CadastroEntrada(BaseModel):
-    """Nome, sindicato e vigência de um perfil. Em edição, campo ausente = não muda; `null` limpa sindicato e vigência."""
+    """Nome, sindicato e vigência de um perfil. Em edição, campo ausente = não muda; `null` limpa sindicato e vigência.
+    `geral` e `prestador_id` (dono) só a plataforma envia; de um admin de empresa própria, qualquer um dos dois dá 403."""
     nome: str | None = None
     sindicato: str | None = None
     vigencia_inicio: date | None = None
     vigencia_fim: date | None = None
+    geral: StrictBool | None = None  # visível a todos que leem perfis; exclusivo com dono; `null` dá 422
+    prestador_id: IdBanco | None = None  # dono; em edição, `null` tira o dono
 
     @field_validator("nome")
     @classmethod
@@ -51,6 +55,14 @@ class CadastroEntrada(BaseModel):
     @model_validator(mode="after")
     def _vigencia(self):
         vigencia_coerente(self.vigencia_inicio, self.vigencia_fim)
+        return self
+
+    @model_validator(mode="after")
+    def _escopo(self):
+        if "geral" in self.model_fields_set and self.geral is None:
+            raise ValueError("geral não pode ser nulo")
+        if self.geral and self.prestador_id is not None:
+            raise ValueError("perfil geral não tem dono: não envie geral=true junto com prestador_id")
         return self
 
 
@@ -114,6 +126,9 @@ class CadastroOut(BaseModel):
     vigencia_inicio: date | None
     vigencia_fim: date | None
     vigente: bool  # hoje está dentro da vigência (início e fim vazios = sempre vigente)
+    geral: bool  # visível a todos que leem perfis (o Padrão não usa)
+    prestador_id: int | None  # dono; só a plataforma e o próprio dono o veem (os outros recebem null)
+    editavel: bool  # o usuário que consulta pode editar o perfil (o Padrão nunca)
 
 
 class PerfilResumoOut(CadastroOut):

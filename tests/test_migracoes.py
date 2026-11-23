@@ -188,3 +188,29 @@ def test_0010_cadastro_do_perfil_nome_derivado_e_vigencia(banco_descartavel):
     assert "perfil_jornada_cadastro" not in _tabelas(url)
     with psycopg.connect(url) as conn:  # os parâmetros ficam
         assert conn.execute("SELECT count(*) FROM perfil_jornada WHERE perfil = 'adm_publica'").fetchone()[0] == 1
+
+
+def test_0011_escopo_do_perfil_existentes_nao_gerais_e_sem_dono(banco_descartavel):
+    url = banco_descartavel
+    _alembic(url, "upgrade", "0010_perfil_jornada_cadastro")
+    with psycopg.connect(url) as conn:
+        conn.execute("INSERT INTO perfil_jornada (perfil, parametro, valor, unidade, base_legal) "
+                     "VALUES ('adm_publica', 'jornada_diaria_min', 360, 'min', 'x')")
+        conn.execute("INSERT INTO perfil_jornada_cadastro (perfil, nome) VALUES ('adm_publica', 'Adm publica')")
+    _alembic(url, "upgrade", "head")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT perfil, geral, prestador_id FROM perfil_jornada_cadastro ORDER BY perfil"
+                            ).fetchall() == [("adm_publica", False, None), ("clt_padrao", False, None)]
+        prestador = conn.execute("INSERT INTO prestador (cnpj, razao_social) VALUES ('11222333000181', 'P') RETURNING id"
+                                 ).fetchone()[0]
+        conn.execute("UPDATE perfil_jornada_cadastro SET prestador_id = %s WHERE perfil = 'adm_publica'", (prestador,))
+        conn.execute("DELETE FROM prestador WHERE id = %s", (prestador,))  # o perfil fica, sem dono
+        assert conn.execute("SELECT prestador_id FROM perfil_jornada_cadastro WHERE perfil = 'adm_publica'"
+                            ).fetchone()[0] is None
+        conn.commit()
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            conn.execute("UPDATE perfil_jornada_cadastro SET prestador_id = 999999999 WHERE perfil = 'adm_publica'")
+    _alembic(url, "downgrade", "0010_perfil_jornada_cadastro")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*) FROM information_schema.columns WHERE table_name = "
+                            "'perfil_jornada_cadastro' AND column_name IN ('geral', 'prestador_id')").fetchone()[0] == 0
