@@ -38,7 +38,7 @@ export const ConvencaoContratos: React.FC<Props> = ({ contratos, perfis, onTroca
       await onTrocar(pendente.id, pendente.perfil)
       setPendente(null)
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao trocar a convenção do contrato')
+      setErro(e instanceof Error ? e.message : modoEscolha ? 'Não foi possível trocar a convenção. Tente de novo.' : 'Erro ao trocar a convenção do contrato')
     } finally {
       setSalvando(false)
     }
@@ -48,17 +48,19 @@ export const ConvencaoContratos: React.FC<Props> = ({ contratos, perfis, onTroca
     <section className={`${CARD} overflow-hidden`} aria-labelledby="convencao-contratos">
       <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39]">
         <h2 id="convencao-contratos" className="text-sm font-bold text-[#2d0a33] dark:text-white">
-          {modoEscolha ? 'Convenção da empresa' : 'Convenção de cada contrato'}
+          {modoEscolha ? 'Convenção da sua empresa' : 'Convenção de cada contrato'}
         </h2>
         <p className={`text-xs mt-0.5 ${SUAVE}`}>
-          A troca vale para as análises feitas a partir daí. Lote sem contrato usa o Padrão.
+          {modoEscolha
+            ? 'A troca vale para as análises feitas a partir daí. Sem escolha, a análise usa o Padrão.'
+            : 'A troca vale para as análises feitas a partir daí. Lote sem contrato usa o Padrão.'}
         </p>
       </div>
       <div className="px-5 pt-4 empty:hidden">
         <ErroBox message={erro} />
       </div>
       {contratos.length === 0 ? (
-        <p className={`p-5 text-xs ${SUAVE}`}>Nenhum contrato cadastrado.</p>
+        <p className={`p-5 text-xs ${SUAVE}`}>{modoEscolha ? 'Sua empresa ainda não está cadastrada.' : 'Nenhum contrato cadastrado.'}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[520px]">
@@ -81,7 +83,7 @@ export const ConvencaoContratos: React.FC<Props> = ({ contratos, perfis, onTroca
                       {!modoEscolha && <td className={TD}>{c.prestador_razao_social}</td>}
                       <td className={TD}>
                         <select
-                          aria-label={`Convenção do contrato de ${rotuloContrato}`}
+                          aria-label={modoEscolha ? 'Convenção da sua empresa' : `Convenção do contrato de ${rotuloContrato}`}
                           className="px-3 py-1.5 rounded-xl text-sm bg-white dark:bg-[#150c18] border border-[#dcd4e2] dark:border-[#3d2948] text-[#2d0a33] dark:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3e0b48] dark:focus-visible:ring-[#f38df9]"
                           value={pendente?.id === c.id ? pendente.perfil : c.perfil_jornada}
                           disabled={salvando}

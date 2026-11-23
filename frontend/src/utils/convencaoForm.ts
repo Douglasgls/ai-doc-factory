@@ -3,6 +3,7 @@ import type { ParametroEntrada, PerfilJornadaDetalhe } from '../services/api'
 import {
   DEF_PARAMETROS,
   GRUPOS,
+  grupoDoParametro,
   duracaoParaMinutos,
   horarioParaMinutos,
   minutosParaHorario,
@@ -198,4 +199,67 @@ export function escopoParaCorpo(e: EstadoForm): { geral: boolean; prestador_id: 
   if (e.escopo === 'geral') return { geral: true, prestador_id: null }
   if (e.escopo === 'prestador') return { geral: false, prestador_id: Number(e.prestador_id) }
   return { geral: false, prestador_id: null }
+}
+
+/** Quantas regras foram alteradas em cada tema (chave = id do grupo). */
+export function alteracoesPorGrupo(alteracoes: Record<string, unknown>): Record<string, number> {
+  return Object.fromEntries(GRUPOS.map((g) => [g.id, g.parametros.filter((p) => alteracoes[p.chave]).length]))
+}
+
+export interface ErroLocalizado {
+  chave: string
+  /** Id do tema (aba) do campo; null para os dados de cadastro, que ficam acima das abas. */
+  aba: string | null
+  /** Id do elemento do campo, para rolar e focar. */
+  campoId: string
+  texto: string
+}
+
+const CADASTRO: Record<string, { campoId: string; texto: string }> = {
+  nome: { campoId: 'conv-nome', texto: 'Falta o nome' },
+  sindicato: { campoId: 'conv-sindicato', texto: 'Corrija o sindicato' },
+  vigencia_fim: { campoId: 'conv-fim', texto: 'Corrija o fim da vigência' },
+  prestador: { campoId: 'conv-prestador', texto: 'Falta escolher o prestador' },
+}
+
+/** Leva as chaves de erro de `validarForm` ao tema e ao campo de cada uma, na ordem da tela. */
+export function localizarErros(erros: Record<string, string>): ErroLocalizado[] {
+  const ordemTema = (id: string | null) => (id === null ? -1 : GRUPOS.findIndex((g) => g.id === id))
+  const itens: ErroLocalizado[] = []
+  for (const chave of Object.keys(erros)) {
+    const cad = CADASTRO[chave]
+    if (cad) {
+      itens.push({ chave, aba: null, ...cad })
+      continue
+    }
+    const [param, meio, fim] = chave.split(':')
+    const rotulo = DEF_PARAMETROS[param]?.rotulo ?? param
+    const aba = grupoDoParametro(param) ?? null
+    const datada = fim !== undefined
+    const tipo = datada ? fim : meio
+    const k = datada ? `${param}:${meio}` : param
+    const campo = tipo === 'base' ? `base-${k}` : tipo === 'desde' ? `desde-${k}` : `val-${k}`
+    const texto =
+      tipo === 'base' ? `Falta a base legal em ${rotulo}` : tipo === 'desde' ? `Falta a data em ${rotulo}` : `Corrija o valor de ${rotulo}`
+    itens.push({ chave, aba, campoId: campo, texto })
+  }
+  return itens.sort((a, b) => ordemTema(a.aba) - ordemTema(b.aba))
+}
+
+/** Quantos campos com erro há em cada tema (chave = id do grupo). */
+export function errosPorAba(erros: Record<string, string>): Record<string, number> {
+  const r: Record<string, number> = Object.fromEntries(GRUPOS.map((g) => [g.id, 0]))
+  for (const e of localizarErros(erros)) if (e.aba) r[e.aba] += 1
+  return r
+}
+
+/** Resumo do rodapé: "Falta a base legal em Jornada diária (aba Jornada)" ou a contagem com os temas. */
+export function resumoErros(erros: Record<string, string>): string {
+  const lista = localizarErros(erros)
+  if (lista.length === 0) return ''
+  const titulo = (id: string | null) => (id === null ? 'dados de cadastro' : `aba ${GRUPOS.find((g) => g.id === id)?.titulo ?? id}`)
+  const frase = (e: ErroLocalizado) => `${e.texto} (${titulo(e.aba)})`
+  if (lista.length === 1) return frase(lista[0])
+  const abas = [...new Set(lista.map((e) => e.aba))].map(titulo).join(', ')
+  return `${lista.length} campos precisam de correção, em ${abas}: ${lista.map((e) => e.texto).join('; ')}.`
 }

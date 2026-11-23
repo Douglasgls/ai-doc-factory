@@ -8,6 +8,8 @@ import {
 } from '../services/api'
 import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL } from './formUi'
 import { CampoValor } from './CampoValor'
+import { AbasTema, type AbaDef } from './AbasTema'
+import { idAba, idPainel } from '../utils/abas'
 import {
   GRUPOS,
   fraseValor,
@@ -18,6 +20,10 @@ import {
   BASE_LEGAL_MAX,
   NOME_MAX,
   SINDICATO_MAX,
+  alteracoesPorGrupo,
+  errosPorAba,
+  localizarErros,
+  resumoErros,
   chaveParametros,
   entradaVazia,
   escopoParaCorpo,
@@ -32,6 +38,8 @@ import {
 } from '../utils/convencaoForm'
 
 const SUAVE = 'text-[#6e6378] dark:text-[#a093a8]'
+
+const AJUDA_BASE = 'Cite a cláusula da convenção que muda este valor, ex.: CCT 2026/2027, cláusula 12ª.'
 
 const Erro: React.FC<{ id: string; texto?: string }> = ({ id, texto }) =>
   texto ? (
@@ -59,6 +67,8 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
   const [salvando, setSalvando] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
   const [recemAberto, setRecemAberto] = useState<string | null>(null)
+  const [aba, setAba] = useState<string>(GRUPOS[0].id)
+  const [tentouSalvar, setTentouSalvar] = useState(false)
 
   // o erro de um campo some assim que a pessoa volta a mexer nele
   const limpar = (prefixo: string) =>
@@ -108,9 +118,15 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
     setErros(r.erros)
     setErroGeral(null)
     if (Object.keys(r.erros).length > 0) {
-      setErroGeral('Corrija os campos destacados para salvar.')
-      // leva o foco ao primeiro campo com erro, depois que a tela o marcar como inválido
-      requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
+      setTentouSalvar(true)
+      // abre a aba do primeiro campo com erro, rola até ele e põe o foco nele
+      const primeiro = localizarErros(r.erros)[0]
+      if (primeiro.aba) setAba(primeiro.aba)
+      requestAnimationFrame(() => {
+        const el = document.getElementById(primeiro.campoId)
+        el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el?.focus({ preventScroll: true })
+      })
       return
     }
     const inicialParametros = validarForm(inicial, padrao.efetivo, plataforma).parametros
@@ -146,6 +162,10 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
   }
 
   const idTitulo = 'form-convencao-titulo'
+  const contagemErros = errosPorAba(erros)
+  const contagemAlt = alteracoesPorGrupo(estado.alteracoes)
+  const abas: AbaDef[] = GRUPOS.map((g) => ({ id: g.id, rotulo: g.titulo, contagem: contagemAlt[g.id], erro: contagemErros[g.id] > 0 }))
+  const resumo = resumoErros(erros)
 
   return (
     <form ref={formRef} onSubmit={salvar} noValidate className="space-y-5" aria-labelledby={idTitulo}>
@@ -253,8 +273,17 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
         )}
       </section>
 
+      <div className="space-y-4">
+      <AbasTema base="form" rotulo="Regras por tema" abas={abas} ativa={aba} onChange={setAba} />
       {GRUPOS.map((g) => (
-        <section key={g.id} className={`${CARD} p-5`} aria-labelledby={`form-grupo-${g.id}`}>
+        <div
+          key={g.id}
+          role="tabpanel"
+          id={idPainel('form', g.id)}
+          aria-labelledby={idAba('form', g.id)}
+          hidden={g.id !== aba}
+        >
+        <section className={`${CARD} p-5`} aria-labelledby={`form-grupo-${g.id}`}>
           <h3 id={`form-grupo-${g.id}`} className="text-sm font-bold text-[#2d0a33] dark:text-white">{g.titulo}</h3>
           <div className="mt-2 divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
             {g.parametros
@@ -299,15 +328,17 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
                           <Erro id={`${d.chave}-valor-erro`} texto={erros[`${d.chave}:valor`]} />
                         </div>
                         <div>
-                          <label className={LABEL} htmlFor={`base-${d.chave}`}>Base legal</label>
+                          <label className={LABEL} htmlFor={`base-${d.chave}`}>Base legal (obrigatória)</label>
+                          <p id={`base-${d.chave}-ajuda`} className={`text-xs mb-1.5 ${SUAVE}`}>{AJUDA_BASE}</p>
                           <input
                             id={`base-${d.chave}`}
                             className={INPUT}
                             value={alt.base_legal}
                             maxLength={BASE_LEGAL_MAX}
                             placeholder="Ex.: CCT 2026/2027, cláusula 12ª"
+                            aria-required="true"
                             aria-invalid={!!erros[`${d.chave}:base`] || undefined}
-                            aria-describedby={erros[`${d.chave}:base`] ? `${d.chave}-base-erro` : undefined}
+                            aria-describedby={`base-${d.chave}-ajuda${erros[`${d.chave}:base`] ? ` ${d.chave}-base-erro` : ''}`}
                             onChange={(e) => alterar(d.chave, (a) => ({ ...a, base_legal: e.target.value }))}
                           />
                           <Erro id={`${d.chave}-base-erro`} texto={erros[`${d.chave}:base`]} />
@@ -362,15 +393,17 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
                                 </button>
                               </div>
                               <div>
-                                <label className={LABEL} htmlFor={`base-${k}`}>Base legal</label>
+                                <label className={LABEL} htmlFor={`base-${k}`}>Base legal (obrigatória)</label>
+                                <p id={`base-${k}-ajuda`} className={`text-xs mb-1.5 ${SUAVE}`}>{AJUDA_BASE}</p>
                                 <input
                                   id={`base-${k}`}
                                   className={INPUT}
                                   value={dt.base_legal}
                                   maxLength={BASE_LEGAL_MAX}
                                   placeholder="Ex.: CCT 2026/2027, aditivo 3"
+                                  aria-required="true"
                                   aria-invalid={!!erros[`${k}:base`] || undefined}
-                                  aria-describedby={erros[`${k}:base`] ? `${k}-base-erro` : undefined}
+                                  aria-describedby={`base-${k}-ajuda${erros[`${k}:base`] ? ` ${k}-base-erro` : ''}`}
                                   onChange={(e) => mudar((x) => ({ ...x, base_legal: e.target.value }))}
                                 />
                                 <Erro id={`${k}-base-erro`} texto={erros[`${k}:base`]} />
@@ -394,9 +427,19 @@ export const ConvencaoForm: React.FC<Props> = ({ existente, padrao, plataforma, 
               })}
           </div>
         </section>
+        </div>
       ))}
+      </div>
 
       <ErroBox message={erroGeral} />
+      {tentouSalvar && resumo && (
+        <div
+          role="alert"
+          className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-xs font-medium text-red-600 dark:text-red-400"
+        >
+          {resumo}
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <button type="submit" disabled={salvando} className={BTN}>

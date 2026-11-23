@@ -177,6 +177,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
             perfis={perfis}
             detalhes={detalhes}
             escopoDe={escopoDe}
+            solo={modoEscolha}
             onNova={() => setTela({ tipo: 'form', perfil: null })}
             onVer={(perfil) => setTela({ tipo: 'ver', perfil })}
           />
@@ -186,6 +187,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
         detalhe &&
         padrao && (
           <ConvencaoDetalhe
+            key={detalhe.perfil}
             detalhe={detalhe}
             padrao={padrao}
             escopo={escopoDe?.(detalhe)}
