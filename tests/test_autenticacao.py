@@ -397,7 +397,7 @@ def test_varredura_toda_rota_exige_token():
 # filtradas pelo escopo (a matriz completa e o isolamento estão em tests/test_isolamento.py).
 SO_PLATAFORMA = {("POST", "/tomadores"), ("GET", "/tomadores"),
                  ("POST", "/prestadores"), ("GET", "/prestadores"), ("POST", "/contratos"),
-                 ("GET", "/perfis-jornada"), ("GET", "/perfis-jornada/{perfil}"), ("PUT", "/perfis-jornada/{perfil}"),
+                 ("GET", "/perfis-jornada"), ("GET", "/perfis-jornada/{perfil}"), ("PUT", "/perfis-jornada/{perfil}"), ("POST", "/perfis-jornada"),
                  ("PUT", "/contratos/{contrato_id}/perfil-jornada"), ("POST", "/empresas-proprias"),
                  ("PATCH", "/tomadores/{tomador_id}"), ("PATCH", "/prestadores/{prestador_id}"),
                  ("PATCH", "/contratos/{contrato_id}")}

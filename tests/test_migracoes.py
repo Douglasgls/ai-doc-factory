@@ -19,7 +19,7 @@ TABELAS = TABELAS_SEM_EMPRESA | {"empresa"}  # 0001_baseline
 TABELAS_ACESSO = {"tomador", "prestador", "contrato", "usuario"}  # migração 0002
 # migração 0004: `empresa` sai, `lote` ganha `contrato_id`
 TABELAS_0004 = TABELAS_SEM_EMPRESA | TABELAS_ACESSO
-TABELAS_HEAD = TABELAS_0004 | {"convite"}  # migração 0005
+TABELAS_HEAD = TABELAS_0004 | {"convite", "perfil_jornada_cadastro"}  # migrações 0005 e 0010
 
 
 @pytest.fixture
@@ -165,3 +165,26 @@ def test_0009_contratos_existentes_ficam_nao_proprios(banco_descartavel):
     _alembic(url, "downgrade", "0008_documento_campos_autor")
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT count(*) FROM contrato").fetchone()[0] == 1  # o contrato fica, só perde a marca
+
+
+def test_0010_cadastro_do_perfil_nome_derivado_e_vigencia(banco_descartavel):
+    url = banco_descartavel
+    _alembic(url, "upgrade", "0009_contrato_proprio")
+    with psycopg.connect(url) as conn:  # perfil que já existia antes do cadastro
+        conn.execute("INSERT INTO perfil_jornada (perfil, parametro, valor, unidade, base_legal) "
+                     "VALUES ('adm_publica', 'jornada_diaria_min', 360, 'min', 'x')")
+    _alembic(url, "upgrade", "head")
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT perfil, nome, sindicato, vigencia_inicio, vigencia_fim "
+                            "FROM perfil_jornada_cadastro ORDER BY perfil").fetchall() == [
+            ("adm_publica", "Adm publica", None, None, None), ("clt_padrao", "Padrão", None, None, None)]
+        with pytest.raises(psycopg.errors.CheckViolation):  # fim antes do início
+            conn.execute("INSERT INTO perfil_jornada_cadastro (perfil, nome, vigencia_inicio, vigencia_fim) "
+                         "VALUES ('x', 'X', '2027-01-02', '2027-01-01')")
+    with psycopg.connect(url) as conn:
+        with pytest.raises(psycopg.errors.CheckViolation):  # nome vazio
+            conn.execute("INSERT INTO perfil_jornada_cadastro (perfil, nome) VALUES ('y', '  ')")
+    _alembic(url, "downgrade", "0009_contrato_proprio")
+    assert "perfil_jornada_cadastro" not in _tabelas(url)
+    with psycopg.connect(url) as conn:  # os parâmetros ficam
+        assert conn.execute("SELECT count(*) FROM perfil_jornada WHERE perfil = 'adm_publica'").fetchone()[0] == 1

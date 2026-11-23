@@ -457,6 +457,14 @@ def test_organizacoes(orgs, sessao):
                  perfil_actions.obter_perfil(sessao, perfil))
         _confere("GET /perfis-jornada/{perfil}", "/perfis-jornada/clt_padrao", PerfilOut,
                  perfil_actions.obter_perfil(sessao, "clt_padrao"))
+        r = client.post("/perfis-jornada", json={"nome": "Teste de Schema", "sindicato": "Sindicato X"})
+        assert r.status_code == 201, r.text
+        slug_novo = r.json()["perfil"]
+        try:
+            _confere_resposta("POST /perfis-jornada", r, perfil_actions.obter_perfil(sessao, slug_novo), PerfilOut,
+                              status=201)
+        finally:
+            orgs.db.execute("DELETE FROM perfil_jornada_cadastro WHERE perfil = %s", (slug_novo,))
         r = client.put(f"/contratos/{contrato}/perfil-jornada", json={"perfil": perfil})
         _confere_resposta("PUT /contratos/{contrato_id}/perfil-jornada", r,
                           achar(_contratos(sessao), contrato), ContratoOut)
@@ -464,6 +472,7 @@ def test_organizacoes(orgs, sessao):
         _confere("GET /perfis-jornada", "/perfis-jornada", PerfilResumoOut, perfil_actions.listar_perfis(sessao, PLATAFORMA))
     finally:
         orgs.db.execute("DELETE FROM perfil_jornada WHERE perfil = %s", (perfil,))
+        orgs.db.execute("DELETE FROM perfil_jornada_cadastro WHERE perfil = %s", (perfil,))
 
 
 def test_auth_login_e_me(auth_real, sessao):
@@ -627,6 +636,7 @@ COMPARACOES = {
     "GET /perfis-jornada": ["test_organizacoes"],
     "GET /perfis-jornada/{perfil}": ["test_organizacoes"],
     "PUT /perfis-jornada/{perfil}": ["test_organizacoes"],
+    "POST /perfis-jornada": ["test_organizacoes"],
     "PUT /contratos/{contrato_id}/perfil-jornada": ["test_organizacoes"],
     "POST /empresas-proprias": ["test_empresas_proprias"],
     "GET /usuarios": ["test_terceirizadas_e_usuarios"],
