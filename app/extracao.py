@@ -4,8 +4,10 @@ Fora do fan-in do lote. Falha do Gemini ou resposta inválida não trava nada: o
 pendência no cálculo. O texto do documento é dado não confiável: só o que passa pela validação abaixo
 (lista fixa de campos, formatos e enum) chega ao banco.
 """
+import calendar
 import logging
 import re
+from datetime import date, timedelta
 
 import psycopg
 import redis
@@ -63,6 +65,21 @@ def enfileirar_extracao(documento_id: int, r: redis.Redis | None = None, forcar:
         return False
 
 
+def calcular_data_termino(inicio: date | None, numero, unidade) -> date | None:
+    """Fim de contrato por prazo determinado. O dia do início conta: 45 dias a partir de 27/07/2024 terminam
+    em 09/09/2024 (início + N - 1). Meses: mesmo dia N meses depois (limitado ao último dia do mês), menos 1 dia."""
+    if inicio is None or isinstance(numero, bool) or not isinstance(numero, int) or not 0 < numero <= 3650:
+        return None
+    if unidade == "dias":
+        return inicio + timedelta(days=numero - 1)
+    if unidade == "meses":
+        mes = inicio.month - 1 + numero
+        ano, mes = inicio.year + mes // 12, mes % 12 + 1
+        dia = min(inicio.day, calendar.monthrange(ano, mes)[1])
+        return date(ano, mes, dia) - timedelta(days=1)
+    return None
+
+
 def limpar(dados) -> dict[str, str]:
     """Aceita só os campos do schema, com formato válido; o resto é descartado."""
     if not isinstance(dados, dict):
@@ -90,6 +107,11 @@ def limpar(dados) -> dict[str, str]:
         saida["distingue_prestadora"] = "true" if dados["distingue_prestadora"] else "false"
     if dados.get("tipo_prazo") in prompts.TIPOS_PRAZO:
         saida["tipo_prazo"] = dados["tipo_prazo"]
+    if "data_termino" not in saida and "data_admissao" in saida:  # data explícita prevalece; senão, calcula
+        fim = calcular_data_termino(date.fromisoformat(saida["data_admissao"]), dados.get("prazo_numero"),
+                                    dados.get("prazo_unidade"))
+        if fim is not None:
+            saida["data_termino"] = fim.isoformat()
     tipo_exame = normalizar_tipo_exame(dados.get("tipo_exame"))
     if tipo_exame is not None:
         saida["tipo_exame"] = tipo_exame
