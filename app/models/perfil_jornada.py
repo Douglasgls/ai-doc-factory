@@ -32,6 +32,7 @@ class PerfilJornadaCadastro(Base):
         CheckConstraint("btrim(nome) <> ''", name="perfil_jornada_cadastro_nome_check"),
         CheckConstraint("vigencia_inicio IS NULL OR vigencia_fim IS NULL OR vigencia_fim >= vigencia_inicio",
                         name="perfil_jornada_cadastro_vigencia_check"),
+        CheckConstraint("NOT (geral AND prestador_id IS NOT NULL)", name="perfil_jornada_cadastro_geral_dono_check"),
         Index("perfil_jornada_cadastro_prestador_idx", "prestador_id"))
 
     perfil: Mapped[str] = mapped_column(Text, primary_key=True)

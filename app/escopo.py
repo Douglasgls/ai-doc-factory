@@ -298,6 +298,7 @@ def escrita_de_perfis(usuario: UsuarioContexto = Depends(exigir_usuario),
 # - plataforma: vê e edita tudo; cria perfis gerais ou de um prestador; marca/desmarca geral.
 # - admin de empresa própria: vê o Padrão, os gerais e os do próprio prestador; cria perfis (nascem dele, nunca
 #   gerais) e edita só os dele. Perfil fora do escopo = 404, igual a inexistente; visível mas não editável = 403.
+# - Geral e dono são exclusivos: perfil geral não tem dono e só a plataforma o edita.
 # - Perfil sem linha de cadastro, ou "não geral e sem dono" (os que existiam antes): só a plataforma.
 
 _NEGADO_EDICAO_PERFIL = "apenas a plataforma ou o dono do perfil o edita"
@@ -332,7 +333,7 @@ def perfil_editavel(usuario: UsuarioContexto, cadastro: PerfilJornadaCadastro | 
         return False
     if usuario.nivel == "plataforma":
         return True
-    return (_eh_admin_de_prestador(usuario) and cadastro is not None
+    return (_eh_admin_de_prestador(usuario) and cadastro is not None and not cadastro.geral
             and cadastro.prestador_id == usuario.prestador_id)
 
 
