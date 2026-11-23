@@ -4,7 +4,6 @@ import { apiService, type ParametroProprio, type PerfilJornadaDetalhe } from '..
 import { BTN, BTN_SEC, CARD, ErroBox, INPUT, LABEL } from './formUi'
 import {
   BASE_LEGAL_MAX,
-  PERFIL_PADRAO,
   formatarValor,
   linhasDe,
   nomeUnidade,
@@ -23,7 +22,7 @@ interface Props {
 }
 
 export const PerfilJornadaForm: React.FC<Props> = ({ existente, catalogo, onCancelar, onSalvo }) => {
-  const [nome, setNome] = useState(existente?.perfil ?? '')
+  const [nome, setNome] = useState(existente?.nome ?? '')
   const [linhas, setLinhas] = useState<LinhaForm[]>(existente ? linhasDe(existente.proprios) : [])
   const [proxChave, setProxChave] = useState(existente ? existente.proprios.length : 0)
   const [erro, setErro] = useState<string | null>(null)
@@ -51,8 +50,13 @@ export const PerfilJornadaForm: React.FC<Props> = ({ existente, catalogo, onCanc
     setErro(null)
     setSalvando(true)
     try {
-      await apiService.gravarPerfilJornada(nome.trim(), r.parametros)
-      onSalvo(nome.trim())
+      const params = r.parametros.length ? r.parametros : undefined
+      let perfil = existente?.perfil ?? ''
+      if (!existente) perfil = (await apiService.criarPerfilJornada({ nome: nome.trim() })).perfil
+      if (existente || params) {
+        await apiService.atualizarPerfilJornada(perfil, { nome: nome.trim(), parametros: params })
+      }
+      onSalvo(perfil)
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Erro ao salvar o perfil de jornada')
     } finally {
@@ -64,36 +68,30 @@ export const PerfilJornadaForm: React.FC<Props> = ({ existente, catalogo, onCanc
     <form onSubmit={salvar} className={`${CARD} p-5 space-y-4`} noValidate>
       <div>
         <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">
-          {existente ? `Editar perfil ${existente.perfil}` : 'Novo perfil de jornada'}
+          {existente ? `Editar ${existente.nome}` : 'Nova convenção'}
         </h3>
         <p className="text-xs text-[#877991] dark:text-[#a093a8] mt-0.5">
-          Informe só o que difere do {PERFIL_PADRAO}; o resto é herdado. Salvar substitui todos os parâmetros próprios do
-          perfil. Cada parâmetro informado substitui a linha do tempo inteira dele no padrão (inclusive as vigências da EC
+          Informe só o que difere do Padrão; o resto é herdado. Salvar substitui todos os parâmetros próprios da
+          convenção. Cada parâmetro informado substitui a linha do tempo inteira dele no padrão (inclusive as vigências da EC
           141) e precisa de uma linha de base, sem vigência.
         </p>
       </div>
 
       <div className="max-w-sm">
-        <label className={LABEL} htmlFor="perfil-nome">Nome do perfil</label>
+        <label className={LABEL} htmlFor="perfil-nome">Nome da convenção</label>
         <input
           id="perfil-nome"
           className={INPUT}
           value={nome}
-          readOnly={!!existente}
-          maxLength={50}
-          placeholder="ex.: adm_publica"
+          maxLength={100}
+          placeholder="Ex.: Comerciários SP 2026/2027"
           onChange={(e) => setNome(e.target.value)}
         />
-        {!existente && (
-          <p className="text-[11px] text-[#877991] dark:text-[#a093a8] mt-1">
-            Minúsculas, dígitos e sublinhado (até 50). Não pode ser alterado depois.
-          </p>
-        )}
       </div>
 
       <div className="space-y-3">
         {linhas.length === 0 && (
-          <p className="text-xs text-[#877991] dark:text-[#a093a8]">Nenhum parâmetro próprio. Adicione ao menos um.</p>
+          <p className="text-xs text-[#877991] dark:text-[#a093a8]">Nenhum parâmetro próprio: a convenção usa os valores do Padrão.</p>
         )}
         {linhas.map((l, i) => {
           const unidade = unidades.get(l.parametro)
@@ -186,7 +184,7 @@ export const PerfilJornadaForm: React.FC<Props> = ({ existente, catalogo, onCanc
       <div className="flex items-center gap-3">
         <button type="submit" disabled={salvando} className={BTN}>
           {salvando && <Loader2 className="w-4 h-4 animate-spin" />}
-          Salvar perfil
+          Salvar convenção
         </button>
         <button type="button" onClick={onCancelar} disabled={salvando} className={BTN_SEC}>
           Cancelar
