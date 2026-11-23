@@ -42,7 +42,9 @@ def _empresas(session: Session, usuario: UsuarioContexto):
     docs, campos = _carregar_conformidade(session, usuario)
     empresas, sem = conformidade.agrupar_empresas(docs, campos)
     hoje = date.today()
-    resultados = {c: conformidade.calcular_empresa(ds, campos, hoje) for c, ds in empresas.items()}
+    cadastradas = dict(session.execute(select(Prestador.cnpj, Prestador.razao_social)
+                                       .where(Prestador.cnpj.in_(list(empresas)))).all()) if empresas else {}
+    resultados = {c: conformidade.calcular_empresa(ds, campos, hoje, cadastradas.get(c)) for c, ds in empresas.items()}
     return resultados, sem, empresas
 
 
