@@ -157,7 +157,7 @@ def test_busca_traz_nome_do_documento_pessoa_e_intervalo(banco):
     palavra = "zzxqnome" + uuid.uuid4().hex[:6]
     lid, did = lote(tipo="folha_ponto", ini=5, fim=6, texto=f"ponto {palavra}")
     conn.execute("UPDATE documento SET nome_padronizado = 'folha_ponto_ana_2024-11.pdf' WHERE id = %s", (did,))
-    conn.execute("INSERT INTO documento_campos (documento_id, campo, valor) VALUES (%s, 'nome', 'Ana Souza')", (did,))
+    conn.execute("INSERT INTO documento_campos (documento_id, campo, valor, origem) VALUES (%s, 'nome', 'Ana Souza', 'teste')", (did,))
     lid2, _ = lote(tipo="aso", ini=1, fim=1, texto=f"aso {palavra}")
     conn.execute("INSERT INTO pagina (lote_id, numero, documento_id, texto) VALUES (%s, 2, NULL, %s)",
                  (lid2, f"orfa {palavra}"))
