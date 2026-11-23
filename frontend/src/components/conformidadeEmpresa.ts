@@ -1,4 +1,4 @@
-// Tipos e funções puras da explicação do score de conformidade de uma empresa.
+// Tipos e funções puras da explicação da nota de conformidade de uma empresa.
 // Formato real: GET /empresas/{cnpj}/conformidade (app/routers/empresas/actions.py), calculado em
 // app/conformidade.py::calcular_empresa. Tudo aqui é derivado dos dados da API; nada é inventado.
 import { formatarData } from './auditoriaPonto'
@@ -99,6 +99,18 @@ export const FAIXAS_CONFORMIDADE: { nome: Classificacao; minimo: number; maximo:
 
 export const ORDEM_CRITERIOS: CriterioChave[] = ['completude', 'validade', 'consistencia']
 
+/** Nome de cada critério como a tela o mostra nos cartões da nota (todos no plural, masculino). */
+export const ROTULO_CRITERIO_NOTA: Record<CriterioChave, string> = {
+  completude: 'Documentos enviados',
+  validade: 'Documentos válidos',
+  consistencia: 'Dados consistentes',
+}
+
+/** Quem cobra documentos de terceiros (plataforma e tomador) "solicita"; quem tem de enviar (prestador, empresa
+ * própria) "envia". Decide pelo nível do usuário logado. */
+export const quemCobraDocumentos = (nivel: string | null | undefined, empresaPropria = false): boolean =>
+  !empresaPropria && (nivel === 'plataforma' || nivel === 'tomador')
+
 export const CRITERIOS: Record<CriterioChave, { rotulo: string; mede: string }> = {
   completude: { rotulo: ROTULO_CRITERIO.completude, mede: 'Mede se a empresa enviou todos os documentos obrigatórios.' },
   validade: {
@@ -173,7 +185,9 @@ export const motivosProvisorio = (g: Avaliacao, rotulos: Rotulos): string[] => {
   for (const chave of ORDEM_CRITERIOS) {
     const c = g.criterios[chave]
     if (c.pendente && c.aplicavel) {
-      motivos.push(`${CRITERIOS[chave].rotulo} ainda não tem nada para analisar, e o peso dele passou para os outros critérios.`)
+      motivos.push(
+        `Ainda não há nada para avaliar em "${ROTULO_CRITERIO_NOTA[chave]}". Essa parte não vale zero: o peso dela foi dividido entre as outras.`,
+      )
     }
   }
   return motivos

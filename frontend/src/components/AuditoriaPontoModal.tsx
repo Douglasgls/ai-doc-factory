@@ -26,9 +26,11 @@ import {
   formatarMinutos,
   listarCamposEspelho,
   nivelDeRisco,
+  descreverDiferenca,
   rotuloSemValor,
   rotuloTipo,
   textoBaseRisco,
+  textoRegraAplicada,
   type AnalisePonto,
   type DiaApurado,
   type Divergencia,
@@ -480,6 +482,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
   const nivel = risco != null ? nivelDeRisco(risco) : null
   const britanico = analise?.ponto_britanico
   const diferencas = analise?.diferencas_gemini ?? []
+  const regraAplicada = analise ? textoRegraAplicada(analise) : null
 
   const dimensoesIndeterminadas = useMemo(() => {
     if (!analise?.scores_dimensao) return []
@@ -587,6 +590,13 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
 
             {concluida && (
               <>
+                {regraAplicada && (
+                  <p className="flex items-start gap-2 text-xs sm:text-[13px] font-medium text-[#4e4356] dark:text-[#c7bad1]">
+                    <Info className="w-4 h-4 shrink-0 mt-px text-[#7e22ce] dark:text-[#d8b4fe]" />
+                    <span>{regraAplicada}</span>
+                  </p>
+                )}
+
                 {/* Resumo Principal */}
                 <section className="space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-5">
@@ -608,7 +618,7 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                                 : 'bg-red-100/80 text-red-800 dark:bg-red-950/50 dark:text-red-300'
                         }`}
                       >
-                        {precisaRevisao ? (
+                        {precisaRevisao || nivel === 'medio' || nivel === 'alto' ? (
                           <AlertTriangle className="w-3 h-3" />
                         ) : (
                           <Check className="w-3 h-3" />
@@ -800,11 +810,20 @@ const AuditoriaPontoModal: React.FC<Props> = ({ documentoId, filename, onClose }
                   )}
 
                   {diferencas.length > 0 && (
-                    <p className={`text-xs ${MUTED}`}>
-                      {diferencas.length}{' '}
-                      {diferencas.length === 1 ? 'valor divergiu' : 'valores divergiram'} da
-                      leitura da IA; prevalece o cálculo do sistema.
-                    </p>
+                    <div className={`text-xs space-y-1.5 ${MUTED}`}>
+                      <p>
+                        {diferencas.length}{' '}
+                        {diferencas.length === 1 ? 'valor divergiu' : 'valores divergiram'} da
+                        leitura da IA; prevalece o cálculo do sistema.
+                      </p>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {diferencas.map((d, i) => (
+                          <li key={`${d.tipo}-${d.campo ?? ''}-${d.data ?? ''}-${i}`}>
+                            {descreverDiferenca(d)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </section>
 
