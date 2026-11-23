@@ -19,7 +19,7 @@ Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O q
 | `migrate` | One-shot: roda `alembic upgrade head` e sai; `api` e os workers só sobem depois que ele termina com sucesso |
 | `worker_extracao` | Consome `extrair_campos`: Gemini extrai empresa (CNPJ e razão social), datas e identificação em `documento_campos` (Goal 7); fora do fan-in do lote |
 | `worker_analise` | Consome `analisar_folha_ponto`: Gemini + cálculo em código + Jev, grava `analise_ponto` (Goal 6); fora do fan-in do lote |
-| `frontend` | Interface React servida por Nginx (`FRONTEND_PORT`, padrão 5173): login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa (ver [Frontend](#frontend)) |
+| `frontend` | Interface React servida por Nginx (`FRONTEND_PORT`, padrão 5173): login, convite, upload, documentos por tipo, revisão manual, auditoria de ponto, conformidade, convenções coletivas, organizações e equipe (ver [Frontend](#frontend)) |
 | `postgres` | Dados e busca full-text (config `portuguese`) |
 | `redis` | Filas (listas, com ack via `BLMOVE`, 3 tentativas e depois `dlq`) |
 
@@ -75,7 +75,10 @@ Edite o `.env`:
 - `API_PORT` define a porta da API no host (padrão 8000).
 - Para rodar sem rede e sem chaves, defina `CLASSIFICADOR=regras`. Com `CLASSIFICADOR=jev` (padrão do `.env.example`), preencha `OPENROUTER_API_KEY`, `JEV_MODEL` e `GEMINI_API_KEY`.
 
-- `AUTH_USUARIO` e `AUTH_SENHA` servem só para criar o primeiro administrador (ver "Autenticação"); `AUTH_SEGREDO` assina o token. **Sem `AUTH_SEGREDO` o sistema recusa o login (503) e toda rota protegida nega acesso.** Gere o segredo com `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- `AUTH_USUARIO` e `AUTH_SENHA` servem só para criar o primeiro administrador (ver "Primeiro administrador" abaixo); `AUTH_SEGREDO` assina o token. **Sem `AUTH_SEGREDO` o sistema recusa o login (503) e toda rota protegida nega acesso.** Gere o segredo com `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- `UPLOAD_MAX_MB` (padrão 50) e `UPLOAD_MAX_PAGINAS` (padrão 300) limitam o upload: acima do tamanho a API responde 413, acima das páginas, 422. Nada é gravado antes dessas validações.
+- `GEMINI_MODEL` e `GEMINI_ANALISE_MODEL` escolhem os modelos do Gemini (segunda opinião e extração de campos; análise de ponto); `CORS_ORIGINS` lista as origens do frontend; `CONVITE_VALIDADE_DIAS` (padrão 7) é a validade do link de convite (consta do `.env.example`, mas o `docker-compose.yml` atual não a repassa aos containers: para valer no Docker é preciso acrescentá-la ao bloco `environment`). As demais variáveis estão na tabela "Variáveis de ambiente".
+- `FILA_ESPERAS` (espera entre as tentativas da fila) **não existe na `master`**: não consta do código nem do `.env.example`.
 
 O `.env` está no `.gitignore`. Nunca o versione.
 
@@ -94,6 +97,8 @@ curl http://localhost:8000/health
 ```
 
 (troque `8000` pelo valor de `API_PORT`; os exemplos abaixo usam 8000).
+
+**Primeiro administrador.** Com `AUTH_USUARIO` (e-mail) e `AUTH_SENHA` preenchidos no `.env`, o serviço `migrate` cria, na primeira subida, um usuário de nível `plataforma` e papel `admin`. Se o usuário já existe, nada muda: trocar `AUTH_SENHA` depois não altera a senha dele. Para entrar, use `POST /auth/login` (ver "Autenticação") ou a tela de login em `http://localhost:5173` (`FRONTEND_PORT`). Dali em diante os demais acessos nascem por convite (ver "Organizações, contratos e convenções coletivas").
 
 ### 3. Enviar um lote e consultar o resultado
 
@@ -128,7 +133,9 @@ curl http://localhost:8000/documentos/2
 docker compose exec api python -m pytest tests -q
 ```
 
-Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Última execução registrada: `942 passed, 1 skipped, 1 warning in 89.10s`, no commit `4f661bb`, em 2026-11-16, com `CLASSIFICADOR=regras`, na imagem do `api` (Python 3.12) com Postgres 16 e Redis 7 descartáveis, com o comando `python -m pytest tests -q`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
+Os testes rodam dentro do container `api`, que tem acesso ao Postgres e ao Redis do Compose. Para o resultado ser limpo, rode com `CLASSIFICADOR=regras` e sem o administrador de bootstrap (`docker compose exec -e AUTH_USUARIO= -e AUTH_SENHA= api python -m pytest tests -q`), com os workers parados e o banco sem usuários: um admin criado pelo `migrate` quebra `test_modelo_acesso`, e workers ativos consomem o lote que `test_schemas_saida` acabou de enviar. O CI (`.github/workflows/ci.yml`) roda backend (Postgres 16, Redis 7, `alembic upgrade head`, `pytest`) e frontend (`npm run lint`, `npm run build`).
+
+Última execução registrada: 2026-11-23, commit `e14c311`, imagem do `api` (Python 3.12) construída desse commit, no stack de desenvolvimento com Postgres 16 e Redis 7 do Compose, `CLASSIFICADOR=regras`, `python -m pytest tests -q`: **`1141 passed, 2 failed, 1 skipped, 1 warning in 224.86s`**. As 2 falhas (`test_modelo_acesso::test_nivel_e_vinculo_incoerentes_recusados_e_validos_aceitos` e `test_schemas_saida::test_upload_de_lote`) vieram dessa execução ter sido feita com o stack no ar (o administrador de bootstrap no banco e os workers consumindo o lote); com os workers parados e a tabela `usuario` limpa, os dois arquivos juntos deram `36 passed`. `tests/test_migracoes.py` cria um banco descartável no mesmo servidor e testa `upgrade head` e `downgrade base`.
 
 ### 5. Rodar sem rede
 
@@ -136,7 +143,7 @@ Com `CLASSIFICADOR=regras` no `.env`, a classificação usa palavras-chave (`app
 
 ### 6. Mudança de schema e dados locais
 
-O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo. A `0002_modelo_acesso` cria as tabelas `tomador`, `prestador`, `contrato` e `usuario` (base do futuro controle de acesso por organização); a `0003_lote_contrato` liga o lote a um contrato (`lote.contrato_id`, opcional), troca a unicidade global de `lote.sha256` por unicidade por contrato e **remove a tabela `empresa` (o antigo cadastro de empresas) e `lote.empresa_id`, com todos os seus dados**; o downgrade recria `empresa` vazia e falha, sem apagar lote, se o mesmo arquivo existir em mais de um lote. O filtro de dados por organização (`app/escopo.py`) usa `lote.contrato_id`: ver "Autenticação".
+O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo. As seguintes: `0002_modelo_acesso` (tabelas `tomador`, `prestador`, `contrato` e `usuario`), `0003_nome_padronizado_documento`, `0004_lote_contrato` (liga o lote a um contrato, `lote.contrato_id`, opcional; troca a unicidade global de `lote.sha256` por unicidade por contrato; **remove a tabela `empresa` e `lote.empresa_id`, com todos os seus dados**; o downgrade recria `empresa` vazia e falha, sem apagar lote, se o mesmo arquivo existir em mais de um lote), `0005_convite`, `0006_perfil_jornada_vigencia` (vigência por data, EC 141/2026), `0007_contrato_perfil_jornada`, `0008_documento_campos_autor`, `0009_contrato_proprio`, `0010_perfil_jornada_cadastro` (nome, sindicato e vigência da convenção) e `0011_perfil_jornada_escopo` (convenção geral ou de um prestador). O filtro de dados por organização (`app/escopo.py`) usa `lote.contrato_id`: ver "Autenticação".
 
 Criar uma nova revisão (dentro do container, o arquivo gerado fica na imagem; copie-o para `migrations/versions/` do repositório):
 
@@ -164,9 +171,41 @@ docker compose down -v
 
 O `-v` apaga os volumes: **todos os dados locais** (lotes, documentos, arquivos enviados e o cache de LLM) são perdidos. Para só parar os serviços, use `docker compose down` sem `-v`.
 
+### 7. Reextrair campos de documentos antigos
+
+Quando o prompt de extração muda (`VERSAO_PROMPT_EXTRACAO`, hoje `gemini-extracao-v4`) ou um documento ficou sem extração, `scripts/reextrair_campos.py` reenfileira em `extrair_campos` os documentos em `classificado`, `revisado` ou `em_revisao` cuja extração gravada é de outra versão ou não existe. **Por padrão é dry-run: só lista, não enfileira nada.**
+
+```bash
+docker compose exec api python scripts/reextrair_campos.py                 # dry-run: lista e conta por versão
+docker compose exec api python scripts/reextrair_campos.py --lote 3 --limite 10   # dry-run, só o lote 3, até 10 documentos
+docker compose exec api python scripts/reextrair_campos.py --lote 3 --limite 10 --executar   # enfileira de verdade
+```
+
+- `--lote ID` limita a um lote; `--limite N` limita a quantidade; `--executar` enfileira.
+- **Cada documento enfileirado com `--executar` gasta uma chamada ao Gemini** (extração com a imagem da primeira página). Use `--lote` e `--limite` para controlar o custo.
+- Só substitui campos de origem `gemini:*`. Campo corrigido por humano (origem `humano`) nunca é apagado.
+- Saída de um dry-run real (2026-11-23, `--lote 1` de um banco de teste com 5 documentos sem extração):
+
+```
+versão atual do prompt: gemini-extracao-v4
+documentos a reextrair: 5
+  (sem extração): 5
+ids: 1, 2, 3, 4, 5
+dry-run: nada foi enfileirado (use --executar; cada documento gasta uma chamada ao Gemini)
+```
+
 ### Frontend
 
-A pasta `frontend/` é a interface (Vite + React + TypeScript + Tailwind v4), e o `docker-compose.yml` tem o serviço `frontend` (build com Nginx, porta `FRONTEND_PORT`, padrão 5173; `VITE_API_URL` e `VITE_API_PREFIX` entram como argumentos de build; `VITE_API_PREFIX` fica vazio, a API não tem prefixo). Pelo código em `frontend/src`, tem: tela de login (token da API), upload de PDF, JPEG, PNG e TIFF com arrastar e soltar, lista de documentos por tipo, tela de revisão manual (`GET /revisao`, `POST /documentos/{id}/revisao`, correção de campos), modal de auditoria da folha de ponto (`GET /documentos/{id}/analise-ponto`) e modal de conformidade da empresa (`GET /empresas`, `GET /empresas/{cnpj}/conformidade`). Detalhes de desenvolvimento em `frontend/README.md`. A interface não tem testes automatizados nem foi exercitada de ponta a ponta para este README; para desenvolver fora do Docker, veja `frontend/.env.example`.
+A pasta `frontend/` é a interface (Vite + React + TypeScript + Tailwind v4), e o `docker-compose.yml` tem o serviço `frontend` (build com Nginx, porta `FRONTEND_PORT`, padrão 5173; `VITE_API_URL` e `VITE_API_PREFIX` entram como argumentos de build; `VITE_API_PREFIX` fica vazio, a API não tem prefixo). Pelo código em `frontend/src`, as telas são:
+
+- login (com "manter conectado": o token vai para `localStorage` se marcado, senão `sessionStorage`) e aceite de convite (`/convite#<token>`, com o token no fragmento da URL: define nome e senha);
+- documentos por tipo (pastas), upload de PDF, JPEG, PNG e TIFF com arrastar e soltar (o tamanho é validado antes de enviar), histórico de lotes vindo de `GET /lotes` e acompanhamento do processamento;
+- revisão manual (fila, tipo sugerido, correção do tipo e dos campos extraídos) e visualizador com os dados lidos do documento;
+- auditoria da folha de ponto e conformidade da empresa (modais);
+- Convenções coletivas: lista, detalhe com a régua do dia, formulário (alterar, desfazer, mudança com data) e escolha da convenção de cada contrato;
+- Organizações (só plataforma: tomadores, prestadores, contratos, empresa própria, convites), Terceirizadas (admin de tomador) e Equipe (admin de qualquer nível: usuários e convites).
+
+O que aparece depende do nível e do papel (`frontend/src/utils/permissoes.ts`); para a empresa própria os textos de terceirização são trocados ("Seus documentos", "CNPJ da empresa"). Detalhes de desenvolvimento em `frontend/README.md`. A interface não tem testes automatizados (o CI roda só `npm run lint` e `npm run build`). A única avaliação dela até agora é a de um agente de IA, descrita em "Resultados"; para desenvolver fora do Docker, veja `frontend/.env.example`.
 
 ## Autenticação
 
@@ -174,7 +213,7 @@ O login usa a tabela `usuario` (níveis `plataforma`, `tomador` e `prestador`; p
 
 **Primeiro administrador:** `AUTH_USUARIO` e `AUTH_SENHA` agora servem **só** para criar o primeiro administrador. O serviço `migrate` do compose roda `python -m app.bootstrap_admin` depois do `alembic upgrade head`: se as duas variáveis estão definidas e não existe usuário com esse identificador, cria um usuário `plataforma`/`admin`; se já existe, não altera nada. **Trocar `AUTH_SENHA` depois não muda a senha de um usuário já criado.** Fora do Docker, rode o comando com as variáveis e `DATABASE_URL` no ambiente.
 
-A cada requisição o usuário é relido no banco: desativá-lo (ou à sua organização) ou mudar seu papel vale na hora, e o nível e o papel que valem são os do banco, não os do token. Acesso aos dados (`app/escopo.py`, único ponto de decisão): **plataforma** vê e faz tudo; **tomador** só lê, e só lotes de contratos do seu tomador (ativos ou não, é o histórico); **prestador** lê e opera (upload, revisão, cancelar, reprocessar) só em lotes de contratos ativos do seu prestador, e no `POST /lotes` o `contrato_id` é obrigatório (422) e tem de ser contrato dele ativo (404). Recurso fora do escopo responde 404, igual ao inexistente; tomador recebe 403 em qualquer escrita; lote sem contrato é só da plataforma. Listagens (`/documentos`, `/revisao`, `/busca`, `/contratos`) filtram no SQL e o stream de eventos segue o escopo do lote. `/empresas`, `/empresas/{cnpj}/conformidade`, `/lotes/{id}/conformidade` a criação de tomador, prestador e contrato e os perfis de jornada (`/perfis-jornada` e `PUT /contratos/{id}/perfil-jornada`) são só da plataforma por enquanto; `/tipos`, `/auth/me` e `GET /contratos` (filtrado) aceitam qualquer usuário logado. `GET /auth/me` aceita qualquer usuário autenticado e devolve `id`, `email`, `nome`, `nivel`, `papel`, `tomador_id` e `prestador_id`. Tokens do formato anterior (emitidos antes desta mudança) são recusados: é preciso entrar de novo. Ficam abertos só `GET /health`, `POST /auth/login`, `/docs` e `/openapi.json`.
+A cada requisição o usuário é relido no banco: desativá-lo (ou à sua organização) ou mudar seu papel vale na hora, e o nível e o papel que valem são os do banco, não os do token. Acesso aos dados (`app/escopo.py`, único ponto de decisão): **plataforma** vê e faz tudo; **tomador** só lê, e só lotes de contratos do seu tomador (ativos ou não, é o histórico); **prestador** lê e opera (upload, revisão, cancelar, reprocessar) só em lotes de contratos ativos do seu prestador, e no `POST /lotes` o `contrato_id` é obrigatório (422) e tem de ser contrato dele ativo (404). Recurso fora do escopo responde 404, igual ao inexistente; tomador recebe 403 em qualquer escrita sobre lotes e documentos; lote sem contrato é só da plataforma. Listagens (`/lotes`, `/documentos`, `/revisao`, `/busca`, `/contratos`) filtram no SQL e o stream de eventos segue o escopo do lote. As rotas de conformidade (`/empresas`, `/empresas/{cnpj}/conformidade`, `/lotes/{id}/conformidade`) valem para os três níveis, cada um com o seu escopo (ver "Organizações, contratos e convenções coletivas"). A criação e a ativação de tomador, prestador e contrato e o cadastro de empresa própria são só da plataforma; o cadastro de terceirizada é do admin do tomador (ou da plataforma); convites e a lista de usuários são do admin de cada organização (a plataforma vê todos); os perfis de jornada são da plataforma e do admin de empresa própria. `/tipos`, `/auth/me` e `GET /contratos` (filtrado) aceitam qualquer usuário logado. `GET /auth/me` devolve `id`, `email`, `nome`, `nivel`, `papel`, `tomador_id` e `prestador_id`. Tokens do formato anterior (emitidos antes do modelo de acesso) são recusados: é preciso entrar de novo. Ficam abertos só `GET /health`, `POST /auth/login`, `GET /convites/{token}` e `POST /convites/{token}/aceitar` (o token do convite é a credencial), `/docs` e `/openapi.json`.
 
 Para obter o token (substitua pelos seus valores):
 
@@ -189,6 +228,36 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/auth/me
 
 O token é um JWT HS256 (claims `sub` = id do usuário, `nivel`, `papel`, `tomador_id`, `prestador_id`, `iat`, `exp`). No `/docs`, use o botão Authorize. Token em query string não é aceito, nem para a imagem da página: o cliente deve enviar o cabeçalho `Authorization`.
 
+## Organizações, contratos e convenções coletivas
+
+Conferido no código da `master` (commit `e14c311`), não só na documentação dos PRs.
+
+**Níveis de acesso.** `plataforma` (opera o sistema), `tomador` (o cliente que contrata a terceirizada; só lê) e `prestador` (a empresa prestadora; envia e revisa os próprios lotes). Cada nível tem papel `admin` ou `membro`. Quem decide o que cada um vê é `app/escopo.py` (ver "Autenticação").
+
+**Contrato.** O lote pertence a um contrato (tomador + prestador). A conformidade, a análise de ponto e o filtro de dados partem dele.
+
+**Empresa solo = contrato próprio.** A empresa que não terceiriza é cadastrada pela plataforma em `POST /empresas-proprias`: o mesmo CNPJ vira tomador e prestador, com um contrato `proprio` entre eles e o convite do administrador. Uma regra única em `app/escopo.py` impede ligar o prestador de uma empresa própria a outro tomador (`POST /contratos` e `POST /terceirizadas` respondem com erro). O admin dela vê só os próprios dados, e a interface troca os termos de terceirização por "Seus documentos", "CNPJ da empresa" e "Empresa".
+
+**Terceirizadas.** O admin do tomador cadastra a terceirizada em `POST /terceirizadas` (cria ou reaproveita o prestador do CNPJ, cria o contrato e, se o prestador ainda não tem acesso, o convite do administrador dele).
+
+**Convenções coletivas (no código, "perfis de jornada").** Cada convenção tem nome, sindicato (opcional) e vigência (início e fim opcionais), e guarda só os parâmetros que diferem do Padrão (`clt_padrao`): os demais são herdados do Padrão, parâmetro a parâmetro. Escopo de cada uma:
+
+- **Padrão:** o perfil CLT de referência, só leitura, visível a todos que leem perfis.
+- **Geral:** marcada pela plataforma; visível a todos que leem perfis.
+- **De um prestador:** pertence a um prestador; só ele (admin de empresa própria) e a plataforma a veem e editam. Geral e dono são exclusivos.
+
+Cada contrato aponta para uma convenção (`PUT /contratos/{id}/perfil-jornada`, plataforma ou admin do contrato próprio) e o `worker_analise` usa a do contrato do lote; lote sem contrato usa o Padrão. A análise grava o nome e os valores efetivos usados. Trocar a convenção do contrato ou editá-la não refaz análises já gravadas: é preciso reprocessar o documento. A vigência cadastrada (`vigencia_inicio`/`vigencia_fim`) hoje só informa na tela se a convenção está vigente; a análise não deixa de usar uma convenção vencida. Admin de terceirizada (prestador que não é empresa própria) e tomador não veem a tela de convenções.
+
+**Conformidade por escopo e pelo contrato do lote.** A empresa continua sendo a prestadora, identificada pelo CNPJ. O que muda com o contrato (`app/conformidade.py`): em lote com contrato, o documento sem CNPJ válido ou sem distinção entre prestadora e tomadora liga ao prestador do contrato (origem `contrato`), e um CNPJ extraído válido e diferente do contrato também liga ao prestador do contrato, com a divergência `cnpj_diferente_do_contrato`, que conta na Consistência. Lote sem contrato continua exigindo CNPJ extraído válido. O tomador vê o score de uma terceirizada calculado só com os documentos dos contratos dele; o prestador vê só a própria empresa; fora do escopo, 404. A razão social mostrada é a cadastrada no prestador, com a extraída mais comum como reserva.
+
+**Revisão humana com autor.** O revisor gravado em `POST /documentos/{id}/revisao`, `PATCH /documentos/{id}/tipo` e `PUT /documentos/{id}/campos` é o e-mail do usuário autenticado; o campo `revisor` do corpo é ignorado. Campo corrigido guarda o autor (`documento_campos.autor`, migração `0008`).
+
+**Busca por texto.** `GET /busca?q=` usa a full-text search do PostgreSQL (`portuguese`) e devolve lote, página, documento, tipo, nome do arquivo e o trecho com `<b>`. Filtra pelo escopo do usuário; o trecho sai com CPF, RG e PIS mascarados (ver "Anonimização").
+
+**Organizações e convites.** A plataforma cria tomador, prestador, contrato e empresa própria, e pode ativar ou desativar cada um (`PATCH .../{id}` com `ativo`). Convite é link de uso único (`POST /convites`, validade `CONVITE_VALIDADE_DIAS`): o banco guarda só o hash do token, e o token vem só na resposta da criação. O admin de cada organização convida colegas, lista e desativa usuários da própria organização. Um convite pendente pode ser **revogado** (`DELETE /convites/{id}`; convite já usado dá 409) ou **reemitido** (`POST /convites/{id}/reemitir`: revoga o não usado e cria outro igual, com link novo, numa transação). O aceite (`POST /convites/{token}/aceitar`) define nome e senha e já devolve o token de login.
+
+**Fila.** Retry 3x e depois `dlq`, como já descrito. A espera entre tentativas (`FILA_ESPERAS`) não está na `master` e por isso não é descrita aqui.
+
 ## Endpoints
 
 **Todas as rotas abaixo, exceto `GET /health`, exigem `Authorization: Bearer <token>`.** Os exemplos de `curl` da tabela omitem o cabeçalho por brevidade: acrescente `-H "Authorization: Bearer $TOKEN"`.
@@ -197,6 +266,7 @@ O token é um JWT HS256 (claims `sub` = id do usuário, `nivel`, `papel`, `tomad
 |---|---|---|
 | `GET /health` | Verifica Postgres e Redis | `curl localhost:8000/health` |
 | `POST /lotes` | Envia PDF, JPEG, PNG ou TIFF (multipágina inclusive); imagens viram `original.pdf`. Arquivo inválido: 400. Campo de formulário opcional `contrato_id` vincula o lote a um contrato (404 se não existir; 409 se o contrato, o tomador ou o prestador estão inativos); sem ele o lote fica sem contrato. O mesmo arquivo (SHA-256) em contratos diferentes gera lotes diferentes; reenviar no mesmo contrato (ou sem contrato) devolve o lote existente, e um lote nunca muda de contrato | `curl -F "arquivo=@lote.pdf" localhost:8000/lotes` |
+| `GET /lotes?estado=&contrato_id=&antes_de=` | Lista os lotes do escopo do usuário com resumo, filtros por `estado` e `contrato_id` (404 se o contrato está fora do escopo) e paginação por cursor (`proximo_cursor`) | `curl localhost:8000/lotes` |
 | `GET /lotes/{id}` | Estado do lote, `contrato_id` e lista de documentos (intervalo, tipo, confiança, probabilidades) | `curl localhost:8000/lotes/1` |
 | `GET /lotes/{id}/eventos` | Stream SSE (`text/event-stream`) de acompanhamento do lote: cada frame `data: {json}` traz o mesmo corpo de `GET /lotes/{id}` (com `ultimo_evento` e `historico_eventos`); linhas `: keepalive` entre os frames. O último frame traz também `"fim": true` e `"motivo"`: `finalizado` (lote `concluido`, sem documentos pendentes nem extração/análise pendentes), `erro` (lote em `erro`) ou `tempo_esgotado` (conexão aberta por 900 s, contados em tempo real). `?once=true` envia um único frame e fecha. Lote inexistente: 404 | `curl -N localhost:8000/lotes/1/eventos` |
 | `POST /lotes/{id}/cancelar` | Cancela o processamento em andamento e devolve o lote. 404 se não existe; 409 se não há nada a cancelar (lote já finalizado) | `curl -X POST localhost:8000/lotes/1/cancelar` |
@@ -213,17 +283,27 @@ O token é um JWT HS256 (claims `sub` = id do usuário, `nivel`, `papel`, `tomad
 | `GET /prestadores` | Lista os prestadores | `curl localhost:8000/prestadores` |
 | `POST /contratos` | Cria o contrato entre um tomador e um prestador (`{"tomador_id", "prestador_id", "vigencia_inicio"?, "vigencia_fim"?}`); 201. Par repetido: 409; tomador ou prestador inexistente: 404; `vigencia_fim` antes de `vigencia_inicio`: 422 | `curl -H "Content-Type: application/json" -d '{"tomador_id":1,"prestador_id":1}' localhost:8000/contratos` |
 | `GET /contratos?tomador_id=&prestador_id=` | Lista os contratos (filtros opcionais); cada item traz `id`, `ativo`, as datas, o `perfil_jornada`, o nome e o estado do tomador e a razão social, o CNPJ e o estado do prestador, o bastante para montar um seletor de contrato | `curl "localhost:8000/contratos?tomador_id=1"` |
-| `GET /perfis-jornada` | Só plataforma. Perfis de jornada da análise de ponto: nome, se é o padrão, quantos parâmetros próprios e quantos contratos apontam para ele | `curl localhost:8000/perfis-jornada` |
-| `GET /perfis-jornada/{perfil}` | Só plataforma. `proprios` (o que o perfil guarda, com `vigente_desde`) e `efetivo` (o que a análise usa: próprios mais os herdados de `clt_padrao`); 404 se não existe | `curl localhost:8000/perfis-jornada/clt_padrao` |
-| `PUT /perfis-jornada/{perfil}` | Só plataforma. Cria o perfil ou substitui todos os seus parâmetros próprios (`{"parametros": [{"parametro", "valor", "base_legal", "vigente_desde"?}]}`). Informe só o que difere de `clt_padrao`; cada parâmetro informado substitui a linha do tempo inteira dele e precisa de um valor de base (`vigente_desde` nulo). Nome em minúsculas, dígitos e `_`. `clt_padrao`: 409; parâmetro desconhecido, repetido ou sem valor de base: 422 | `curl -X PUT -H "Content-Type: application/json" -d '{"parametros":[{"parametro":"jornada_semanal_min","valor":2640,"base_legal":"EC 141/2026, art. 9º"}]}' localhost:8000/perfis-jornada/adm_publica` |
-| `PUT /contratos/{id}/perfil-jornada` | Só plataforma. Aponta o contrato para um perfil (`{"perfil": "..."}`); contrato ou perfil inexistente: 404. Vale para as análises feitas a partir daí | `curl -X PUT -H "Content-Type: application/json" -d '{"perfil":"adm_publica"}' localhost:8000/contratos/1/perfil-jornada` |
+| `GET /perfis-jornada` | Plataforma e admin de empresa própria, cada um com o seu escopo. Convenções da análise de ponto: nome, sindicato, vigência, geral, se é o padrão, quantos parâmetros próprios e quantos contratos apontam para ela | `curl localhost:8000/perfis-jornada` |
+| `GET /perfis-jornada/{perfil}` | Mesmo escopo da lista; fora dele, 404. `proprios` (o que o perfil guarda, com `vigente_desde`) e `efetivo` (o que a análise usa: próprios mais os herdados de `clt_padrao`); 404 se não existe | `curl localhost:8000/perfis-jornada/clt_padrao` |
+| `PUT /perfis-jornada/{perfil}` | Plataforma (qualquer perfil) ou admin de empresa própria (só os dele). Cria o perfil ou substitui todos os seus parâmetros próprios (`{"parametros": [{"parametro", "valor", "base_legal", "vigente_desde"?}]}`). Informe só o que difere de `clt_padrao`; cada parâmetro informado substitui a linha do tempo inteira dele e precisa de um valor de base (`vigente_desde` nulo). Nome em minúsculas, dígitos e `_`. `clt_padrao`: 409; parâmetro desconhecido, repetido ou sem valor de base: 422 | `curl -X PUT -H "Content-Type: application/json" -d '{"parametros":[{"parametro":"jornada_semanal_min","valor":2640,"base_legal":"EC 141/2026, art. 9º"}]}' localhost:8000/perfis-jornada/adm_publica` |
+| `PUT /contratos/{id}/perfil-jornada` | Plataforma ou admin do contrato próprio. Aponta o contrato para um perfil (`{"perfil": "..."}`); contrato ou perfil inexistente: 404. Vale para as análises feitas a partir daí | `curl -X PUT -H "Content-Type: application/json" -d '{"perfil":"adm_publica"}' localhost:8000/contratos/1/perfil-jornada` |
 | `GET /revisao` | Fila de documentos `em_revisao`, com tipo sugerido e motivo; também `pagina_ini`, `pagina_fim`, `campos`, `pessoa`, `nome_arquivo`, `n_paginas` e `processado_em` | `curl localhost:8000/revisao` |
 | `GET /tipos` | Tipos documentais `[{slug, nome, icone}]` na ordem da configuração (`TIPOS_INFO` em `app/config.py`), sem `desconhecido` | `curl localhost:8000/tipos` |
 | `PUT /documentos/{id}/campos` | Corrige campos extraídos (`{"campos": {nome: valor ou null}, "revisor"}`): valor grava com origem `humano`, `null` remove. Nome `^[a-z0-9_]{1,40}$`, valor não vazio até 500 caracteres, `campos` e `revisor` não vazios (422); 404 se não existe; qualquer estado. Devolve o documento | `curl -X PUT -H "Content-Type: application/json" -d '{"campos":{"nome":"Maria"},"revisor":"ana"}' localhost:8000/documentos/1/campos` |
 | `GET /documentos/{id}/analise-ponto` | Análise de risco da folha de ponto (Goal 6): marcações, divergências (tipo, data, minutos, base legal, evidência; `espelho_incompleto` traz `campos_ausentes`), perfil usado (`perfil_nome` e `perfil`), score por dimensão e score geral (máximo entre as dimensões), modelos e versões dos prompts | `curl localhost:8000/documentos/1/analise-ponto` |
-| `GET /empresas` | Empresas prestadoras (CNPJ validado) com score geral de conformidade e classificação (Goal 7) | `curl localhost:8000/empresas` |
+| `GET /empresas` | Empresas prestadoras (CNPJ validado) com score geral de conformidade e classificação (Goal 7), no escopo do usuário (tomador: só documentos dos contratos dele) | `curl localhost:8000/empresas` |
 | `GET /empresas/{cnpj}/conformidade` | Os três níveis (documento, tipo, geral), notas por critério, classificação, descontos com motivo e pendências | `curl localhost:8000/empresas/12.345.678/0001-95/conformidade` |
 | `GET /lotes/{id}/conformidade` | Empresas encontradas no lote e documentos sem empresa, com o motivo | `curl localhost:8000/lotes/1/conformidade` |
+| `POST /terceirizadas` | Admin do tomador (ou plataforma, com `tomador_id`): cria ou reaproveita o prestador do CNPJ, cria o contrato e, se o prestador ainda não tem acesso, o convite do admin dele (o token vem só nesta resposta) | ver `/docs` |
+| `POST /empresas-proprias` | Só plataforma. Empresa solo: tomador e prestador do mesmo CNPJ, contrato `proprio` e convite do admin, numa transação; conflitos: 409 | ver `/docs` |
+| `PATCH /tomadores/{id}`, `PATCH /prestadores/{id}`, `PATCH /contratos/{id}` | Só plataforma. Ativa ou desativa (`{"ativo": bool}`) | ver `/docs` |
+| `POST /perfis-jornada` | Plataforma ou admin de empresa própria. Cria uma convenção a partir do nome (sindicato e vigência opcionais); o slug é gerado pelo servidor; só a plataforma envia `geral` e `prestador_id` | ver `/docs` |
+| `POST /convites` | Cria o convite (link de uso único); o token vem só nesta resposta. Quem pode convidar quem: `app/escopo.py` | ver `/docs` |
+| `GET /convites` | Convites: plataforma vê todos; admin de organização, os da própria; membro: 403 | `curl localhost:8000/convites` |
+| `DELETE /convites/{id}` | Revoga convite pendente (204); usado: 409 | `curl -X DELETE localhost:8000/convites/1` |
+| `POST /convites/{id}/reemitir` | Revoga o convite não usado e cria outro igual, com link novo (201) | `curl -X POST localhost:8000/convites/1/reemitir` |
+| `GET /convites/{token}`, `POST /convites/{token}/aceitar` | Públicos (o token é a credencial). Consulta e aceite (`{"nome","senha"}`, devolve o token de login) | ver `/docs` |
+| `GET /usuarios`, `PATCH /usuarios/{id}` | Lista usuários do escopo e ativa/desativa (`{"ativo": bool}`); admin só os da própria organização; desativar a si mesmo: 409 | `curl localhost:8000/usuarios` |
 | `POST /documentos/{id}/revisao` | Corrige o tipo; o documento vira `revisado` e `tipo_original` guarda o tipo sugerido. 409 se o documento não está em revisão | ver abaixo |
 
 ```bash
@@ -247,13 +327,18 @@ Definidas no `.env` (modelo em `.env.example`), repassadas aos containers pelo `
 | `FRONTEND_PORT` | `5173` | Porta do frontend no host |
 | `VITE_API_URL` | `http://127.0.0.1:${API_PORT}` | URL da API que o frontend usa (fixada no build) |
 | `VITE_API_PREFIX` | vazio | Prefixo das rotas da API no frontend (a API não usa prefixo) |
+| `UPLOAD_MAX_MB` | `50` | Tamanho máximo do upload, em MB (413 acima) |
+| `UPLOAD_MAX_PAGINAS` | `300` | Máximo de páginas por lote (422 acima) |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Origens do frontend permitidas pela API |
+| `CONVITE_VALIDADE_DIAS` | `7` | Validade do link de convite; no `.env.example`, mas não repassada pelo `docker-compose.yml` |
+| `GEMINI_ANALISE_MODEL` | `gemini-3.8-flash` | Modelo do Gemini na análise de folha de ponto |
 | `CONF_AUTO` | `0.85` | Confiança mínima para classificação automática |
 | `CONF_MIN` | `0.50` | Abaixo disso o tipo vira `desconhecido` e vai para revisão |
 | `CLASSIFICADOR` | `jev` | `jev` (Jev + Gemini) ou `regras` (sem rede) |
 | `OPENROUTER_API_KEY` | vazio | Chave do OpenRouter (Jev). Só no `.env` |
 | `JEV_MODEL` | vazio | Modelo do Jev. Testado com `typesafe/jev-1.13` |
 | `GEMINI_API_KEY` | vazio | Chave do Google AI Studio. Só no `.env` |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Modelo da segunda opinião |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Modelo da segunda opinião e da extração de campos |
 | `AUTH_USUARIO` | vazio | Identificador (e-mail) do primeiro administrador, criado por `python -m app.bootstrap_admin` se não existir |
 | `AUTH_SENHA` | vazio | Senha inicial desse administrador. Só no `.env`. Trocá-la depois não muda a senha de um usuário já criado |
 | `AUTH_SEGREDO` | vazio | Segredo que assina o JWT. Só no `.env`. Sem ele, o login responde 503 |
@@ -271,9 +356,10 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 | Goal 4: OCR pesquisável | Parcial | OCR e busca por texto no banco prontos. PDF pesquisável por documento não implementado: a busca é por texto no banco |
 | Goal 5: confiança e revisão humana | Medido | Roteamento por limiares, `GET /revisao` e `POST /documentos/{id}/revisao`; `scripts/relatorio_cobertura.py` gera a curva. Limiares revistos com os dados de ajuste (ver "Resultados"). A tela de revisão está no `frontend/` |
 | Goal 6: score de risco de ponto | Implementado | `worker_analise`, tabelas `perfil_jornada` e `analise_ponto`, `GET /documentos/{id}/analise-ponto`. Sem gabarito de divergências, então não há métrica de acurácia. Base legal conferida em 15/11/2026 no texto compilado do Planalto (CF, EC 141/2026 e CLT) e na Portaria MTP 671/2021 compilada. O perfil tem vigência por data (EC 141/2026) e a prorrogação noturna do art. 73, § 5º; decisões e pendências nas limitações |
-| Goal 7: score de conformidade da empresa prestadora | Implementado | `worker_extracao`, tabela `documento_campos`, `GET /empresas`, `GET /empresas/{cnpj}/conformidade` e `GET /lotes/{id}/conformidade`. Sem gabarito de extração, então não há métrica de acurácia; prazo do ASO (NR-7) ainda por conferir |
+| Goal 7: score de conformidade da empresa prestadora | Implementado | `worker_extracao`, tabela `documento_campos`, `GET /empresas`, `GET /empresas/{cnpj}/conformidade` e `GET /lotes/{id}/conformidade`. Sem gabarito de extração, então não há métrica de acurácia; prazo do ASO (NR-7) ainda por conferir. Escopo por nível e pelo contrato do lote |
 | UI Streamlit | Não implementado | Substituída pelo `frontend/` React |
-| `frontend/` | Implementado | Login, upload, documentos por tipo, revisão manual, auditoria de ponto e conformidade da empresa; serviço `frontend` no `docker-compose.yml`. Sem testes automatizados |
+| `frontend/` | Implementado | Login, convite, upload, documentos por tipo, revisão manual, auditoria de ponto, conformidade, convenções coletivas, organizações, terceirizadas e equipe; serviço `frontend` no `docker-compose.yml`. Sem testes automatizados; avaliado só por um agente de IA (ver "Resultados") |
+| Acesso por nível, empresa própria, convites e convenções por escopo | Implementado | Plataforma, tomador e prestador; conformidade e análise de ponto pelo contrato do lote; ver "Organizações, contratos e convenções coletivas". Sem medição de acerto: só testes automatizados e as avaliações descritas em "Resultados" |
 
 ## Anonimização
 
@@ -309,23 +395,27 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 
 - Os dados sintéticos são otimistas. A validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.
 - Um worker por fila: não há escala horizontal testada.
-- Autenticação: o login usa a tabela `usuario`, mas ainda não há endpoints de gestão de usuários, convite nem troca de senha, e a conformidade por empresa ainda é só da plataforma (a conformidade por contrato é um passo posterior); sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend.
+- Autenticação: o login usa a tabela `usuario` e há convites e gestão de usuários (listar, ativar e desativar), mas não há troca nem recuperação de senha; sem limite de tentativas de login; sem revogação de token (ele vale até expirar; para invalidar todos, troque `AUTH_SEGREDO`); e sem HTTPS, que em produção precisa ficar a cargo de um proxy reverso. O token fica em `sessionStorage` no frontend, ou em `localStorage` se o usuário marcar "manter conectado".
 - Migrações só em SQL cru (Alembic, sem models) e sem teste de upgrade a partir de bancos antigos além do baseline; quem tem banco criado pelo antigo `sql/schema.sql` precisa de `alembic stamp head` (ver seção 6).
-- Sem CI.
+- O CI (`.github/workflows/ci.yml`) roda os testes do backend e `lint` e `build` do frontend; o frontend não tem testes automatizados.
+- Prazo do ASO: o prazo de 12 meses em `app/conformidade.py` é um valor de partida e **precisa ser conferido na NR-7**. O desconto por ASO vencido depende desse prazo.
 - O Jev e o Gemini recebem texto (anonimizado, ver "Anonimização") e imagem de páginas dos documentos. Use `CLASSIFICADOR=regras` se o conteúdo não puder sair da máquina.
 - A confiança do classificador por regras é uma heurística sem calibração, usada só para roteamento.
 - O sistema apoia a auditoria e não substitui parecer jurídico.
 - Score de risco de ponto (Goal 6): é apoio à auditoria, não parecer jurídico, e vale por folha (não há consolidado por funcionário). A convenção coletiva e o acordo de compensação podem alterar os limites do perfil padrão (CLT de referência), e o perfil não os considera. O ponto britânico é sinal de risco, não prova de fraude. As horas extras do dia e o total da semana contam a hora noturna reduzida (CLT art. 73, § 1º: 52min30s entre 22h e 5h valem 60 min), e o intervalo intrajornada vale pelo maior intervalo do dia, não pela soma (CLT art. 71, caput).
 - Regras de jornada por data (Emenda Constitucional 141, de 16/10/2026; texto conferido em 15/11/2026 em planalto.gov.br): os parâmetros de `perfil_jornada` têm vigência (`vigente_desde`) e cada dia e cada semana da folha é avaliado pela regra da época. No perfil `clt_padrao`: duração semanal de 44 horas até 15/12/2026, 42 horas a partir de 16/12/2026 e 40 horas a partir de 16/12/2027 (EC 141, art. 6º); repouso semanal de 24 horas consecutivas (CLT art. 67) até 15/12/2026 e de 2 dias a partir de 16/12/2026 (CF art. 7º, XV). As datas ficam só no banco (migração `0006`). Decisões de projeto, que não estão no texto da emenda: (1) a semana vai de segunda a domingo e vale, para a semana inteira, a regra vigente no domingo, então a semana de 14 a 20/12/2026 já é avaliada com 42 horas e 2 dias de repouso; (2) "2 dias de repouso" é lido como 2 dias de calendário sem nenhum minuto de trabalho dentro da semana, que podem ser separados (a emenda não diz se são consecutivos nem define a janela); o dia em que termina uma jornada noturna da véspera não conta; só se conclui em semana com os 7 dias na folha. Não há regra automática para contratos com a administração pública (EC 141, art. 9º): eles ficam cobertos por um perfil próprio no contrato. Também não há regra automática para o regime compensatório por convenção ou acordo coletivo (CF art. 7º, § 2º) nem para os empregados do art. 8º da emenda.
-- Perfil de jornada por contrato: cada contrato aponta para um perfil (`contrato.perfil_jornada`, padrão `clt_padrao`) e o `worker_analise` usa o perfil do contrato do lote; lote sem contrato usa `clt_padrao`. Um perfil próprio guarda só os parâmetros que diferem e herda o resto de `clt_padrao`; a herança é por parâmetro (o parâmetro redefinido substitui a linha do tempo inteira, inclusive as vigências da EC 141). A análise grava o nome (`perfil_nome`) e o perfil efetivo usado. Só a plataforma cadastra e associa perfis, pela API (não há tela). Trocar o perfil do contrato ou editar um perfil não refaz as análises já gravadas: é preciso reprocessar o documento. Não há endpoint para apagar perfil, e um perfil sem linhas no banco faz a análise falhar (vai para a `dlq` e fica como `erro`).
+- Perfil de jornada por contrato: cada contrato aponta para um perfil (`contrato.perfil_jornada`, padrão `clt_padrao`) e o `worker_analise` usa o perfil do contrato do lote; lote sem contrato usa `clt_padrao`. Um perfil próprio guarda só os parâmetros que diferem e herda o resto de `clt_padrao`; a herança é por parâmetro (o parâmetro redefinido substitui a linha do tempo inteira, inclusive as vigências da EC 141). A análise grava o nome (`perfil_nome`) e o perfil efetivo usado. A plataforma e o admin de empresa própria cadastram e associam convenções (API e tela "Convenções coletivas"); admin de terceirizada e tomador não têm acesso a elas, e o contrato de uma terceirizada só recebe uma convenção pela plataforma. Trocar o perfil do contrato ou editar um perfil não refaz as análises já gravadas: é preciso reprocessar o documento. Não há endpoint para apagar perfil, e um perfil sem linhas no banco faz a análise falhar (vai para a `dlq` e fica como `erro`).
 - Prorrogação do trabalho noturno (CLT art. 73, § 5º: "Às prorrogações do trabalho noturno aplica-se o disposto neste capítulo"): o parágrafo não define a prorrogação. Critério usado (decisão de 16/11/2026, com a Súmula 60, II, e a OJ 388 da SDI-1 do TST como referência de entendimento; jurisprudência não conferida em fonte oficial): a parte depois das 5h só conta com a hora reduzida se a jornada cobriu todo o horário noturno, das 22h às 5h. Em código: (1) o empregado já estava trabalhando às 22h (a entrada pode atrasar até a tolerância de 5 minutos por marcação), (2) os intervalos entre as marcações são menores que o descanso entre jornadas (11 horas), senão é nova jornada, e (3) há trabalho depois das 5h. Contam: 22h-7h, 22h-2h e 3h-7h, 19h-7h (12x36; as horas entre 19h e 22h continuam diurnas) e 22h-5h e 6h-8h (a retomada depois de um intervalo curto é emenda da mesma jornada). Não contam: 23h-7h, 0h-7h e 4h-12h. O código não mede quanto da noite foi trabalhado depois das 22h, então uma jornada com intervalo muito longo dentro da noite ainda satisfaz o critério.
 - Espelho de ponto incompleto (`espelho_incompleto`; Portaria MTP 671/2021, art. 84, texto compilado em 21/07/2026): o Gemini informa o tipo de registro e, para cada informação que o artigo lista (nome e CNPJ/CPF do empregador; nome, CPF, data de admissão e cargo/função do trabalhador; data de emissão e período do relatório; horário e jornada contratual; marcações; duração das jornadas), se ela aparece (`true`), não aparece (`false`) ou não pôde ser lida (`null`), sem copiar valores. A decisão é do código: só há divergência quando o documento é um espelho eletrônico e algum campo veio como `false`; campo não lido nunca conta como ausente, e folha manual ou cartão mecânico ficam como `nao_aplicavel`, porque o art. 84 trata do "Espelho de Ponto Eletrônico". CEI/CAEPF/CNO não é exigido ("caso exista"). O resultado fica em `totais.espelho`. A divergência aparece na lista, mas não entra nas contagens enviadas ao Jev nem no score. O Gemini recebe no máximo `PONTO_MAX_PAGINAS` páginas, então uma informação que só aparece depois disso pode vir como ausente.
 - Ainda não tratados no ponto: intervalo intrajornada acima de 2 horas (CLT art. 71, caput), descanso semanal coincidindo com o domingo, escalas especiais (12x36) e banco de horas. A regra de contar o excesso inteiro quando a tolerância de 10 minutos é ultrapassada segue entendimento de jurisprudência, não o texto da lei. As versões novas dos prompts (`gemini-ponto-v4`, `jev-ponto-v6`) só foram exercitadas com mock: falta uma chamada real ao Gemini e ao Jev.
+- Convenções coletivas (limites conhecidos, registrados nos PRs): o downgrade da migração `0010` descarta a tabela de cadastro e, com ela, o nome, o sindicato e a vigência; um perfil sem parâmetros próprios existe só nessa tabela, então desaparece no downgrade (os parâmetros dos demais ficam). O downgrade da `0011` perde a marca de geral e o dono. Os perfis que já existiam antes da `0011` ficam "não gerais e sem dono": só a plataforma os vê até alguém marcá-los. Slugs legados só com `_` não foram tratados. O `PUT` não aceita lista de parâmetros vazia, então não dá para salvar um perfil existente desfazendo todas as mudanças.
 - Completude por empresa (Goal 7): só verifica se existe ao menos um documento de cada tipo obrigatório para a empresa, não se cada funcionário tem o seu.
 
 ## Resultados
 
-Todos os números abaixo vieram dos scripts de `scripts/`, rodados contra o sistema completo (com anonimização e login), com `CLASSIFICADOR=jev` (Jev `typesafe/jev-1.13`; Gemini só como segunda opinião, acionado 1 vez nos dois conjuntos medidos) e `CONF_AUTO=0.85`, `CONF_MIN=0.50`. **Os dados são sintéticos (gerador `gerar_lotes.py`, fora do repositório) e otimistas: a validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.** As amostras são pequenas; um erro a mais ou a menos muda bastante as taxas.
+**Duas partes.** As seções de "Limiares" a "Tempos e filas" abaixo são de medições anteriores (feitas antes das mudanças de acesso, convenções e empresa própria); **não foram repetidas em 23/11/2026**, porque dependem do gerador `gerar_lotes.py` e dos conjuntos sintéticos (fora do repositório) e de chamadas reais ao Jev e ao Gemini. A seção "Rodada de 23/11/2026" traz o que foi rodado ou conferido nesta atualização do README.
+
+Todos os números das seções anteriores vieram dos scripts de `scripts/`, rodados contra o sistema completo (com anonimização e login), com `CLASSIFICADOR=jev` (Jev `typesafe/jev-1.13`; Gemini só como segunda opinião, acionado 1 vez nos dois conjuntos medidos) e `CONF_AUTO=0.85`, `CONF_MIN=0.50`. **Os dados são sintéticos (gerador `gerar_lotes.py`, fora do repositório) e otimistas: a validação em documentos reais (scans ruins, rotações, manuscritos) ainda é necessária.** As amostras são pequenas; um erro a mais ou a menos muda bastante as taxas.
 
 | Conjunto | Seed | Lotes | Documentos reais | Uso |
 |---|---|---|---|---|
@@ -441,8 +531,62 @@ Sobre os 77 documentos previstos (a precisão compara com o tipo real do documen
 
 Tempo desde o envio dos lotes até todos `concluido`: treino (20 lotes, `CLASSIFICADOR=regras`) 120,1 s; ajuste (5 lotes, Jev) 27,7 s; teste (10 lotes, Jev) 55,3 s. Em todos os conjuntos, a `dlq` ficou vazia e nenhum documento ficou em `erro`. Foram 116 registros `llm_chamada` (ajuste e teste juntos, 115 do Jev e 1 do Gemini).
 
+### Rodada de 23/11/2026
+
+Três fontes, com alcances diferentes. Nenhuma substitui as medições acima.
+
+**1. Scripts de avaliação, sem LLM, em 2 lotes pequenos.** Commit `e14c311`, stack do Compose construído desse commit, `CLASSIFICADOR=regras` (sem rede, sem Jev nem Gemini), 2 lotes sintéticos (`L0001`: 5 páginas e 5 documentos; `L0002`: 9 páginas e 5 documentos; 10 documentos no total, o mesmo gabarito `anotacoes.csv` do teste com LLM abaixo), enviados por `POST /lotes` sem contrato. Comandos, a partir da pasta com `anotacoes.csv`:
+
+```bash
+python scripts/avaliar_segmentacao.py anotacoes.csv --api http://localhost:8260 --lote L0001:1 --lote L0002:2
+python scripts/avaliar_classificacao.py anotacoes.csv --api http://localhost:8260 --lote L0001:1 --lote L0002:2
+python scripts/relatorio_cobertura.py anotacoes.csv --api http://localhost:8260 --lote L0001:1 --lote L0002:2
+```
+
+| Segmentação (por documento) | Reais | Previstos | Precisão das fronteiras | Recall das fronteiras | Exatos |
+|---|---|---|---|---|---|
+| `L0001` | 5 | 5 | 1,000 | 1,000 | 5/5 |
+| `L0002` | 5 | 6 | 0,800 | 1,000 | 4/5 |
+| Total | 10 | 11 | 0,889 | 1,000 | 9/10 (0,900) |
+
+Classificação por regras de palavras-chave, nos 10 documentos do gabarito: **acurácia 0,800 e F1 macro 0,833**. Acertou `aso` (2/2), `folha_pagamento` (1/1), `holerite` (2/2), `recibo_ferias` (2/2) e `contrato_trabalho` (1/1) e errou as 2 `folha_ponto`, que saíram `desconhecido`. Só nos 9 documentos com segmentação exata: acurácia 0,778 e F1 macro 0,800. Por qualidade: boa 6/6, média 0/1, ruim 2/3.
+
+Cobertura x precisão do classificador por regras (11 documentos previstos), saída do script: limiar 0,50 dá 72,7% automático com precisão 1,000 (8/11); 0,60 dá 63,6% (7/11); 0,70 dá 36,4% (4/11); de 0,80 a 0,95 dá 18,2% (2/11), sempre com precisão automática 1,000. Com 11 documentos isso não diz nada sobre os limiares do Jev (`CONF_AUTO` e `CONF_MIN`): a confiança do classificador por regras é uma heurística sem calibração.
+
+Não rodados nesta rodada: `scripts/baseline_tfidf.py` (precisa dos lotes de treino e do `requirements-baseline.txt`), `scripts/avaliar_segmentacao_offline.py` (precisa do JSON de OCR dos conjuntos) e `scripts/avaliar_anonimizacao.py`. Os números dessas medições continuam sendo os das seções anteriores, com a fonte de cada uma ali.
+
+**2. Teste ponta a ponta com LLM real, 21/11/2026 (manual, conferido por um testador independente).** Jev e Gemini (`gemini-3.8-flash`) de verdade, 2 lotes sintéticos (`L0001`, contrato entre tomador e terceirizada; `L0002`, empresa própria), **10 documentos no total**. A amostra é muito pequena: serve para ver o fluxo funcionando, não para estimar taxa de acerto. O testador só leu a API e comparou com o gabarito; o roteiro, o script de conferência e o relatório ficam fora do repositório.
+
+| Verificação | Resultado observado |
+|---|---|
+| Segmentação | 10/10 documentos com início e fim exatos (no `L0002`, os versos em branco foram absorvidos e a divisão a mais que ocorre sem LLM não apareceu) |
+| Classificação | 10/10 tipos certos, confiança de 0,99 a 1,00, nenhum documento em revisão |
+| Extração de campos | 23/23 nos campos do roteiro (nome, competência, tipo de exame, data do exame, início e admissão, férias) e 35/35 incluindo empresa e CPF mascarado, comparados com o gabarito |
+| Empresa | Nenhum documento sem empresa; os 10 ligados pelo contrato do lote |
+| Conformidade | Duas empresas com scores separados (25, provisório, e 50), ambas "Crítico", com descontos e pendências coerentes com os documentos; o ASO vencido gerou desconto. Sem gabarito de conformidade, então não é métrica de acerto |
+| Análise de ponto | 2 folhas, 8 e 11 divergências (de intervalo intrajornada com data, minutos e base legal, CLT art. 71, mais `espelho_incompleto` em cada uma); totais de horas exatos; ponto britânico sem sinal. Mesmo `score_geral` (0,337) nas duas. Modelos gravados: `gemini-3.8-flash` e `typesafe/jev-1.14-20261014` (prompts `gemini-ponto-v4` e `jev-ponto-v5`). Sem gabarito de divergências |
+| Empresa própria, pelo admin dela | Aceita o convite, entra, vê só o próprio lote e a própria conformidade; os dados do outro lote respondem 404, igual a inexistente |
+
+O testador registrou 5 problemas. Três foram corrigidos depois, segundo o histórico de commits, **sem repetir a chamada real ao LLM**: `modelo` e `versao_prompt` não apareciam nas rotas de documento (`5a9c941`), a razão social mostrava o nome extraído do primeiro documento em vez da cadastrada (`b89aa0f`) e `data_termino` não era extraída em contrato por prazo determinado (`8c02bb9`). Os outros dois continuam sem correção conhecida: em 2 documentos a extração veio sem `razao_social_prestadora`, o que gerou pendência e um score individual diferente; e o `espelho_incompleto` (Portaria MTP 671/2021, art. 84) aparece na lista de divergências mas, por decisão de projeto descrita nas limitações, não entra nas contagens enviadas ao Jev nem no score.
+
+**3. Testes de usabilidade com agente de IA (agy, modelo Orchestrator), duas rodadas em 23/11/2026.** É a avaliação de **um agente de IA**, não de usuários reais, e deve ser lida assim. Ele recebeu um roteiro com três papéis (operador da plataforma, dona de empresa solo e admin de terceirizada), executou as tarefas no navegador (desktop 1440x900 e celular 390x844) e deu notas de 0 a 10 com justificativa. Os dois lotes foram os mesmos (`L0001` e `L0002`).
+
+| Papel | 1ª rodada | 2ª rodada (depois das correções) |
+|---|---|---|
+| Operador da plataforma | 7,0 | 7,0 |
+| Empresa solo | 7,5 | 7,5 |
+| Admin de terceirizada | 7,8 | 7,5 |
+| **Nota geral** | **7,5** | **7,3** |
+
+As notas **não são comparáveis estatisticamente**: é uma execução por rodada, de um único avaliador automático cuja nota pode variar sem que a interface mude, e os ambientes e os detalhes do roteiro não foram idênticos. A queda de 7,5 para 7,3 não indica piora nem melhora. O valor está na lista de achados:
+
+- 1ª rodada, entre os mais graves: o link do convite se perdia ao sair da tela (sem reenviar nem revogar), o layout quebrava em 390 px e o campo "Base legal" era obrigatório sem aviso. Pelo histórico de PRs, os #119 a #122 trataram parte disso (reemitir e revogar convite, layout responsivo, textos); a 2ª rodada relatou zero rolagem horizontal no celular, e o "Base legal" obrigatório continuou, agora como achado de gravidade baixa.
+- 2ª rodada, ainda abertos: a tela não permite corrigir tipo ou campo de um documento já classificado fora da fila de revisão (a API tem `PATCH /documentos/{id}/tipo` e `PUT /documentos/{id}/campos`); o cadastro de empresa própria fica dentro de "Contratos"; o admin de terceirizada não vê as convenções coletivas; o contrato exige digitar de novo o prestador já cadastrado; faltam o parecer do ASO e o valor líquido do holerite nos cartões; e o alerta de divergência de razão social não lista os documentos em conflito.
+- Nenhum teste com pessoas reais foi feito.
+
 ### O que não foi medido
 
 - Goals 6 e 7: sem gabarito de divergências nem de extração, então não há métrica de acurácia.
 - Documentos reais; páginas giradas; efeito da anonimização sobre o Jev (sem comparação com e sem).
-- Os valores acima valem para estes três conjuntos sintéticos e não foram repetidos.
+- Os valores das seções anteriores à rodada de 23/11/2026 valem para os conjuntos sintéticos descritos e não foram repetidos nela; a rodada tem só 10 documentos.
+- Usabilidade com pessoas reais, acerto da extração fora dos 2 lotes do teste manual e o efeito de convenções coletivas reais no score de ponto.
