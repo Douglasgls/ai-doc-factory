@@ -1,15 +1,17 @@
 """Escopo dos perfis de jornada: cada perfil (exceto o Padrão) é geral ou de um prestador. Plataforma vê e edita tudo;
 admin de empresa própria vê o Padrão, os gerais e os dele, cria perfis dele e edita só esses. Fora do escopo = 404 (o
 mesmo corpo de um perfil inexistente); visível mas de outro dono = 403. Contra o Postgres real; só valores falsos."""
+import re
 import uuid
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config
+from app import analise, config
 from app.api import app
 from app.ponto import PERFIL_PADRAO, carregar_perfil
+from test_analise import IRREGULAR, _doc, _gemini, _jev, rede  # noqa: F401  (rede é fixture)
 from test_empresa_propria import _admin, criar  # noqa: F401  (criar é fixture)
 from test_terceirizadas import _h_id, mundo  # noqa: F401  (mundo é fixture)
 
@@ -209,3 +211,117 @@ def test_tomador_e_prestador_comum_continuam_sem_acesso(cena):
     # leitura de contratos por quem não lê perfis: o slug aparece, sem nome nem detalhes
     contrato = {c["id"]: c for c in client.get("/contratos", headers=comuns[0]).json()}
     assert all(c["perfil_jornada_visivel"] is False and c["perfil_jornada_nome"] is None for c in contrato.values())
+
+
+# ---------- revisão: oráculo de slug, geral x dono, 404/422, perda de acesso, análise ----------
+
+def test_slug_nao_revela_perfis_de_outros_escopos(cena):
+    resp = {}
+    for quem, h in (("x", cena.hx), ("y", cena.hy), ("plat", cena.plat)):
+        resp[quem] = [client.post("/perfis-jornada", headers=h, json={"nome": "Acordo X"}) for _ in range(2)]
+        for r in resp[quem]:
+            assert r.status_code == 201, r.text
+            cena.slugs.append(r.json()["perfil"])
+    todos = [r for lista in resp.values() for r in lista]
+    assert len({r.json()["perfil"] for r in todos}) == 6  # nunca repete
+    assert all(re.fullmatch(r"acordo_x_[a-z0-9]{6}", r.json()["perfil"]) for r in todos)  # nunca `_2`
+    chaves = {tuple(sorted(r.json())) for r in todos}
+    assert len(chaves) == 1  # mesmo formato para quem já tem e para quem não tem um "Acordo X"
+
+
+def test_geral_e_dono_sao_exclusivos(cena):
+    post = lambda corpo: client.post("/perfis-jornada", headers=cena.plat, json=corpo)  # noqa: E731
+    assert post({"nome": "Os dois", "geral": True, "prestador_id": cena.px}).status_code == 422
+    assert post({"nome": "Geral nulo", "geral": None}).status_code == 422
+    assert post({"nome": "Geral texto", "geral": "true"}).status_code == 422
+    assert post({"nome": "Geral numero", "geral": 1}).status_code == 422
+    put = lambda slug, corpo: client.put(f"/perfis-jornada/{slug}", headers=cena.plat, json=corpo)  # noqa: E731
+    assert put(cena.OX, {"geral": True, "prestador_id": cena.px}).status_code == 422
+    assert put(cena.OX, {"geral": None}).status_code == 422
+    assert put(cena.G, {"prestador_id": cena.px}).status_code == 422  # geral sem desmarcar
+    r = put(cena.G, {"geral": False, "prestador_id": cena.px})
+    assert r.status_code == 200 and (r.json()["geral"], r.json()["prestador_id"]) == (False, cena.px)
+    with pytest.raises(psycopg.errors.CheckViolation):  # e o banco recusa a combinação
+        cena.mundo.db.execute("UPDATE perfil_jornada_cadastro SET geral = true WHERE perfil = %s", (cena.OX,))
+
+
+def test_promover_perfil_de_x_a_geral_tira_o_dono_e_a_edicao_dele(cena):
+    r = client.put(f"/perfis-jornada/{cena.OX}", headers=cena.plat, json={"geral": True})
+    assert r.status_code == 200 and (r.json()["geral"], r.json()["prestador_id"]) == (True, None)
+    assert client.put(f"/perfis-jornada/{cena.OX}", headers=cena.hx, json={"nome": "Mudou"}).status_code == 403
+    assert client.put(f"/perfis-jornada/{cena.OX}", headers=cena.hx, json=PARAMETROS).status_code == 403
+    assert client.get(f"/perfis-jornada/{cena.OX}", headers=cena.hx).json()["editavel"] is False
+    visto_por_y = client.get(f"/perfis-jornada/{cena.OX}", headers=cena.hy)
+    assert visto_por_y.status_code == 200 and visto_por_y.json()["editavel"] is False
+    r = client.put(f"/contratos/{cena.cy}/perfil-jornada", headers=cena.hy, json={"perfil": cena.OX})
+    assert r.status_code == 200 and r.json()["perfil_jornada"] == cena.OX
+    assert client.put(f"/perfis-jornada/{cena.OX}", headers=cena.hy, json={"nome": "Y tenta"}).status_code == 403
+
+
+def test_hx_nao_descobre_perfil_de_y_pelo_put(cena):
+    inexistente = client.put("/perfis-jornada/nao_existe_de_jeito_nenhum", headers=cena.hx, json={"geral": True})
+    for corpo in ({"geral": True}, {"prestador_id": cena.px}, {"geral": False}, {"nome": "x"}, PARAMETROS):
+        r = client.put(f"/perfis-jornada/{cena.OY}", headers=cena.hx, json=corpo)
+        assert r.status_code == 404 == inexistente.status_code, corpo
+        assert r.json() == {"detail": f"perfil '{cena.OY}' não encontrado"}
+    assert client.get(f"/perfis-jornada/{cena.OY}", headers=cena.plat).json()["prestador_id"] == cena.py
+
+
+def test_prestador_apagado_entre_a_checagem_e_a_gravacao_da_404(cena, monkeypatch):
+    from app.routers.perfis_jornada import actions
+    monkeypatch.setattr(actions, "_exigir_prestador", lambda session, prestador_id: None)  # simula a corrida
+    r = client.post("/perfis-jornada", headers=cena.plat, json={"nome": "Corrida", "prestador_id": 2 ** 40})
+    assert r.status_code == 404 and r.json() == {"detail": f"prestador {2 ** 40} não encontrado"}
+    r = client.put(f"/perfis-jornada/{cena.L}", headers=cena.plat, json={"prestador_id": 2 ** 40})
+    assert r.status_code == 404 and r.json() == {"detail": f"prestador {2 ** 40} não encontrado"}
+    assert client.get(f"/perfis-jornada/{cena.L}", headers=cena.plat).json()["prestador_id"] is None
+
+
+@pytest.mark.parametrize("onde", ["contrato", "tomador", "prestador"])
+def test_admin_perde_acesso_com_contrato_tomador_ou_prestador_inativo(cena, onde):
+    db = cena.mundo.db
+    tomador = db.execute("SELECT tomador_id FROM contrato WHERE id = %s", (cena.cx,)).fetchone()[0]
+    assert client.get("/perfis-jornada", headers=cena.hx).status_code == 200
+    if onde == "contrato":
+        db.execute("UPDATE contrato SET ativo = false WHERE id = %s", (cena.cx,))
+    elif onde == "tomador":
+        db.execute("UPDATE tomador SET ativo = false WHERE id = %s", (tomador,))
+    else:
+        db.execute("UPDATE prestador SET ativo = false WHERE id = %s", (cena.px,))
+    negado = 401 if onde == "prestador" else 403  # prestador inativo: o login já não vale (401); os outros: 403
+    assert client.get("/perfis-jornada", headers=cena.hx).status_code == negado
+    assert client.get(f"/perfis-jornada/{cena.OX}", headers=cena.hx).status_code == negado
+    assert client.post("/perfis-jornada", headers=cena.hx, json={"nome": "x"}).status_code == negado
+    assert client.put(f"/perfis-jornada/{cena.OX}", headers=cena.hx, json={"nome": "x"}).status_code == negado
+    assert client.put(f"/contratos/{cena.cx}/perfil-jornada", headers=cena.hx,
+                      json={"perfil": cena.OX}).status_code == negado
+    assert client.get("/perfis-jornada", headers=cena.hy).status_code == 200  # a outra empresa não é afetada
+
+
+def test_listagem_conta_parametros_so_do_escopo(cena):
+    assert client.put(f"/perfis-jornada/{cena.OY}", headers=cena.plat, json=PARAMETROS).status_code == 200
+    assert client.put(f"/perfis-jornada/{cena.OX}", headers=cena.hx, json=PARAMETROS).status_code == 200
+    lx = _lista(cena.hx)
+    assert lx[cena.OX]["parametros_proprios"] == 1 and cena.OY not in lx
+    assert _lista(cena.hy)[cena.OY]["parametros_proprios"] == 1
+
+
+def test_analise_de_ponto_usa_perfil_fora_do_escopo_do_admin(cena, rede):  # noqa: F811
+    """Contrato ligado (pela plataforma) a um perfil que o admin não vê: a análise usa esse perfil mesmo assim."""
+    assert client.put(f"/perfis-jornada/{cena.OY}", headers=cena.plat, json={"parametros": [
+        {"parametro": "extras_max_dia_min", "valor": 300, "base_legal": "ACT de Y"}]}).status_code == 200
+    assert client.put(f"/contratos/{cena.cx}/perfil-jornada", headers=cena.plat, json={"perfil": cena.OY}).status_code == 200
+    assert client.get(f"/perfis-jornada/{cena.OY}", headers=cena.hx).status_code == 404
+    lote, doc = _doc()
+    try:
+        cena.mundo.db.execute("UPDATE lote SET contrato_id = %s WHERE id = %s", (cena.cx, lote))
+        rede["gemini"].append(_gemini(IRREGULAR))
+        rede["jev"].append(lambda corpo: _jev(corpo, {}))
+        analise.analisar_documento({"documento_id": doc})
+        perfil_nome, perfil, divs = cena.mundo.db.execute(
+            "SELECT perfil_nome, perfil, divergencias FROM analise_ponto WHERE documento_id = %s", (doc,)).fetchone()
+        assert perfil_nome == cena.OY and perfil["extras_max_dia_min"] == {"valor": 300, "base_legal": "ACT de Y"}
+        assert "horas_extras_acima_limite" not in [d["tipo"] for d in divs]  # 4h extras cabem nos 300 min do perfil de Y
+        assert client.get(f"/documentos/{doc}/analise-ponto", headers=cena.hx).status_code in (200, 404)
+    finally:
+        cena.mundo.db.execute("DELETE FROM lote WHERE id = %s", (lote,))

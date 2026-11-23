@@ -2,7 +2,7 @@ import math
 from datetime import date
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 from app.routers.documentos.schemas import ParametroPerfilOut
 from app.routers.organizacoes.schemas import IdBanco
@@ -39,7 +39,7 @@ class CadastroEntrada(BaseModel):
     sindicato: str | None = None
     vigencia_inicio: date | None = None
     vigencia_fim: date | None = None
-    geral: bool | None = None  # visível a todos que leem perfis
+    geral: StrictBool | None = None  # visível a todos que leem perfis; exclusivo com dono; `null` dá 422
     prestador_id: IdBanco | None = None  # dono; em edição, `null` tira o dono
 
     @field_validator("nome")
@@ -55,6 +55,14 @@ class CadastroEntrada(BaseModel):
     @model_validator(mode="after")
     def _vigencia(self):
         vigencia_coerente(self.vigencia_inicio, self.vigencia_fim)
+        return self
+
+    @model_validator(mode="after")
+    def _escopo(self):
+        if "geral" in self.model_fields_set and self.geral is None:
+            raise ValueError("geral não pode ser nulo")
+        if self.geral and self.prestador_id is not None:
+            raise ValueError("perfil geral não tem dono: não envie geral=true junto com prestador_id")
         return self
 
 

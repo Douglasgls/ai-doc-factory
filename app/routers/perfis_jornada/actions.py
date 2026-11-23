@@ -3,12 +3,16 @@ próprio contrato: a plataforma e o admin de empresa própria (app/escopo.py dec
 A herança e a vigência por data ficam em app/ponto.py; aqui só se grava e se lê. O cadastro (nome, sindicato,
 vigência e escopo) fica em `perfil_jornada_cadastro`; os parâmetros, em `perfil_jornada`."""
 import re
+import secrets
+import string
 import unicodedata
 from datetime import date
 
+import psycopg
 from fastapi import HTTPException
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import ponto
@@ -19,8 +23,9 @@ from app.routers.auth.actions import UsuarioContexto
 from app.routers.organizacoes import actions as organizacoes
 from app.routers.perfis_jornada.schemas import PerfilEntrada, PerfilNovo, vigencia_coerente
 
-SLUG_MAX = 40  # a base do slug deixa espaço para o sufixo numérico dentro do limite de 50 do padrão
-SLUG_MAX_FINAL = 50
+SLUG_MAX = 40  # base do slug; com "_" e o sufixo aleatório de SUFIXO_TAM caracteres, cabe nos 50 do padrão
+SUFIXO_TAM = 6
+_ALFABETO = string.ascii_lowercase + string.digits
 _CAMPOS_CADASTRO = ("nome", "sindicato", "vigencia_inicio", "vigencia_fim", "geral", "prestador_id")
 _CAMPOS_ESCOPO = frozenset({"geral", "prestador_id"})  # só a plataforma envia
 _NEGADO_ESCOPO = "apenas a plataforma define se o perfil é geral ou de qual prestador"
@@ -45,6 +50,12 @@ def gerar_slug(nome: str) -> str:
     ascii_ = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "_", ascii_.lower()).strip("_")[:SLUG_MAX].strip("_")
     return slug or "perfil"
+
+
+def gerar_slug_unico(nome: str) -> str:
+    """`<base do nome>_<6 caracteres aleatórios>`. O sufixo é sempre aleatório (nunca 2, 3...), então o slug não
+    revela se outro cliente já tem um perfil com o mesmo nome."""
+    return f"{gerar_slug(nome)}_{''.join(secrets.choice(_ALFABETO) for _ in range(SUFIXO_TAM))}"
 
 
 def vigente(inicio: date | None, fim: date | None, hoje: date | None = None) -> bool:
@@ -94,8 +105,11 @@ def listar_perfis(session: Session, usuario: UsuarioContexto) -> list[dict]:
                 .join(Tomador, Tomador.id == Contrato.tomador_id).join(Prestador, Prestador.id == Contrato.prestador_id)
                 .where(filtro_contrato(usuario)))
     contratos = {nome: n for nome, n in session.execute(consulta.group_by(Contrato.perfil_jornada))}
-    parametros = {nome: n for nome, n in session.execute(
-        select(PerfilJornada.perfil, func.count(func.distinct(PerfilJornada.parametro))).group_by(PerfilJornada.perfil))}
+    por_perfil = select(PerfilJornada.perfil, func.count(func.distinct(PerfilJornada.parametro))).group_by(PerfilJornada.perfil)
+    if usuario.nivel != "plataforma":  # só os perfis do escopo entram na agregação
+        por_perfil = por_perfil.where(PerfilJornada.perfil.in_(
+            select(PerfilJornadaCadastro.perfil).where(filtro_perfil(usuario))))
+    parametros = {nome: n for nome, n in session.execute(por_perfil)}
     cadastros = {c.perfil: {k: getattr(c, k) for k in _CAMPOS_CADASTRO}
                  for c in session.scalars(select(PerfilJornadaCadastro).where(filtro_perfil(usuario)))}
     nomes = set(cadastros)
@@ -123,8 +137,9 @@ def _recusar_escopo_de_quem_nao_e_plataforma(usuario: UsuarioContexto, corpo) ->
 
 
 def criar_perfil(session: Session, corpo: PerfilNovo, usuario: UsuarioContexto) -> dict:
-    """Cria um perfil sem parâmetros próprios (herda tudo de `clt_padrao`) com o slug gerado a partir do nome:
-    `slug`, `slug_2`, `slug_3`... em colisão. A chave primária decide corridas entre criações simultâneas.
+    """Cria um perfil sem parâmetros próprios (herda tudo de `clt_padrao`) com o slug `<base do nome>_<aleatório>`.
+    O sufixo aleatório não depende do que existe em outros escopos (sem oráculo de existência); a chave primária
+    decide a colisão do aleatório, que repete o sorteio.
     Plataforma: geral e/ou de um prestador (ou nenhum dos dois). Admin de empresa própria: sempre dele, nunca geral."""
     _recusar_escopo_de_quem_nao_e_plataforma(usuario, corpo)
     if usuario.nivel == "plataforma":
@@ -133,22 +148,31 @@ def criar_perfil(session: Session, corpo: PerfilNovo, usuario: UsuarioContexto) 
             _exigir_prestador(session, dono)
     else:
         geral, dono = False, usuario.prestador_id
-    base = gerar_slug(corpo.nome)
-    for n in range(1, 1000):
-        sufixo = "" if n == 1 else f"_{n}"
-        slug = base[:SLUG_MAX_FINAL - len(sufixo)] + sufixo
+    for _ in range(20):  # nova tentativa só se o sufixo aleatório colidir
+        slug = gerar_slug_unico(corpo.nome)
         if _existe(session, slug):
             continue
-        criado = session.execute(
-            pg_insert(PerfilJornadaCadastro).values(
-                perfil=slug, nome=corpo.nome, sindicato=corpo.sindicato, vigencia_inicio=corpo.vigencia_inicio,
-                vigencia_fim=corpo.vigencia_fim, geral=geral, prestador_id=dono)
-            .on_conflict_do_nothing().returning(PerfilJornadaCadastro.perfil)).first()
+        try:
+            criado = session.execute(
+                pg_insert(PerfilJornadaCadastro).values(
+                    perfil=slug, nome=corpo.nome, sindicato=corpo.sindicato, vigencia_inicio=corpo.vigencia_inicio,
+                    vigencia_fim=corpo.vigencia_fim, geral=geral, prestador_id=dono)
+                .on_conflict_do_nothing().returning(PerfilJornadaCadastro.perfil)).first()
+        except IntegrityError as erro:
+            _prestador_inexistente_ou_erro(session, erro, dono)
         if criado is not None:
             resultado = _perfil(session, slug, usuario)
             session.commit()
             return resultado
     raise HTTPException(409, "não foi possível gerar um identificador único para o perfil")
+
+
+def _prestador_inexistente_ou_erro(session: Session, erro: IntegrityError, prestador_id: int | None) -> None:
+    """FK de `prestador_id` violada (prestador apagado entre a checagem e a gravação): o mesmo 404 de inexistente."""
+    session.rollback()
+    if isinstance(erro.orig, psycopg.errors.ForeignKeyViolation):
+        raise HTTPException(404, f"prestador {prestador_id} não encontrado")
+    raise erro
 
 
 def _gravar_cadastro(session: Session, perfil: str, corpo: PerfilEntrada) -> None:
@@ -162,11 +186,19 @@ def _gravar_cadastro(session: Session, perfil: str, corpo: PerfilEntrada) -> Non
         vigencia_coerente(novo["vigencia_inicio"], novo["vigencia_fim"])
     except ValueError as erro:
         raise HTTPException(422, str(erro))
+    enviados = corpo.model_fields_set
+    if novo["geral"] and "geral" in enviados:
+        novo["prestador_id"] = None  # marcar geral tira o dono (geral e dono são exclusivos)
+    elif novo["geral"] and novo["prestador_id"] is not None:
+        raise HTTPException(422, "perfil geral não tem dono: envie geral=false para atribuí-lo a um prestador")
     if novo["prestador_id"] is not None and novo["prestador_id"] != (atual or {}).get("prestador_id"):
         _exigir_prestador(session, novo["prestador_id"])
     if atual != novo:
-        session.execute(pg_insert(PerfilJornadaCadastro).values(perfil=perfil, **novo).on_conflict_do_update(
-            index_elements=[PerfilJornadaCadastro.perfil], set_=novo))
+        try:
+            session.execute(pg_insert(PerfilJornadaCadastro).values(perfil=perfil, **novo).on_conflict_do_update(
+                index_elements=[PerfilJornadaCadastro.perfil], set_=novo))
+        except IntegrityError as erro:
+            _prestador_inexistente_ou_erro(session, erro, novo["prestador_id"])
 
 
 # Contexto só para montar o cadastro padrão de um perfil novo criado pela plataforma (não vaza para nenhuma resposta).
