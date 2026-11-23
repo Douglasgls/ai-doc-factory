@@ -224,13 +224,17 @@ export const BuscaDocumentos: React.FC<BuscaDocumentosProps> = ({ variante, empr
                 {rotuloTipoDocumental(grupo.tipo, nomes)}
               </span>
             </div>
+            {grupo.pessoa && (
+              <p className="px-2 pl-8 -mt-0.5 text-xs text-[#6e6378] dark:text-[#a093a8] break-words">{grupo.pessoa}</p>
+            )}
             <ul>
               {grupo.itens.map((item) => {
                 const chave = `${grupo.chave}:${item.pagina}`
                 const conteudo = (
                   <>
                     <span className="block text-xs font-semibold text-[#6e6378] dark:text-[#a093a8]">
-                      Página {item.pagina}
+                      Página {item.paginaNoDocumento}
+                      {grupo.totalPaginas != null && ` de ${grupo.totalPaginas}`}
                       {abrindo === chave && ' · abrindo...'}
                     </span>
                     <span className="block text-sm text-[#2d0a33] dark:text-[#f5edf9] break-words">

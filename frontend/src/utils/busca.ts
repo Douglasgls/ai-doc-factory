@@ -29,7 +29,10 @@ export const trechoParaPartes = (trecho: string): ParteTrecho[] => {
 }
 
 export interface ItemBusca {
+  /** Página do lote (é a que o visualizador recebe). */
   pagina: number
+  /** Página dentro do documento, contando de 1. */
+  paginaNoDocumento: number
   partes: ParteTrecho[]
 }
 
@@ -38,6 +41,9 @@ export interface GrupoBusca {
   documentoId: number | null
   loteId: number
   nomeArquivo: string
+  pessoa: string | null
+  /** Total de páginas do documento; null se a API não informou o intervalo. */
+  totalPaginas: number | null
   tipo: string | null
   itens: ItemBusca[]
 }
@@ -53,13 +59,16 @@ export const agruparResultados = (resultados: SearchResult[]): GrupoBusca[] => {
         chave,
         documentoId: r.documento_id,
         loteId: r.lote_id,
-        nomeArquivo: r.nome_arquivo,
+        nomeArquivo: r.nome_documento || r.nome_arquivo,
+        pessoa: r.pessoa || null,
+        totalPaginas: r.pagina_ini != null && r.pagina_fim != null ? r.pagina_fim - r.pagina_ini + 1 : null,
         tipo: r.tipo,
         itens: [],
       }
       grupos.set(chave, grupo)
     }
-    grupo.itens.push({ pagina: r.pagina, partes: trechoParaPartes(r.trecho) })
+    const paginaNoDocumento = r.pagina_ini != null ? r.pagina - r.pagina_ini + 1 : r.pagina
+    grupo.itens.push({ pagina: r.pagina, paginaNoDocumento, partes: trechoParaPartes(r.trecho) })
   }
   return [...grupos.values()]
 }

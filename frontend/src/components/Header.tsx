@@ -161,7 +161,7 @@ export const Header: React.FC<HeaderProps> = ({
           </nav>
 
           {/* Menu do celular */}
-          <div ref={menuRef} className="relative sm:hidden">
+          <div ref={menuRef} className="sm:hidden">
             <button
               ref={menuBotaoRef}
               type="button"
@@ -176,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
             {menuAberto && (
               <div
                 id="menu-navegacao"
-                className="absolute left-0 top-[calc(100%+8px)] w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
+                className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
               >
                 <BuscaDocumentos variante="menu" empresaPropria={empresaPropria} />
                 {itens.map((item, indice) => (

@@ -150,3 +150,20 @@ def test_busca_com_documento_tipo_arquivo_e_orfa(banco):
     assert "<b>" in por_pagina[1]["trecho"]
     assert por_pagina[2]["documento_id"] is None and por_pagina[2]["tipo"] is None
     assert por_pagina[2]["nome_arquivo"] == "arq.pdf"
+
+
+def test_busca_traz_nome_do_documento_pessoa_e_intervalo(banco):
+    conn, lote = banco
+    palavra = "zzxqnome" + uuid.uuid4().hex[:6]
+    lid, did = lote(tipo="folha_ponto", ini=5, fim=6, texto=f"ponto {palavra}")
+    conn.execute("UPDATE documento SET nome_padronizado = 'folha_ponto_ana_2024-11.pdf' WHERE id = %s", (did,))
+    conn.execute("INSERT INTO documento_campos (documento_id, campo, valor) VALUES (%s, 'nome', 'Ana Souza')", (did,))
+    lid2, _ = lote(tipo="aso", ini=1, fim=1, texto=f"aso {palavra}")
+    conn.execute("INSERT INTO pagina (lote_id, numero, documento_id, texto) VALUES (%s, 2, NULL, %s)",
+                 (lid2, f"orfa {palavra}"))
+    achados = client.get("/busca", params={"q": palavra, "limite": 100}).json()
+    a = next(x for x in achados if x["lote_id"] == lid and x["pagina"] == 5)
+    assert a["nome_documento"] == "folha_ponto_ana_2024-11.pdf" and a["nome_arquivo"] == "arq.pdf"
+    assert a["pessoa"] == "Ana Souza" and (a["pagina_ini"], a["pagina_fim"]) == (5, 6)
+    b = next(x for x in achados if x["lote_id"] == lid2 and x["documento_id"] is None)
+    assert b["nome_documento"] is None and b["pessoa"] is None and b["pagina_ini"] is None
