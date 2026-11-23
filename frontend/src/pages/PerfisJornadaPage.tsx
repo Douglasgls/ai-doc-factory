@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Clock, FileText, Loader2, Plus } from 'lucide-react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { CheckCircle2, ChevronRight, Clock, FileText, Loader2, Plus } from 'lucide-react'
 import {
   apiService,
   type Contrato,
@@ -11,7 +11,7 @@ import { BTN, ErroBox } from '../components/formUi'
 import { ConvencaoContratos } from '../components/ConvencaoContratos'
 import { ConvencaoDetalhe } from '../components/ConvencaoDetalhe'
 import { ConvencoesLista } from '../components/ConvencoesLista'
-import { PerfilJornadaForm } from '../components/PerfilJornadaForm'
+import { ConvencaoForm } from '../components/ConvencaoForm'
 import { rotuloEscopo } from '../utils/convencoes'
 import { PERFIL_PADRAO } from '../utils/perfisJornada'
 
@@ -35,7 +35,7 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
   const [erro, setErro] = useState<string | null>(null)
 
   const padrao = detalhes[PERFIL_PADRAO] ?? null
-  const catalogo = useMemo(() => (padrao ? padrao.proprios.filter((p) => p.vigente_desde === null) : []), [padrao])
+  const [aviso, setAviso] = useState<string | null>(null)
 
   const carregar = useCallback(async () => {
     setLoading(true)
@@ -83,6 +83,11 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
 
   const voltarLista = () => {
     setTela({ tipo: 'lista' })
+    void carregar()
+  }
+  const salvo = (perfil: string) => {
+    setAviso('Convenção salva')
+    setTela({ tipo: 'ver', perfil })
     void carregar()
   }
 
@@ -152,6 +157,15 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
       )}
 
       <ErroBox message={erro} />
+      {aviso && tela.tipo === 'ver' && (
+        <div
+          role="status"
+          className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 flex items-center gap-2 text-emerald-700 dark:text-emerald-400"
+        >
+          <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span className="text-xs font-medium">{aviso}</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-16" role="status" aria-label="Carregando">
@@ -175,19 +189,34 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
             detalhe={detalhe}
             padrao={padrao}
             escopo={escopoDe?.(detalhe)}
-            onEditar={() => setTela({ tipo: 'form', perfil: detalhe.perfil })}
+            onEditar={() => {
+              setAviso(null)
+              setTela({ tipo: 'form', perfil: detalhe.perfil })
+            }}
             onVoltar={voltarLista}
           />
         )
       ) : tela.perfil === null ? (
-        <PerfilJornadaForm existente={null} catalogo={catalogo} onCancelar={voltarLista} onSalvo={voltarLista} />
+        padrao && (
+          <ConvencaoForm
+            existente={null}
+            padrao={padrao}
+            plataforma={!modoEscolha}
+            prestadores={prestadores}
+            onCancelar={voltarLista}
+            onSalvo={salvo}
+          />
+        )
       ) : (
-        detalhe && (
-          <PerfilJornadaForm
+        detalhe &&
+        padrao && (
+          <ConvencaoForm
             existente={detalhe}
-            catalogo={catalogo}
+            padrao={padrao}
+            plataforma={!modoEscolha}
+            prestadores={prestadores}
             onCancelar={() => setTela({ tipo: 'ver', perfil: detalhe.perfil })}
-            onSalvo={voltarLista}
+            onSalvo={salvo}
           />
         )
       )}
