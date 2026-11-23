@@ -5,6 +5,7 @@ import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
 import { extraEmailClasses, validarEmail } from '../utils/convites'
 import { CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL } from './formUi'
 import { ConviteLink } from './ConviteLink'
+import { explicarErro } from '../utils/errosCadastro'
 
 /** Resultado do cadastro, conforme o `acesso` devolvido pela API. */
 const ResultadoEmpresaPropria: React.FC<{ resultado: EmpresaPropriaCadastrada }> = ({ resultado }) => (
@@ -73,7 +74,7 @@ export const CadastroEmpresaPropriaForm: React.FC<CadastroEmpresaPropriaFormProp
       setEmail('')
       await onCadastrada()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Erro ao cadastrar empresa própria')
+      setFormError(err instanceof Error ? explicarErro(err.message) : 'Erro ao cadastrar empresa própria')
     } finally {
       setSaving(false)
     }

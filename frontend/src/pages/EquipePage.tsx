@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { ChevronRight, Eye, FileText, Loader2, Mail, Send, ShieldCheck, User, Users, X } from 'lucide-react'
+import { ChevronRight, Eye, FileText, Link2, Loader2, Mail, Send, ShieldCheck, User, Users, X } from 'lucide-react'
 import {
   apiService,
   type ConviteCriado,
@@ -16,8 +16,9 @@ import {
   validarEmail,
 } from '../utils/convites'
 import { ESTADO_CONVITE, PAPEL_ROTULO, rotulo, rotuloNivel } from '../utils/rotulos'
-import { CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo } from '../components/formUi'
+import { BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
+import { explicarErro } from '../utils/errosCadastro'
 
 interface EquipePageProps {
   usuario: UsuarioAtual
@@ -51,6 +52,45 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
   // Modais de detalhes para inspeção individual sem necessidade de scroll horizontal
   const [conviteDetalhes, setConviteDetalhes] = useState<ConviteListado | null>(null)
   const [usuarioDetalhes, setUsuarioDetalhes] = useState<UsuarioListado | null>(null)
+
+  // Ações do modal de detalhes: novo link (revoga e recria) e revogar
+  const [acaoOcupada, setAcaoOcupada] = useState(false)
+  const [acaoErro, setAcaoErro] = useState<string | null>(null)
+  const [novoLink, setNovoLink] = useState<ConviteCriado | null>(null)
+
+  const abrirDetalhes = (c: ConviteListado) => {
+    setConviteDetalhes(c)
+    setAcaoErro(null)
+    setNovoLink(null)
+  }
+
+  const gerarNovoLink = async (c: ConviteListado) => {
+    setAcaoErro(null)
+    setAcaoOcupada(true)
+    try {
+      setNovoLink(await apiService.reemitirConvite(c.id))
+      await carregar()
+    } catch (err) {
+      setAcaoErro(err instanceof Error ? explicarErro(err.message) : 'Não foi possível gerar o novo link. Tente de novo.')
+    } finally {
+      setAcaoOcupada(false)
+    }
+  }
+
+  const revogarConvite = async (c: ConviteListado) => {
+    if (!window.confirm(`Revogar o convite de ${c.email}? O link já enviado deixa de funcionar.`)) return
+    setAcaoErro(null)
+    setAcaoOcupada(true)
+    try {
+      await apiService.revogarConvite(c.id)
+      setConviteDetalhes(null)
+      await carregar()
+    } catch (err) {
+      setAcaoErro(err instanceof Error ? err.message : 'Não foi possível revogar o convite. Tente de novo.')
+    } finally {
+      setAcaoOcupada(false)
+    }
+  }
 
   const emailValido = validarEmail(email)
 
@@ -87,7 +127,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
       setEmail('')
       await carregar()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Erro ao criar convite')
+      setFormError(err instanceof Error ? explicarErro(err.message) : 'Erro ao criar convite')
     } finally {
       setSaving(false)
     }
@@ -229,7 +269,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
       ) : (
         <>
           <ErroBox message={loadError} />
-          <div className="grid gap-6 lg:grid-cols-2 items-start">
+          <div className="grid gap-6 xl:grid-cols-2 items-start">
             {/* Tabela de Usuários / Pessoas com acesso */}
             <div className={`${CARD} overflow-hidden flex flex-col`}>
               <div className="p-4 sm:p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39] flex items-center justify-between gap-2">
@@ -261,17 +301,17 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                     {usuarios.map((u) => (
                       <tr key={u.id} className="hover:bg-purple-50/30 dark:hover:bg-purple-950/10 transition-colors">
                         <td className={TD_COMPACT}>
-                          <div className="flex items-center gap-2 max-w-[110px] sm:max-w-[140px]">
+                          <div className="flex items-center gap-2 min-w-[8rem]">
                             <div className="w-6 h-6 rounded-md bg-[#3e1347] dark:bg-[#34163d] text-[#e87bf8] dark:text-[#f38df9] font-bold text-[10px] flex items-center justify-center shrink-0">
                               {extrairIniciais(u.nome)}
                             </div>
-                            <span className="font-semibold text-[#2d0a33] dark:text-white truncate" title={u.nome}>
+                            <span className="font-semibold text-[#2d0a33] dark:text-white break-words" title={u.nome}>
                               {u.nome}
                             </span>
                           </div>
                         </td>
                         <td className={TD_COMPACT}>
-                          <span className="block max-w-[110px] sm:max-w-[130px] truncate" title={u.email}>
+                          <span className="block break-all min-w-[10rem]" title={u.email}>
                             {u.email}
                           </span>
                         </td>
@@ -336,7 +376,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                       <tr key={c.id} className="hover:bg-purple-50/30 dark:hover:bg-purple-950/10 transition-colors">
                         <td className={TD_COMPACT}>
                           <span
-                            className="block font-semibold text-[#2d0a33] dark:text-white max-w-[110px] sm:max-w-[140px] truncate"
+                            className="block font-semibold text-[#2d0a33] dark:text-white break-all min-w-[10rem]"
                             title={c.email}
                           >
                             {c.email}
@@ -344,7 +384,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                         </td>
                         <td className={TD_COMPACT}>
                           <span
-                            className="block max-w-[75px] sm:max-w-[90px] truncate text-[#6e6378] dark:text-[#a093a8]"
+                            className="block break-words min-w-[6rem] text-[#6e6378] dark:text-[#a093a8]"
                             title={c.organizacao_nome ?? rotuloNivel(c.nivel, empresaPropria)}
                           >
                             {c.organizacao_nome ?? rotuloNivel(c.nivel, empresaPropria)}
@@ -362,7 +402,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                         <td className={`${TD_COMPACT} text-right`}>
                           <button
                             type="button"
-                            onClick={() => setConviteDetalhes(c)}
+                            onClick={() => abrirDetalhes(c)}
                             title="Visualizar detalhes do convite"
                             className="p-1 rounded-md text-[#877991] hover:text-[#9333ea] dark:hover:text-[#f38df9] hover:bg-purple-100 dark:hover:bg-purple-950/60 transition-colors cursor-pointer"
                           >
@@ -443,7 +483,33 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end">
+            {novoLink && (
+              <ConviteLink token={novoLink.token} expiraEm={novoLink.expira_em} email={novoLink.email} papel={novoLink.papel} />
+            )}
+            <ErroBox message={acaoErro} />
+
+            <div className="pt-2 flex flex-wrap justify-end gap-2">
+              {conviteDetalhes.estado !== 'usado' && !novoLink && (
+                <button
+                  type="button"
+                  disabled={acaoOcupada}
+                  onClick={() => void gerarNovoLink(conviteDetalhes)}
+                  className={BTN_SEC}
+                >
+                  {acaoOcupada ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                  Gerar novo link
+                </button>
+              )}
+              {conviteDetalhes.estado === 'pendente' && !novoLink && (
+                <button
+                  type="button"
+                  disabled={acaoOcupada}
+                  onClick={() => void revogarConvite(conviteDetalhes)}
+                  className={BTN_SEC}
+                >
+                  Revogar convite
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setConviteDetalhes(null)}
