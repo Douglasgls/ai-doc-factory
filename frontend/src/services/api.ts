@@ -252,6 +252,10 @@ export interface SearchResult {
   documento_id: number | null;
   tipo: string | null;
   nome_arquivo: string;
+  nome_documento?: string | null;
+  pessoa?: string | null;
+  pagina_ini?: number | null;
+  pagina_fim?: number | null;
 }
 
 export interface DivergenciaPontoResponse {
