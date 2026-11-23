@@ -10,13 +10,16 @@ from sqlalchemy.orm import Session
 from app import config
 from app.anonimizacao import mascarar_campos, mascarar_documentos, mascarar_estrutura
 from app.analise import enfileirar_analise
-from app.escopo import filtro_contrato, filtro_lote
+from app.escopo import filtro_contrato, filtro_lote, filtro_perfil, leitura_de_perfis_permitida
 from app.extracao import enfileirar_extracao
-from app.models import AnalisePonto, Contrato, Documento, DocumentoCampo, Lote, Pagina, Prestador, Tomador
+from app.models import (AnalisePonto, Contrato, Documento, DocumentoCampo, Lote, Pagina, PerfilJornadaCadastro, Prestador,
+                        Tomador)
+from app import ponto
 from app.renomeacao import atualizar_nome_padronizado_sessao, gerar_nome_padronizado
 from app.routers import r
 from app.routers.auth.actions import UsuarioContexto
 from app.routers.documentos.schemas import AtualizacaoCampos
+from app.routers.perfis_jornada.actions import nome_do_slug
 from app.routers.revisao.schemas import Revisao
 
 _COLUNAS_ANALISE = ("estado", "erro", "perfil_nome", "perfil", "marcacoes", "intervalo_pre_assinalado", "totais", "divergencias",
@@ -83,7 +86,22 @@ def obter_documento(session: Session, documento_id: int) -> dict:
     }
 
 
-def obter_analise_ponto(session: Session, documento_id: int) -> dict:
+def _nome_do_perfil_gravado(session: Session, perfil: str | None, usuario: UsuarioContexto) -> str | None:
+    """Nome legível do perfil que ficou gravado na análise, só para quem lê perfis e o vê no escopo (mesma regra de
+    GET /perfis-jornada); os demais recebem None e a tela mostra só os valores."""
+    perfil = perfil or ponto.PERFIL_PADRAO
+    try:
+        leitura_de_perfis_permitida(session, usuario)
+    except HTTPException:
+        return None
+    nome = session.scalar(select(PerfilJornadaCadastro.nome).where(PerfilJornadaCadastro.perfil == perfil,
+                                                                   filtro_perfil(usuario)))
+    if nome is None and usuario.nivel == "plataforma":  # perfil sem cadastro (criado por fora da API)
+        return nome_do_slug(perfil)
+    return nome
+
+
+def obter_analise_ponto(session: Session, documento_id: int, usuario: UsuarioContexto) -> dict:
     doc = session.execute(select(Documento.tipo).where(Documento.id == documento_id)).first()
     if doc is None:
         raise HTTPException(404, "documento não encontrado")
@@ -93,7 +111,9 @@ def obter_analise_ponto(session: Session, documento_id: int) -> dict:
         raise HTTPException(404, "documento não é uma folha de ponto analisada")
     if row is None:
         return {"documento_id": documento_id, "estado": "pendente"}
-    return mascarar_estrutura({"documento_id": documento_id, **dict(zip(_COLUNAS_ANALISE, row))})
+    dados = dict(zip(_COLUNAS_ANALISE, row))
+    dados["perfil_nome_legivel"] = _nome_do_perfil_gravado(session, dados["perfil_nome"], usuario)
+    return mascarar_estrutura({"documento_id": documento_id, **dados})
 
 
 SEM_TIPO = "sem_tipo"

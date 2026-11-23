@@ -329,6 +329,24 @@ def test_endpoint_devolve_a_analise_pendente_e_concluida(doc, rede):
         conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
 
 
+def test_nome_legivel_do_perfil_gravado_so_para_quem_ve_o_perfil(doc, rede, sessao):
+    from app.routers import documentos as _  # noqa: F401  (garante o carregamento dos routers)
+    from app.routers.auth.actions import UsuarioContexto
+    from app.routers.documentos import actions as doc_actions
+    rede["gemini"].append(_gemini(IRREGULAR, GEM_OK_DIVS))
+    rede["jev"].append(lambda corpo: _jev(corpo, {"horas_extras": 2}))
+    analise.analisar_documento({"documento_id": doc})
+    plataforma = UsuarioContexto(id=0, email="p@teste.local", nome="P", nivel="plataforma", papel="admin",
+                                 tomador_id=None, prestador_id=None)
+    tomador = UsuarioContexto(id=0, email="t@teste.local", nome="T", nivel="tomador", papel="admin",
+                              tomador_id=1, prestador_id=None)
+    vista = doc_actions.obter_analise_ponto(sessao, doc, plataforma)
+    assert vista["perfil_nome"] == "clt_padrao" and vista["perfil_nome_legivel"]  # nome do perfil gravado
+    assert vista["perfil"]["extras_max_dia_min"]["valor"] == 120  # valores do que foi gravado
+    sem_nome = doc_actions.obter_analise_ponto(sessao, doc, tomador)
+    assert sem_nome["perfil_nome_legivel"] is None and sem_nome["perfil"] == vista["perfil"]
+
+
 def test_folha_irregular_pontua_acima_da_regular(rede, monkeypatch, tmp_path):
     resultados = []
     for marc, divs, niveis in ((IRREGULAR, GEM_OK_DIVS, {"horas_extras": 3, "intervalos": 2}), (REGULAR, [], {})):

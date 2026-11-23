@@ -362,12 +362,12 @@ def test_analise_ponto(cenario, monkeypatch, sessao):
     lote, ids = cenario
     rota = "GET /documentos/{documento_id}/analise-ponto"
     url = f"/documentos/{ids[2]}/analise-ponto"
-    pendente = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
+    pendente = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2], PLATAFORMA))
     assert pendente == {"documento_id": ids[2], "estado": "pendente"}
 
     # folha só com dias úteis: o descanso semanal não é avaliado (nao_avaliada, motivo; campos do Jev nulos)
     _analisar_ponto(monkeypatch, ids[2])
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2], PLATAFORMA))
     assert corpo["estado"] == "concluida" and corpo["score_geral"] == pytest.approx(2 / 3)
     assert corpo["divergencias"][0]["base_legal"] and set(corpo["scores_dimensao"]) == {
         "horas_extras", "intervalos", "descanso", "registro"}
@@ -378,25 +378,25 @@ def test_analise_ponto(cenario, monkeypatch, sessao):
 
     # semana completa: descanso avaliado
     _analisar_ponto(monkeypatch, ids[2], marcacoes=SEMANA_COMPLETA)
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2], PLATAFORMA))
     assert corpo["contagens"]["nao_avaliadas"] == [] and corpo["scores_dimensao"]["descanso"]["score"] == 0.0
 
     # dimensão indeterminada (confiança baixa): normalizado nulo, revisão pedida
     _analisar_ponto(monkeypatch, ids[2], marcacoes=SEMANA_COMPLETA, confianca_intervalos=0.1)
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2], PLATAFORMA))
     assert corpo["scores_dimensao"]["intervalos"]["indeterminada"] is True
     assert corpo["scores_dimensao"]["intervalos"]["normalizado"] is None and corpo["requer_revisao"] is True
 
     # horário contratual e totais declarados lidos da folha
     _analisar_ponto(monkeypatch, ids[2], horario_contratual=[["08:00", "12:00"], ["13:00", "17:00"]],
                     totais_declarados={"total_horas_min": 2400, "horas_extras_min": 0})
-    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
+    corpo = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2], PLATAFORMA))
     assert corpo["totais"]["declarados"]["comparado"] is True and corpo["totais"]["horario_contratual"]
 
     # falha definitiva: linha em erro, sem os demais campos
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         analise._gravar(conn, ids[2], "erro", {}, erro="análise falhou após as tentativas")
-    erro = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2]))
+    erro = _confere(rota, url, AnalisePontoOut, doc_actions.obter_analise_ponto(sessao, ids[2], PLATAFORMA))
     assert erro["estado"] == "erro" and erro["erro"] and erro["score_geral"] is None
 
     assert client.get(f"/documentos/{ids[0]}/analise-ponto").status_code == 404  # não é folha de ponto
