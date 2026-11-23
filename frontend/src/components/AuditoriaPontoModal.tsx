@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { apiService, fetchPageImage } from '../services/api'
+import { emFrase } from '../utils/rotulos'
 import {
   ORDEM_DIMENSOES,
   ROTULO_DIMENSAO,
@@ -23,6 +24,7 @@ import {
   formatarData,
   formatarMarca,
   formatarMinutos,
+  listarCamposEspelho,
   nivelDeRisco,
   rotuloSemValor,
   rotuloTipo,
@@ -229,6 +231,15 @@ const LinhaDivergencia: React.FC<{
         <>
           <strong>{data ? formatarData(data) : 'sem data'}</strong>:{' '}
           {div.detalhe || 'marcação inválida'}
+        </>
+      )
+      break
+    case 'espelho_incompleto':
+      corpo = (
+        <>
+          {div.campos_ausentes && div.campos_ausentes.length > 0
+            ? `Campos ausentes no espelho: ${emFrase(listarCamposEspelho(div.campos_ausentes))}`
+            : 'O espelho de ponto não traz todos os campos exigidos'}
         </>
       )
       break

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { rotuloTipoDocumental } from '../utils/rotulos'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -123,7 +124,7 @@ function resolverDestinoLote(lote: TrackedLote): {
   const docPrincipal = docs.find((d) => d.tipo && NOMES_CATEGORIAS[d.tipo]) || docs[0]
   const slug = docPrincipal?.tipo || null
   return {
-    labelCategoria: slug ? NOMES_CATEGORIAS[slug] || slug : null,
+    labelCategoria: slug ? rotuloTipoDocumental(slug, NOMES_CATEGORIAS) : null,
     slugCategoria: slug && NOMES_CATEGORIAS[slug] ? slug : null,
     emRevisao: false,
   }

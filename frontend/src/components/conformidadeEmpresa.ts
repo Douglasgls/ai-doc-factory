@@ -2,6 +2,16 @@
 // Formato real: GET /empresas/{cnpj}/conformidade (app/routers/empresas/actions.py), calculado em
 // app/conformidade.py::calcular_empresa. Tudo aqui é derivado dos dados da API; nada é inventado.
 import { formatarData } from './auditoriaPonto'
+import {
+  ROTULO_CRITERIO,
+  ROTULO_REGRA,
+  emFrase,
+  rotuloCampo as rotuloCampoBase,
+  rotuloMotivo,
+  rotulo,
+  rotuloPadrao,
+  rotuloTipoDocumental,
+} from '../utils/rotulos'
 
 export type Classificacao = 'Regular' | 'Atenção' | 'Crítico'
 export type CriterioChave = 'completude' | 'validade' | 'consistencia'
@@ -29,7 +39,7 @@ export interface Desconto {
   criterio: CriterioChave
   documento: number | null
   tipo: string | null
-  /** obrigatorio_ausente | documento_vencido | campo_divergente (outros valores caem no fallback). */
+  /** obrigatorio_ausente | documento_vencido | campo_divergente | cnpj_diferente_do_contrato (outros valores caem no fallback). */
   regra: string
   detalhe: string
   pontos: number
@@ -90,40 +100,28 @@ export const FAIXAS_CONFORMIDADE: { nome: Classificacao; minimo: number; maximo:
 export const ORDEM_CRITERIOS: CriterioChave[] = ['completude', 'validade', 'consistencia']
 
 export const CRITERIOS: Record<CriterioChave, { rotulo: string; mede: string }> = {
-  completude: { rotulo: 'Completude', mede: 'Mede se a empresa enviou todos os documentos obrigatórios.' },
+  completude: { rotulo: ROTULO_CRITERIO.completude, mede: 'Mede se a empresa enviou todos os documentos obrigatórios.' },
   validade: {
-    rotulo: 'Validade',
+    rotulo: ROTULO_CRITERIO.validade,
     mede: 'Mede se os documentos com prazo (ASO e contrato por prazo determinado) estão dentro da validade.',
   },
   consistencia: {
-    rotulo: 'Consistência',
+    rotulo: ROTULO_CRITERIO.consistencia,
     mede: 'Mede se as informações batem entre os documentos: razão social e, para o mesmo CPF, nome, matrícula e data de admissão.',
   },
 }
 
-const ROTULO_CAMPO: Record<string, string> = {
-  razao_social_prestadora: 'razão social da prestadora',
-  nome: 'nome',
-  matricula: 'matrícula',
-  data_admissao: 'data de admissão',
-}
-
-/** Empresa própria: a empresa dona dos documentos é a própria, sem o termo "prestadora". */
-const ROTULO_CAMPO_PROPRIA: Record<string, string> = { razao_social_prestadora: 'razão social da empresa' }
-
+/** Campo em minúscula, para o meio de uma frase ("razão social da prestadora"); siglas ficam ("CPF"). */
 export const rotuloCampo = (campo: string | undefined, propria = false): string =>
-  campo ? ((propria ? ROTULO_CAMPO_PROPRIA[campo] : undefined) ?? ROTULO_CAMPO[campo] ?? campo.replace(/_/g, ' ')) : 'campo'
-
-/** Tipo que a API usa quando a confiança ficou abaixo do mínimo (app/config.py); não está em /tipos. */
-const TIPO_DESCONHECIDO = 'desconhecido'
+  campo ? emFrase(rotuloCampoBase(campo, propria)) : 'campo'
 
 export const rotuloTipoDoc = (tipo: string | null | undefined, rotulos: Rotulos): string =>
-  !tipo ? 'Documento' : tipo === TIPO_DESCONHECIDO ? 'Documento de tipo não identificado' : (rotulos[tipo] ?? tipo.replace(/_/g, ' '))
+  tipo === 'desconhecido' ? 'Documento de tipo não identificado' : rotuloTipoDocumental(tipo, rotulos)
 
 /** Forma curta para usar no meio de uma frase: sem parênteses e em minúsculas ("ASO", "folha de ponto"). */
 export const rotuloEmFrase = (tipo: string | null | undefined, rotulos: Rotulos): string => {
   const base = rotuloTipoDoc(tipo, rotulos).replace(/\s*\([^)]*\)/g, '').trim()
-  return /^[A-ZÀ-Ý]{2,}/.test(base) ? base : base.charAt(0).toLowerCase() + base.slice(1)
+  return emFrase(base)
 }
 
 /** ["a", "b", "c"] -> "a, b e c". */
@@ -300,29 +298,29 @@ export interface AcaoRecomendada {
 /** Uma ação por regra. Regra sem entrada aqui usa o fallback (mostra o `detalhe` da API). */
 export const ACOES: Record<string, AcaoRecomendada> = {
   obrigatorio_ausente: {
-    titulo: 'Documento obrigatório não enviado',
+    titulo: ROTULO_REGRA.obrigatorio_ausente,
     texto: 'Peça o documento à prestadora e envie em um novo lote.',
   },
   documento_vencido: {
-    titulo: 'Documento vencido',
+    titulo: ROTULO_REGRA.documento_vencido,
     texto: 'Peça o documento renovado à prestadora e envie em um novo lote.',
   },
   campo_divergente: {
-    titulo: 'Informação divergente entre documentos',
+    titulo: ROTULO_REGRA.campo_divergente,
     texto:
       'Confira os valores na imagem dos documentos. Se a leitura errou, corrija o campo na revisão; se o documento está ' +
       'errado, peça a correção à prestadora.',
   },
   pendente_revisao: {
-    titulo: 'Documento aguardando revisão',
+    titulo: ROTULO_REGRA.pendente_revisao,
     texto: 'Conclua a revisão manual do documento. A nota passa a considerá-lo assim que ele for revisado.',
   },
   pendente_obrigatorio: {
-    titulo: 'Obrigatório que pode estar num documento não identificado',
+    titulo: ROTULO_REGRA.pendente_obrigatorio,
     texto: 'Conclua a revisão dos documentos pendentes: um deles pode ser o obrigatório que falta.',
   },
   campo_ausente: {
-    titulo: 'Campo ausente ou ilegível',
+    titulo: ROTULO_REGRA.campo_ausente,
     texto: 'Confira o documento. Se a informação existe, corrija ou preencha o campo na revisão.',
   },
 }
@@ -380,7 +378,12 @@ export const explicarDesconto = (d: Desconto, rotulos: Rotulos, propria = false)
         valores: (d.valores ?? []).map((v) => ({ rotulo: `${rotuloTipoDoc(v.tipo, rotulos)} (documento ${v.documento})`, valor: v.valor })),
       }
     default:
-      return { ...base, conhecida: false, titulo: d.detalhe || d.regra.replace(/_/g, ' '), detalhe: null }
+      return {
+        ...base,
+        conhecida: d.regra in ROTULO_REGRA,
+        titulo: ROTULO_REGRA[d.regra] ?? (d.detalhe || rotuloPadrao(d.regra)),
+        detalhe: d.regra in ROTULO_REGRA ? d.detalhe || null : null,
+      }
   }
 }
 
@@ -413,12 +416,13 @@ export const agruparAcoes = (g: Avaliacao, rotulos: Rotulos, propria = false): A
   for (const d of g.descontos) {
     const item = d.regra === 'campo_divergente' ? rotuloCampo(d.campo, propria) : doc(d.tipo, d.documento)
     // Regra desconhecida: o título é o `detalhe` da API e o texto é genérico.
-    adicionar(d.regra, d.detalhe || d.regra, 'Confira este ponto nos documentos da empresa.', item)
+    adicionar(d.regra, d.detalhe || rotulo(ROTULO_REGRA, d.regra), 'Confira este ponto nos documentos da empresa.', item)
   }
   for (const p of g.pendencias) {
     const regra = regraDaPendencia(p)
     if (regra === 'criterio_sem_dados') continue // nada a fazer: passa a contar quando houver documentos
-    adicionar(regra, p.motivo, p.motivo, regra === 'pendente_obrigatorio' ? rotuloTipoDoc(p.tipo, rotulos) : `${doc(p.tipo, p.documento)}: ${p.motivo}`)
+    const motivo = rotuloMotivo(p.motivo, rotulos)
+    adicionar(regra, motivo, motivo, regra === 'pendente_obrigatorio' ? rotuloTipoDoc(p.tipo, rotulos) : `${doc(p.tipo, p.documento)}: ${motivo}`)
   }
   return [...mapa.values()]
 }

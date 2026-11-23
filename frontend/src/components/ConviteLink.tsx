@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Check, Copy, Eye, EyeOff, Info, Mail, MessageCircle } from 'lucide-react'
-import { formatDataHoraPorExtenso, montarLinkConvite, PAPEL_ROTULO } from '../utils/convites'
+import { formatDataHoraPorExtenso, montarLinkConvite } from '../utils/convites'
+import { PAPEL_ROTULO, rotulo } from '../utils/rotulos'
 
 interface ConviteLinkProps {
   token: string
@@ -54,7 +55,7 @@ export const ConviteLink: React.FC<ConviteLinkProps> = ({ token, expiraEm, email
             {email || 'Novo convite gerado'}
           </h4>
           <p className="text-xs text-emerald-100/80 mt-0.5">
-            Entrará como <span className="font-semibold text-white">{papel ? (PAPEL_ROTULO[papel] ?? papel) : 'Membro'}</span> e poderá aceitar o convite até <span className="font-medium text-white">{formatDataHoraPorExtenso(expiraEm)}</span>.
+            Entrará como <span className="font-semibold text-white">{papel ? rotulo(PAPEL_ROTULO, papel) : 'Membro'}</span> e poderá aceitar o convite até <span className="font-medium text-white">{formatDataHoraPorExtenso(expiraEm)}</span>.
           </p>
         </div>
       </div>
