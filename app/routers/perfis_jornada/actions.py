@@ -75,7 +75,7 @@ def _cadastro_out(perfil: str, c: dict | None, usuario: UsuarioContexto) -> dict
               "geral": False, "prestador_id": None}
     dono_visivel = usuario.nivel == "plataforma" or c["prestador_id"] == usuario.prestador_id
     editavel = perfil != ponto.PERFIL_PADRAO and (
-        usuario.nivel == "plataforma" or (c["prestador_id"] is not None and dono_visivel))
+        usuario.nivel == "plataforma" or (c["prestador_id"] is not None and dono_visivel and not c["geral"]))
     return {**c, "prestador_id": c["prestador_id"] if dono_visivel else None, "editavel": editavel,
             "vigente": vigente(c["vigencia_inicio"], c["vigencia_fim"])}
 
