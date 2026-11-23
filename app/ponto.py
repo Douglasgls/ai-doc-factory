@@ -129,14 +129,17 @@ def herdar(linhas_padrao, linhas_proprias):
 
 def carregar_perfil(conn, perfil=PERFIL_PADRAO):
     """Lê o perfil efetivo da tabela perfil_jornada (conn psycopg), já com a herança de PERFIL_PADRAO.
-    Devolve o formato de `montar_perfil`. ValueError se o perfil não tem nenhuma linha."""
+    Devolve o formato de `montar_perfil`. Perfil cadastrado sem parâmetros próprios (criado por POST /perfis-jornada)
+    herda tudo do padrão. ValueError se o perfil não tem nenhuma linha nem cadastro."""
     rows = conn.execute(
         "SELECT perfil, parametro, valor, base_legal, vigente_desde FROM perfil_jornada WHERE perfil = ANY(%s)",
         ([PERFIL_PADRAO, perfil],)).fetchall()
     padrao = [r[1:] for r in rows if r[0] == PERFIL_PADRAO]
     proprias = padrao if perfil == PERFIL_PADRAO else [r[1:] for r in rows if r[0] == perfil]
     if not proprias:
-        raise ValueError(f"perfil '{perfil}' não encontrado")
+        if conn.execute("SELECT 1 FROM perfil_jornada_cadastro WHERE perfil = %s", (perfil,)).fetchone() is None:
+            raise ValueError(f"perfil '{perfil}' não encontrado")
+        return herdar(padrao, [])
     return herdar(padrao, proprias)
 
 

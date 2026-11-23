@@ -323,3 +323,11 @@ def test_perfil_sem_cadastro_sai_com_nome_do_slug(nome):
     p = client.get(f"/perfis-jornada/{nome}").json()
     assert p["nome"] == _nome_do_slug(nome) and p["vigente"] is True
     assert nome in {x["perfil"] for x in client.get("/perfis-jornada").json()}
+
+
+def test_perfil_cadastrado_sem_parametros_herda_tudo_do_padrao_na_analise(slugs):
+    slug = _criar(slugs, {"nome": "Sem parâmetros próprios"}).json()["perfil"]
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        assert carregar_perfil(conn, slug) == carregar_perfil(conn, PERFIL_PADRAO)
+        with pytest.raises(ValueError):  # sem cadastro nem linhas continua inexistente
+            carregar_perfil(conn, slug + "_nao_existe")
