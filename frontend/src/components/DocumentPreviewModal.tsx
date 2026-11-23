@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, FileText, X, ZoomIn } from 'lucide-react'
 import { downloadDocumento, fetchPageImage } from '../services/api'
 import type { DetailedDocument } from '../types'
+import { camposVisiveis, rotuloCampoDocumento, rotuloValorCampo } from '../utils/rotulos'
 
 interface ThumbnailProps {
   loteId?: number
@@ -73,9 +74,40 @@ export const DocumentThumbnail: React.FC<ThumbnailProps> = ({
 interface PreviewModalProps {
   doc: DetailedDocument
   onClose: () => void
+  /** Empresa solo: os campos da empresa aparecem como "Empresa" e "CNPJ da empresa". */
+  empresaPropria?: boolean
 }
 
-export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose }) => {
+/** Dados lidos do documento, só para consulta: ao lado da imagem no computador, abaixo dela no celular. */
+const DadosDoDocumento: React.FC<{ doc: DetailedDocument; empresaPropria: boolean }> = ({ doc, empresaPropria }) => {
+  const campos = camposVisiveis(doc.campos, empresaPropria)
+  return (
+    <aside
+      aria-label="Dados do documento"
+      className="shrink-0 lg:w-72 border-t lg:border-t-0 lg:border-l border-[#ebe5ef] dark:border-[#2f1e39] p-4 sm:p-5 lg:overflow-y-auto"
+    >
+      <h3 className="text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc]">Dados do documento</h3>
+      {campos.length === 0 ? (
+        <p className="text-xs text-[#6e6378] dark:text-[#a093a8] mt-2">Nenhum dado foi lido deste documento.</p>
+      ) : (
+        <dl className="mt-3 space-y-3">
+          {campos.map(([chave, valor]) => (
+            <div key={chave}>
+              <dt className="text-xs font-semibold text-[#6e6378] dark:text-[#a093a8]">
+                {rotuloCampoDocumento(chave, empresaPropria)}
+              </dt>
+              <dd className="text-sm text-[#2d0a33] dark:text-[#f8f5fc] break-words">
+                {rotuloValorCampo(chave, valor)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </aside>
+  )
+}
+
+export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose, empresaPropria = false }) => {
   const startPage = doc.startPage ?? 1
   const totalPages = Math.max(1, doc.pages || 1)
   const [pageOffset, setPageOffset] = useState(0)
@@ -166,7 +198,7 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
       aria-label={`Visualização de ${doc.filename}`}
     >
       <div
-        className="w-full max-w-4xl max-h-[92vh] rounded-2xl bg-white dark:bg-[#1a1120] border border-[#ebe5ef] dark:border-[#2f1e39] shadow-2xl flex flex-col overflow-hidden"
+        className="w-full max-w-5xl max-h-[92vh] rounded-2xl bg-white dark:bg-[#1a1120] border border-[#ebe5ef] dark:border-[#2f1e39] shadow-2xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -204,12 +236,14 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
           </div>
         </div>
 
+        {/* Corpo: imagem + dados (em coluna no celular) */}
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         {/* Image Area */}
         <div
           onMouseEnter={() => setIsHoveringImage(true)}
           onMouseLeave={() => setIsHoveringImage(false)}
           onMouseMove={handleImageMouseMove}
-          className={`relative flex-1 overflow-hidden bg-[#f6f2f8] dark:bg-[#120b17] p-4 flex items-center justify-center min-h-[380px] ${
+          className={`relative flex-1 min-w-0 overflow-hidden bg-[#f6f2f8] dark:bg-[#120b17] p-4 flex items-center justify-center min-h-[380px] ${
             isZoomEnabled ? 'cursor-zoom-in' : ''
           }`}
         >
@@ -256,6 +290,9 @@ export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose
               className="max-w-full max-h-[70vh] rounded-lg shadow-md border border-[#e6dce9] dark:border-[#2f1e39] bg-white transition-transform duration-150 ease-out select-none pointer-events-none"
             />
           )}
+        </div>
+
+        <DadosDoDocumento doc={doc} empresaPropria={empresaPropria} />
         </div>
 
         {/* Pagination Footer */}

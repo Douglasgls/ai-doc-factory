@@ -14,6 +14,7 @@ import {
   type LoteSnapshot,
   type TrackedLote,
 } from './lotePollingLogic'
+import { humanizarMensagemLote } from '../utils/mensagensLote'
 
 interface PollRun {
   startedAt: number
@@ -198,7 +199,7 @@ export function useLotePolling(onProgress: () => void | Promise<void>, autentica
         docsPendentes: status.docs_pendentes,
         networkError: null,
         etapaAtual: nextEtapa,
-        mensagemAtual: ev?.mensagem ?? null,
+        mensagemAtual: humanizarMensagemLote(ev?.mensagem),
         paginaAtual: ev?.pagina_atual ?? null,
         totalPaginas: ev?.total_paginas ?? null,
         totalDocumentos: ev?.total_documentos ?? (status.documentos ? status.documentos.length : null),

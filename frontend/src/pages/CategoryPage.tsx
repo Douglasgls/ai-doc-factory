@@ -16,7 +16,7 @@ import type { DocumentCategory, DetailedDocument } from '../types'
 import { downloadDocumento } from '../services/api'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
 import { DocumentPreviewModal, DocumentThumbnail } from '../components/DocumentPreviewModal'
-import { rotuloCampo, rotuloValorCampo } from '../utils/rotulos'
+import { camposVisiveis, rotuloCampoDocumento, rotuloValorCampo } from '../utils/rotulos'
 import {
   type GroupMode,
   agruparPorColaborador,
@@ -51,6 +51,13 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   const [auditDoc, setAuditDoc] = useState<{ id: number; filename: string } | null>(null)
   const [previewDoc, setPreviewDoc] = useState<DetailedDocument | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+  const filtrosAtivos = searchTerm.trim() !== '' || selectedPerson !== 'todas' || selectedConfidence !== 'todas'
+  const limparFiltros = () => {
+    setSearchTerm('')
+    setSelectedPerson('todas')
+    setSelectedConfidence('todas')
+  }
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -227,14 +234,14 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
 
           {/* Metadata Badges / Tags */}
           <div className="flex flex-wrap items-center gap-2 mt-3">
-            {Object.entries(doc.campos || {})
-              .filter(([k, v]) => k !== 'nome' && k !== 'distingue_prestadora' && v)
+            {camposVisiveis(doc.campos, empresaPropria)
+              .filter(([k]) => k !== 'nome')
               .map(([key, value]) => (
                 <span
                   key={key}
                   className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]"
                 >
-                  {rotuloCampo(key)}: {rotuloValorCampo(key, value)}
+                  {rotuloCampoDocumento(key, empresaPropria)}: {rotuloValorCampo(key, value)}
                 </span>
               ))}
             {!doc.campos && doc.metadata.registrationNumber && (
@@ -305,9 +312,9 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
             <div className="flex flex-col gap-1">
               <label
                 htmlFor="categoria-switcher"
-                className="text-[10px] font-bold tracking-wider uppercase text-[#8f8298] dark:text-[#95849f]"
+                className="text-xs font-semibold text-[#6e6378] dark:text-[#a093a8]"
               >
-                Prévia de categoria
+                Trocar de pasta
               </label>
               <div className="relative">
                 <select
@@ -458,11 +465,26 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
           <div className="py-16 text-center rounded-2xl border border-dashed border-[#ebe5ef] dark:border-[#2f1e39] bg-white/50 dark:bg-[#1a1120]/50">
             <FileText className="w-12 h-12 mx-auto text-[#a092a8] dark:text-[#5f5367] mb-2" />
             <p className="text-base font-semibold text-[#2d0a33] dark:text-white">
-              Nenhum documento encontrado
+              {filtrosAtivos ? 'Nenhum documento encontrado' : 'Nenhum documento nesta pasta ainda'}
             </p>
-            <p className="text-xs text-[#8f8298] dark:text-[#7f7188] mt-1">
-              Tente redefinir os filtros ou o termo de pesquisa.
-            </p>
+            {filtrosAtivos ? (
+              <>
+                <p className="text-xs text-[#6e6378] dark:text-[#a093a8] mt-1">
+                  Nenhum documento combina com a busca ou com os filtros escolhidos.
+                </p>
+                <button
+                  type="button"
+                  onClick={limparFiltros}
+                  className="mt-3 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-[#5c1363] dark:text-[#f38df9] bg-[#f4e8f7] dark:bg-[#34163d] hover:opacity-80 transition-opacity cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea]"
+                >
+                  Limpar busca e filtros
+                </button>
+              </>
+            ) : (
+              <p className="text-xs text-[#6e6378] dark:text-[#a093a8] mt-1">
+                Os documentos desta pasta aparecem aqui quando forem enviados.
+              </p>
+            )}
           </div>
         ) : groupMode === 'lista' ? (
           /* MODO 1: Lista Direta */
@@ -586,6 +608,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
       {previewDoc && (
         <DocumentPreviewModal
           doc={previewDoc}
+          empresaPropria={empresaPropria}
           onClose={() => setPreviewDoc(null)}
         />
       )}

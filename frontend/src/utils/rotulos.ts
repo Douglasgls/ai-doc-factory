@@ -104,6 +104,23 @@ const ROTULO_CAMPO_PROPRIA: Record<string, string> = {
 export const rotuloCampo = (campo: string | null | undefined, propria = false): string =>
   campo ? ((propria ? ROTULO_CAMPO_PROPRIA[campo] : undefined) ?? rotulo({ ...ROTULO_CAMPO, ...ROTULO_CAMPO_ESPELHO }, campo)) : 'Campo'
 
+/** Empresa própria, só para mostrar os dados do documento: a razão social da dona dos documentos vira "Empresa". */
+const ROTULO_CAMPO_DOCUMENTO_PROPRIA: Record<string, string> = {
+  razao_social_prestadora: 'Empresa',
+  cnpj_prestadora: 'CNPJ da empresa',
+}
+
+export const rotuloCampoDocumento = (campo: string, propria = false): string =>
+  (propria ? ROTULO_CAMPO_DOCUMENTO_PROPRIA[campo] : undefined) ?? rotuloCampo(campo, propria)
+
+/** Campos que valem ser mostrados ao usuário, na ordem em que vieram: tira os técnicos e, em empresa própria, o nome
+ * da empresa repetido (a tomadora é a própria empresa). */
+export const camposVisiveis = (campos: Record<string, string> | undefined, propria = false): [string, string][] =>
+  Object.entries(campos ?? {}).filter(
+    ([k, v]) =>
+      v && k !== 'distingue_prestadora' && !(propria && k === 'nome_empresa' && campos?.razao_social_prestadora),
+  )
+
 /** Valores de campos que são códigos (enums de app/prompts.py: TIPOS_PRAZO e TIPOS_EXAME). */
 const ROTULO_VALOR_CAMPO: Record<string, Record<string, string>> = {
   tipo_prazo: {
