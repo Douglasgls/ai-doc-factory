@@ -16,6 +16,7 @@ import type { DocumentCategory, DetailedDocument } from '../types'
 import { downloadDocumento } from '../services/api'
 import AuditoriaPontoModal from '../components/AuditoriaPontoModal'
 import { DocumentPreviewModal, DocumentThumbnail } from '../components/DocumentPreviewModal'
+import { rotuloCampo, rotuloValorCampo } from '../utils/rotulos'
 import {
   type GroupMode,
   agruparPorColaborador,
@@ -126,25 +127,6 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
     [filteredDocuments]
   )
 
-  const campoLabels: Record<string, string> = {
-    cpf: 'CPF',
-    matricula: 'Matrícula',
-    data_admissao: 'Admissão',
-    data_exame: 'Data do exame',
-    tipo_exame: 'Tipo de exame',
-    data_termino: 'Término',
-    data_emissao: 'Emissão',
-    competencia: 'Competência',
-    inicio_ferias: 'Início das férias',
-    fim_ferias: 'Fim das férias',
-    inicio_periodo: 'Início do período',
-    fim_periodo: 'Fim do período',
-    tipo_prazo: 'Prazo',
-    nome_empresa: 'Empresa',
-    razao_social_prestadora: 'Empresa',
-    cnpj_prestadora: 'CNPJ',
-  }
-
   const renderDocumentCard = (doc: DetailedDocument) => {
     const isFolhaPonto = category.id === 'folha_ponto'
     const openAudit = () =>
@@ -252,7 +234,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                   key={key}
                   className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#f6f2f8] dark:bg-[#25172d] text-[#5b4d67] dark:text-[#c4b5cd] border border-[#ece4f1] dark:border-[#382343]"
                 >
-                  {campoLabels[key] || key}: {value}
+                  {rotuloCampo(key)}: {rotuloValorCampo(key, value)}
                 </span>
               ))}
             {!doc.campos && doc.metadata.registrationNumber && (

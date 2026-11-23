@@ -9,15 +9,13 @@ import {
   type UsuarioListado,
 } from '../services/api'
 import {
-  ESTADO_CONVITE,
   extraEmailClasses,
   extrairIniciais,
   formatDataHoraCurta,
   formatDataHoraPorExtenso,
-  rotuloNivel,
-  PAPEL_ROTULO,
   validarEmail,
 } from '../utils/convites'
+import { ESTADO_CONVITE, PAPEL_ROTULO, rotulo, rotuloNivel } from '../utils/rotulos'
 import { CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 
@@ -278,7 +276,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                           </span>
                         </td>
                         <td className={TD_COMPACT}>{rotuloNivel(u.nivel, empresaPropria)}</td>
-                        <td className={TD_COMPACT}>{PAPEL_ROTULO[u.papel] ?? u.papel}</td>
+                        <td className={TD_COMPACT}>{rotulo(PAPEL_ROTULO, u.papel)}</td>
                         <td className={TD_COMPACT}>
                           <Selo tom={u.ativo ? 'verde' : 'cinza'}>
                             {u.ativo ? 'Ativo' : 'Inativo'}
@@ -352,10 +350,10 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                             {c.organizacao_nome ?? rotuloNivel(c.nivel, empresaPropria)}
                           </span>
                         </td>
-                        <td className={TD_COMPACT}>{PAPEL_ROTULO[c.papel] ?? c.papel}</td>
+                        <td className={TD_COMPACT}>{rotulo(PAPEL_ROTULO, c.papel)}</td>
                         <td className={TD_COMPACT}>
                           <Selo tom={c.estado === 'usado' ? 'verde' : c.estado === 'pendente' ? 'ambar' : 'cinza'}>
-                            {c.estado === 'pendente' ? 'Aguardando resposta' : ESTADO_CONVITE[c.estado] ?? c.estado}
+                            {c.estado === 'pendente' ? 'Aguardando resposta' : rotulo(ESTADO_CONVITE, c.estado)}
                           </Selo>
                         </td>
                         <td className={`${TD_COMPACT} whitespace-nowrap text-[11px] text-[#6e6378] dark:text-[#a093a8]`}>
@@ -425,7 +423,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                 <div>
                   <span className="text-[#877991] dark:text-[#95849f] font-medium block mb-0.5">Papel:</span>
                   <span className="text-[#2d0a33] dark:text-[#f8f5fc] font-medium">
-                    {PAPEL_ROTULO[conviteDetalhes.papel] ?? conviteDetalhes.papel}
+                    {rotulo(PAPEL_ROTULO, conviteDetalhes.papel)}
                   </span>
                 </div>
               </div>
@@ -433,7 +431,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                 <div>
                   <span className="text-[#877991] dark:text-[#95849f] font-medium block mb-0.5">Situação:</span>
                   <Selo tom={conviteDetalhes.estado === 'usado' ? 'verde' : conviteDetalhes.estado === 'pendente' ? 'ambar' : 'cinza'}>
-                    {conviteDetalhes.estado === 'pendente' ? 'Aguardando resposta' : ESTADO_CONVITE[conviteDetalhes.estado] ?? conviteDetalhes.estado}
+                    {conviteDetalhes.estado === 'pendente' ? 'Aguardando resposta' : rotulo(ESTADO_CONVITE, conviteDetalhes.estado)}
                   </Selo>
                 </div>
                 <div>
@@ -503,7 +501,7 @@ const EquipePage: React.FC<EquipePageProps> = ({ usuario, onBack, empresaPropria
                 <div>
                   <span className="text-[#877991] dark:text-[#95849f] font-medium block mb-0.5">Papel:</span>
                   <span className="text-[#2d0a33] dark:text-[#f8f5fc]">
-                    {PAPEL_ROTULO[usuarioDetalhes.papel] ?? usuarioDetalhes.papel}
+                    {rotulo(PAPEL_ROTULO, usuarioDetalhes.papel)}
                   </span>
                 </div>
                 <div>

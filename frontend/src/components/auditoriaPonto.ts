@@ -1,6 +1,15 @@
 // Tipos e funções puras da tela de auditoria de folha de ponto.
 // Formato real: GET /documentos/{id}/analise-ponto (app/routers/documentos/actions.py), com `totais`
 // vindo de app/ponto.py::apurar_folha (sem `divergencias`) e `marcacoes` como extraído pelo Gemini.
+// Os rótulos dos códigos (tipos, dimensões, campos) ficam em utils/rotulos.ts.
+import {
+  ROTULO_CAMPO_ESPELHO,
+  ROTULO_DIMENSAO_PONTO,
+  ROTULO_DIVERGENCIA,
+  ROTULO_MOTIVO_NAO_AVALIADA,
+  emFrase,
+  rotulo,
+} from '../utils/rotulos'
 
 export type TipoDivergencia =
   | 'horas_extras_acima_limite'
@@ -10,6 +19,7 @@ export type TipoDivergencia =
   | 'descanso_semanal_ausente'
   | 'marcacao_invalida'
   | 'total_declarado_divergente'
+  | 'espelho_incompleto'
 
 export interface Divergencia {
   tipo: string
@@ -19,6 +29,8 @@ export interface Divergencia {
   base_legal: string
   detalhe: string
   campo?: string
+  /** Só em espelho_incompleto: campos do art. 84 da Portaria MTP 671/2021 que não aparecem (códigos de CAMPOS_ESPELHO). */
+  campos_ausentes?: string[]
 }
 
 export interface MarcacaoDia {
@@ -70,8 +82,8 @@ export interface ScoreDimensao {
 /** Rótulo curto de uma dimensão sem valor: não avaliada (falta de dados) é diferente de indeterminada (confiança baixa). */
 export const rotuloSemValor = (dim: ScoreDimensao | undefined): string =>
   dim?.nao_avaliada
-    ? dim.motivo === 'sem_semana_completa'
-      ? 'Não avaliado: a folha não traz semanas completas'
+    ? dim.motivo && ROTULO_MOTIVO_NAO_AVALIADA[dim.motivo]
+      ? `Não avaliado: ${emFrase(ROTULO_MOTIVO_NAO_AVALIADA[dim.motivo])}`
       : 'Não avaliado'
     : 'Indeterminada'
 
@@ -103,30 +115,30 @@ export const ROTULO_RISCO: Record<NivelRisco, string> = {
   alto: 'Risco alto',
 }
 
-export const ROTULO_DIMENSAO: Record<DimensaoPonto, string> = {
-  horas_extras: 'Horas extras',
-  intervalos: 'Intervalos',
-  descanso: 'Descanso',
-  registro: 'Registro de ponto',
-}
+export const ROTULO_DIMENSAO = ROTULO_DIMENSAO_PONTO as Record<DimensaoPonto, string>
 
 export const ORDEM_DIMENSOES: DimensaoPonto[] = ['horas_extras', 'intervalos', 'descanso', 'registro']
 
-/** Rótulo e unidade (singular/plural) de cada tipo; a ordem das chaves é a ordem dos blocos na tela. */
-export const TIPOS_DIVERGENCIA: Record<string, { rotulo: string; unidade: [string, string] }> = {
-  horas_extras_acima_limite: { rotulo: 'Horas extras acima do limite diário', unidade: ['dia', 'dias'] },
-  semana_acima_limite: { rotulo: 'Semana acima de 44 horas', unidade: ['semana', 'semanas'] },
-  intervalo_intrajornada_insuficiente: { rotulo: 'Intervalo de almoço insuficiente', unidade: ['dia', 'dias'] },
-  interjornada_insuficiente: { rotulo: 'Descanso entre jornadas (11h) insuficiente', unidade: ['dia', 'dias'] },
-  descanso_semanal_ausente: { rotulo: 'Descanso semanal de 24h ausente', unidade: ['semana', 'semanas'] },
-  marcacao_invalida: { rotulo: 'Marcação inválida', unidade: ['ocorrência', 'ocorrências'] },
-  total_declarado_divergente: { rotulo: 'Total declarado diverge do calculado', unidade: ['ocorrência', 'ocorrências'] },
+/** Unidade (singular/plural) de cada tipo; a ordem das chaves é a ordem dos blocos na tela. O rótulo está em utils/rotulos.ts. */
+export const TIPOS_DIVERGENCIA: Record<string, { unidade: [string, string] }> = {
+  horas_extras_acima_limite: { unidade: ['dia', 'dias'] },
+  semana_acima_limite: { unidade: ['semana', 'semanas'] },
+  intervalo_intrajornada_insuficiente: { unidade: ['dia', 'dias'] },
+  interjornada_insuficiente: { unidade: ['dia', 'dias'] },
+  descanso_semanal_ausente: { unidade: ['semana', 'semanas'] },
+  marcacao_invalida: { unidade: ['ocorrência', 'ocorrências'] },
+  total_declarado_divergente: { unidade: ['ocorrência', 'ocorrências'] },
+  espelho_incompleto: { unidade: ['ocorrência', 'ocorrências'] },
 }
 
 export const nivelDeRisco = (percentual: number): NivelRisco =>
   percentual >= FAIXAS_RISCO.alto ? 'alto' : percentual >= FAIXAS_RISCO.medio ? 'medio' : 'baixo'
 
-export const rotuloTipo = (tipo: string): string => TIPOS_DIVERGENCIA[tipo]?.rotulo ?? tipo.replace(/_/g, ' ')
+export const rotuloTipo = (tipo: string): string => rotulo(ROTULO_DIVERGENCIA, tipo)
+
+/** Lista dos campos ausentes do espelho, com o nome em português ("Nome do empregador, CPF do trabalhador"). */
+export const listarCamposEspelho = (campos: string[]): string =>
+  campos.map((c) => rotulo(ROTULO_CAMPO_ESPELHO, c)).join(', ')
 
 export const contagemTipo = (tipo: string, n: number): string => {
   const [singular, plural] = TIPOS_DIVERGENCIA[tipo]?.unidade ?? ['ocorrência', 'ocorrências']

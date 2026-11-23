@@ -1,6 +1,7 @@
 import React from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react'
 import { trackedStatus, type TrackedLote } from '../hooks/lotePollingLogic'
+import { ROTULO_ESTADO_LOTE, emFrase, rotulo } from '../utils/rotulos'
 
 interface LotesStatusPanelProps {
   lotes: TrackedLote[]
@@ -58,7 +59,7 @@ export const LotesStatusPanel: React.FC<LotesStatusPanelProps> = ({
                   {status === 'concluido' && `Lote ${nome} processado.`}
                   {status === 'timeout' && `O lote ${nome} ainda está em processamento.`}
                   {status === 'processando' &&
-                    `Processando o lote ${nome}${lote.mensagemAtual ? ` — ${lote.mensagemAtual}` : lote.estado ? ` (${lote.estado}${lote.docsPendentes ? `, ${lote.docsPendentes} documento(s) pendente(s)` : ''})` : ''}...`}
+                    `Processando o lote ${nome}${lote.mensagemAtual ? ` — ${lote.mensagemAtual}` : lote.estado ? ` (${emFrase(rotulo(ROTULO_ESTADO_LOTE, lote.estado))}${lote.docsPendentes ? `, ${lote.docsPendentes} documento(s) pendente(s)` : ''})` : ''}...`}
                 </p>
                 {status === 'erro' && lote.mensagemAtual && (
                   <p className="text-xs sm:text-sm text-[#6e6378] dark:text-[#9f91a6] mt-0.5 break-words">

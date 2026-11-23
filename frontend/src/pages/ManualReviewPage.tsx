@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Check, X, Plus, ZoomIn, ChevronLeft } from 'lucide-react'
 import type { ReviewPendingDocument } from '../types'
 import { fetchPageImage } from '../services/api'
+import { rotuloCampo, rotuloTipoDocumental } from '../utils/rotulos'
 import {
   OFFICIAL_CATEGORY_OPTIONS,
   initialReviewCategory,
@@ -52,7 +53,9 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
     : ''
   const hasCategory = selectedCategory !== ''
   const [personName, setPersonName] = useState(doc.personName)
-  const [extractedFields, setExtractedFields] = useState(doc.extractedFields)
+  const [extractedFields, setExtractedFields] = useState<{ key: string; value: string; novo?: boolean }[]>(
+    doc.extractedFields
+  )
   const [currentPage, setCurrentPage] = useState(0)
   const [isZoomEnabled, setIsZoomEnabled] = useState(false)
   const [isHoveringImage, setIsHoveringImage] = useState(false)
@@ -96,7 +99,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   }
 
   const handleAddField = () => {
-    setExtractedFields((prev) => [...prev, { key: 'novo_campo', value: '' }])
+    setExtractedFields((prev) => [...prev, { key: '', value: '', novo: true }])
   }
 
   // <img src> não envia Authorization: baixa a imagem autenticada e usa um object URL (revogado ao trocar/desmontar)
@@ -128,7 +131,7 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
   const suggestedLabel =
     doc.suggestedTypeLabel ||
     availableCategories.find((c) => c.slug === doc.suggestedType)?.name ||
-    doc.suggestedType
+    rotuloTipoDocumental(doc.suggestedType)
 
   return (
     <div className="space-y-6">
@@ -259,18 +262,25 @@ const ReviewDetailPanel: React.FC<DetailPanelProps> = ({
                 key={idx}
                 className="flex items-center rounded-xl border border-[#ebe5ef] dark:border-[#2f1e39] overflow-hidden bg-white dark:bg-[#150c18]"
               >
-                <input
-                  type="text"
-                  value={field.key}
-                  onChange={(e) => {
-                    const keyVal = e.target.value
-                    setExtractedFields((prev) =>
-                      prev.map((f, i) => (i === idx ? { ...f, key: keyVal } : f))
-                    )
-                  }}
-                  aria-label="Nome do campo"
-                  className="px-3.5 py-2 bg-[#f8f5fa] dark:bg-[#201224] border-r border-[#ebe5ef] dark:border-[#2f1e39] text-xs font-semibold text-[#6e6378] dark:text-[#a093a8] w-32 focus:outline-none"
-                />
+                {field.novo ? (
+                  <input
+                    type="text"
+                    value={field.key}
+                    placeholder="Nome do campo"
+                    onChange={(e) => {
+                      const keyVal = e.target.value
+                      setExtractedFields((prev) =>
+                        prev.map((f, i) => (i === idx ? { ...f, key: keyVal } : f))
+                      )
+                    }}
+                    aria-label="Nome do campo"
+                    className="px-3.5 py-2 bg-[#f8f5fa] dark:bg-[#201224] border-r border-[#ebe5ef] dark:border-[#2f1e39] text-xs font-semibold text-[#6e6378] dark:text-[#a093a8] w-32 focus:outline-none"
+                  />
+                ) : (
+                  <span className="px-3.5 py-2 bg-[#f8f5fa] dark:bg-[#201224] border-r border-[#ebe5ef] dark:border-[#2f1e39] text-xs font-semibold text-[#6e6378] dark:text-[#a093a8] w-32 shrink-0 break-words">
+                    {rotuloCampo(field.key)}
+                  </span>
+                )}
                 <input
                   type="text"
                   value={field.value}
