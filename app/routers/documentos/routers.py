@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_session
+from app.downloads import content_disposition
 
 from app.escopo import documento_para_escrita, documento_para_leitura
 from app.routers.auth.actions import UsuarioContexto, exigir_usuario
@@ -69,5 +70,5 @@ def download_documento(documento_id: int, session: Session = Depends(get_session
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+        headers={"Content-Disposition": content_disposition(nome_arquivo)},
     )
