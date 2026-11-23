@@ -13,7 +13,7 @@ import {
   valoresIguais,
   type TipoCampo,
   type ValorComVigencias,
-} from './convencoes'
+} from './perfisJornadaFormato'
 
 export const NOME_MAX = 100
 export const SINDICATO_MAX = 200

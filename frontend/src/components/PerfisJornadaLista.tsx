@@ -2,8 +2,8 @@ import React from 'react'
 import { Plus } from 'lucide-react'
 import type { PerfilJornadaDetalhe, PerfilJornadaResumo } from '../services/api'
 import { BTN, BTN_SEC, CARD, Selo } from './formUi'
-import { VigenciaSelo } from './ConvencaoDetalhe'
-import { contarDiferencas, descreverVigencia, hojeIso } from '../utils/convencoes'
+import { VigenciaSelo } from './DetalhePerfilJornada'
+import { contarDiferencas, descreverVigencia, hojeIso } from '../utils/perfisJornadaFormato'
 
 const SUAVE = 'text-[#6e6378] dark:text-[#a093a8]'
 
@@ -31,7 +31,7 @@ interface Props {
   solo?: boolean
 }
 
-export const ConvencoesLista: React.FC<Props> = ({ perfis, detalhes, escopoDe, onNova, onVer, solo = false }) => {
+export const PerfisJornadaLista: React.FC<Props> = ({ perfis, detalhes, escopoDe, onNova, onVer, solo = false }) => {
   const padrao = perfis.find((p) => p.padrao)
   const hoje = hojeIso()
   const demais = perfis

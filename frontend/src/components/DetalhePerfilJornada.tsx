@@ -14,7 +14,7 @@ import {
   hojeIso,
   valoresIguais,
   type DefParametro,
-} from '../utils/convencoes'
+} from '../utils/perfisJornadaFormato'
 import { parametrosDoDia } from '../utils/reguaDia'
 
 const TOM_VIGENCIA = {
@@ -51,7 +51,7 @@ interface Props {
   onVoltar: () => void
 }
 
-export const ConvencaoDetalhe: React.FC<Props> = ({ detalhe, padrao, escopo, onEditar, onVoltar }) => {
+export const DetalhePerfilJornada: React.FC<Props> = ({ detalhe, padrao, escopo, onEditar, onVoltar }) => {
   const ehPadrao = detalhe.padrao
   const atual = useMemo(() => parametrosDoDia(valoresBase(detalhe.efetivo)), [detalhe])
   const ref = useMemo(() => parametrosDoDia(valoresBase(padrao.efetivo)), [padrao])

@@ -1,5 +1,5 @@
 /** Geometria da régua do dia: um dia de exemplo (a partir das 08:00) a partir dos valores de uma convenção. */
-import { formatarDuracao, minutosParaHorario } from './convencoes'
+import { formatarDuracao, minutosParaHorario } from './perfisJornadaFormato'
 
 export const INICIO_EXEMPLO = 8 * 60
 const MIN_DIA = 1440
