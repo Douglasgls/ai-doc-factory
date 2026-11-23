@@ -1,8 +1,9 @@
 import type { ParametroEntrada, ParametroProprio } from '../services/api'
 
-/** Nome do perfil: o mesmo padrão do backend (vai na URL e em contrato.perfil_jornada). */
+/** Identificador técnico do perfil de referência (o usuário só vê "Padrão"). */
 export const PERFIL_PADRAO = 'clt_padrao'
-export const NOME_PERFIL_RE = /^[a-z0-9_]{1,50}$/
+export const NOME_MAX = 100
+export const SINDICATO_MAX = 200
 export const BASE_LEGAL_MAX = 300
 export const PARAMETROS_MAX = 200
 
@@ -97,11 +98,8 @@ export function validarPerfil(
   linhas: LinhaForm[],
   validos: Set<string>,
 ): { erro: string } | { parametros: ParametroEntrada[] } {
-  if (!NOME_PERFIL_RE.test(nome)) {
-    return { erro: 'Nome do perfil: de 1 a 50 caracteres, só minúsculas, dígitos e sublinhado.' }
-  }
-  if (nome === PERFIL_PADRAO) return { erro: `O perfil ${PERFIL_PADRAO} é a referência e não pode ser editado.` }
-  if (linhas.length === 0) return { erro: 'Informe ao menos um parâmetro.' }
+  if (!nome) return { erro: 'Informe o nome da convenção.' }
+  if (nome.length > NOME_MAX) return { erro: `O nome tem no máximo ${NOME_MAX} caracteres.` }
   if (linhas.length > PARAMETROS_MAX) return { erro: `No máximo ${PARAMETROS_MAX} linhas.` }
   const parametros: ParametroEntrada[] = []
   const vistos = new Set<string>()

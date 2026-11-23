@@ -1,81 +1,79 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, Pencil, Plus } from 'lucide-react'
+import { ChevronRight, Clock, FileText, Loader2, Plus } from 'lucide-react'
 import {
   apiService,
   type Contrato,
   type PerfilJornadaDetalhe,
   type PerfilJornadaResumo,
+  type Prestador,
 } from '../services/api'
-import { BTN, BTN_SEC, CARD, ErroBox, Selo, TD, TH } from '../components/formUi'
+import { BTN, ErroBox } from '../components/formUi'
+import { ConvencaoContratos } from '../components/ConvencaoContratos'
+import { ConvencaoDetalhe } from '../components/ConvencaoDetalhe'
+import { ConvencoesLista } from '../components/ConvencoesLista'
 import { PerfilJornadaForm } from '../components/PerfilJornadaForm'
-import { PERFIL_PADRAO, formatarData, formatarValor, rotuloParametro } from '../utils/perfisJornada'
+import { rotuloEscopo } from '../utils/convencoes'
+import { PERFIL_PADRAO } from '../utils/perfisJornada'
 
 type Tela = { tipo: 'lista' } | { tipo: 'ver'; perfil: string } | { tipo: 'form'; perfil: string | null }
 
 interface Props {
   onBack: () => void
-  /** Admin de empresa própria: só consulta os perfis e escolhe o do próprio contrato (sem criar nem editar). */
+  /** Admin de empresa própria: vê as convenções e escolhe a do próprio contrato; cadastra só as dele. */
   modoEscolha?: boolean
 }
+
+const SUAVE = 'text-[#877991] dark:text-[#a093a8]'
 
 const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => {
   const [tela, setTela] = useState<Tela>({ tipo: 'lista' })
   const [perfis, setPerfis] = useState<PerfilJornadaResumo[]>([])
   const [contratos, setContratos] = useState<Contrato[]>([])
-  const [padrao, setPadrao] = useState<PerfilJornadaDetalhe | null>(null)
-  const [detalhe, setDetalhe] = useState<PerfilJornadaDetalhe | null>(null)
+  const [prestadores, setPrestadores] = useState<Prestador[]>([])
+  const [detalhes, setDetalhes] = useState<Record<string, PerfilJornadaDetalhe>>({})
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
 
-  const catalogo = useMemo(
-    () => (padrao ? padrao.proprios.filter((p) => p.vigente_desde === null) : []),
-    [padrao],
-  )
+  const padrao = detalhes[PERFIL_PADRAO] ?? null
+  const catalogo = useMemo(() => (padrao ? padrao.proprios.filter((p) => p.vigente_desde === null) : []), [padrao])
 
   const carregar = useCallback(async () => {
     setLoading(true)
     setErro(null)
     try {
-      const [ps, cs, pad] = await Promise.all([
+      const [ps, cs, pres] = await Promise.all([
         apiService.getPerfisJornada(),
         apiService.getContratos(),
-        apiService.getPerfilJornada(PERFIL_PADRAO),
+        modoEscolha ? Promise.resolve([] as Prestador[]) : apiService.getPrestadores().catch(() => [] as Prestador[]),
       ])
+      // o detalhe de cada convenção mostra quantas regras ela muda em relação ao Padrão
+      const ds = await Promise.all([PERFIL_PADRAO, ...ps.filter((p) => !p.padrao).map((p) => p.perfil)].map((p) => apiService.getPerfilJornada(p)))
       setPerfis(ps)
       setContratos(cs)
-      setPadrao(pad)
+      setPrestadores(pres)
+      setDetalhes(Object.fromEntries(ds.map((d) => [d.perfil, d])))
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao carregar os perfis de jornada')
+      setErro(e instanceof Error ? e.message : 'Erro ao carregar as convenções')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [modoEscolha])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void carregar()
   }, [carregar])
 
-  const perfilAlvo = tela.tipo === 'lista' ? null : tela.perfil
+  const chaveTela = tela.tipo === 'lista' ? 'lista' : `${tela.tipo}:${tela.perfil}`
   useEffect(() => {
-    if (!perfilAlvo) return
-    let ativo = true
-    apiService
-      .getPerfilJornada(perfilAlvo)
-      .then((d) => {
-        if (ativo) {
-          setDetalhe(d)
-          setErro(null)
-        }
-      })
-      .catch((e) => {
-        if (ativo) setErro(e instanceof Error ? e.message : 'Erro ao carregar o perfil')
-      })
-    return () => {
-      ativo = false
-      setDetalhe(null)
-    }
-  }, [perfilAlvo])
+    window.scrollTo({ top: 0 })
+  }, [chaveTela])
+
+  const nomePrestador = useCallback(
+    (id: number) => prestadores.find((p) => p.id === id)?.razao_social,
+    [prestadores],
+  )
+  const escopoDe = modoEscolha ? undefined : (c: { geral: boolean; prestador_id: number | null }) => rotuloEscopo(c, nomePrestador)
 
   const trocarContrato = async (contratoId: number, perfil: string) => {
     const c = await apiService.associarPerfilJornada(contratoId, perfil)
@@ -88,330 +86,110 @@ const PerfisJornadaPage: React.FC<Props> = ({ onBack, modoEscolha = false }) => 
     void carregar()
   }
 
+  const alvo = tela.tipo === 'lista' ? null : tela.perfil
+  const detalhe = alvo ? (detalhes[alvo] ?? null) : null
   const titulo =
-    tela.tipo === 'lista' ? null : tela.tipo === 'form' ? (tela.perfil ? `Editar ${tela.perfil}` : 'Novo perfil') : tela.perfil
+    tela.tipo === 'lista'
+      ? null
+      : tela.tipo === 'form'
+        ? tela.perfil
+          ? `Editar ${detalhe?.nome ?? ''}`.trim()
+          : 'Nova convenção'
+        : detalhe?.padrao
+          ? 'Padrão'
+          : (detalhe?.nome ?? '')
 
   return (
     <div className="space-y-6">
-      <nav className="flex items-center gap-2 text-xs sm:text-sm text-[#877991] dark:text-[#95849f]">
+      <nav aria-label="Você está em" className={`flex items-center gap-2 text-xs sm:text-sm ${SUAVE}`}>
         <button
           onClick={onBack}
           className="hover:text-[#2d0a33] dark:hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5"
         >
-          <FileText className="w-3.5 h-3.5" />
+          <FileText className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Documentos</span>
         </button>
-        <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+        <ChevronRight className="w-3.5 h-3.5 opacity-60" aria-hidden="true" />
         {titulo ? (
           <>
             <button onClick={voltarLista} className="hover:text-[#2d0a33] dark:hover:text-white cursor-pointer">
-              Perfis de jornada
+              Convenções coletivas
             </button>
-            <ChevronRight className="w-3.5 h-3.5 opacity-60" />
-            <span className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">{titulo}</span>
+            <ChevronRight className="w-3.5 h-3.5 opacity-60" aria-hidden="true" />
+            <span aria-current="page" className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">
+              {titulo}
+            </span>
           </>
         ) : (
-          <span className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">Perfis de jornada</span>
+          <span aria-current="page" className="font-semibold text-[#2d0a33] dark:text-[#f8f5fc]">
+            Convenções coletivas
+          </span>
         )}
       </nav>
 
-      <div className="flex items-start sm:items-center gap-3.5">
-        <div className="w-11 h-11 rounded-2xl bg-purple-950/40 border border-purple-800/40 flex items-center justify-center text-purple-400 shrink-0 shadow-sm">
-          <Clock className="w-5 h-5" />
+      {tela.tipo === 'lista' && (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[#f4e8f7] dark:bg-[#34163d] flex items-center justify-center text-[#5c1363] dark:text-[#f38df9] shrink-0">
+              <Clock className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-[#2d0a33] dark:text-white tracking-tight">
+                Convenções coletivas
+              </h1>
+              <p className={`text-xs sm:text-sm mt-0.5 ${SUAVE}`}>
+                Regras de jornada usadas na análise das folhas de ponto.
+              </p>
+            </div>
+          </div>
+          {!loading && (
+            <button type="button" onClick={() => setTela({ tipo: 'form', perfil: null })} className={BTN}>
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              Nova convenção
+            </button>
+          )}
         </div>
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#2d0a33] dark:text-white tracking-tight">
-            Perfis de jornada
-          </h1>
-          <p className="text-xs sm:text-sm text-[#877991] dark:text-[#a093a8] mt-0.5">
-            Parâmetros da análise de folha de ponto (CLT e Portaria MTP 671/2021) e o perfil de cada contrato.
-          </p>
-        </div>
-      </div>
+      )}
 
       <ErroBox message={erro} />
 
       {loading ? (
-        <div className="flex justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-[#9333ea]" />
+        <div className="flex justify-center py-16" role="status" aria-label="Carregando">
+          <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-[#9333ea]" />
         </div>
       ) : tela.tipo === 'lista' ? (
         <>
-          <ListaPerfis
+          <ConvencoesLista
             perfis={perfis}
+            detalhes={detalhes}
+            escopoDe={escopoDe}
+            onNova={() => setTela({ tipo: 'form', perfil: null })}
             onVer={(perfil) => setTela({ tipo: 'ver', perfil })}
-            onNovo={modoEscolha ? undefined : () => setTela({ tipo: 'form', perfil: null })}
           />
-          <ContratosPerfis contratos={contratos} perfis={perfis} onTrocar={trocarContrato} modoEscolha={modoEscolha} />
+          <ConvencaoContratos contratos={contratos} perfis={perfis} onTrocar={trocarContrato} modoEscolha={modoEscolha} />
         </>
       ) : tela.tipo === 'ver' ? (
-        detalhe && (
-          <VerPerfil
+        detalhe &&
+        padrao && (
+          <ConvencaoDetalhe
             detalhe={detalhe}
-            catalogo={catalogo}
-            onEditar={modoEscolha ? undefined : () => setTela({ tipo: 'form', perfil: detalhe.perfil })}
+            padrao={padrao}
+            escopo={escopoDe?.(detalhe)}
+            onEditar={() => setTela({ tipo: 'form', perfil: detalhe.perfil })}
+            onVoltar={voltarLista}
           />
         )
       ) : tela.perfil === null ? (
-        <PerfilJornadaForm
-          existente={null}
-          catalogo={catalogo}
-          onCancelar={voltarLista}
-          onSalvo={(perfil) => {
-            void carregar()
-            setTela({ tipo: 'ver', perfil })
-          }}
-        />
+        <PerfilJornadaForm existente={null} catalogo={catalogo} onCancelar={voltarLista} onSalvo={voltarLista} />
       ) : (
         detalhe && (
           <PerfilJornadaForm
             existente={detalhe}
             catalogo={catalogo}
             onCancelar={() => setTela({ tipo: 'ver', perfil: detalhe.perfil })}
-            onSalvo={(perfil) => {
-              void carregar()
-              setTela({ tipo: 'ver', perfil })
-            }}
+            onSalvo={voltarLista}
           />
         )
-      )}
-    </div>
-  )
-}
-
-const ListaPerfis: React.FC<{
-  perfis: PerfilJornadaResumo[]
-  onVer: (perfil: string) => void
-  onNovo?: () => void
-}> = ({ perfis, onVer, onNovo }) => (
-  <div className={`${CARD} overflow-hidden`}>
-    <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39] flex items-center justify-between gap-3">
-      <div>
-        <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">Perfis cadastrados</h3>
-        <p className="text-xs text-[#877991] dark:text-[#a093a8] mt-0.5">
-          {perfis.length} {perfis.length === 1 ? 'perfil' : 'perfis'}
-        </p>
-      </div>
-      {onNovo && (
-        <button type="button" onClick={onNovo} className={BTN}>
-          <Plus className="w-4 h-4" />
-          Novo perfil
-        </button>
-      )}
-    </div>
-    <div className="overflow-x-auto">
-      <table className="w-full text-left border-collapse min-w-[560px]">
-        <thead>
-          <tr className="bg-[#fbf9fc] dark:bg-[#1f1325] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-            <th className={TH}>Perfil</th>
-            <th className={TH}>Tipo</th>
-            <th className={TH}>Parâmetros próprios</th>
-            <th className={TH}>Contratos</th>
-            <th className={TH}></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
-          {perfis.map((p) => (
-            <tr key={p.perfil} className="hover:bg-slate-50/50 dark:hover:bg-[#23152c]/50 transition-colors">
-              <td className={`${TD} font-bold font-mono`}>{p.perfil}</td>
-              <td className={TD}>{p.padrao ? <Selo tom="ambar">Padrão (referência)</Selo> : <Selo tom="cinza">Próprio</Selo>}</td>
-              <td className={TD}>{p.parametros_proprios}</td>
-              <td className={TD}>{p.contratos}</td>
-              <td className={TD}>
-                <button type="button" onClick={() => onVer(p.perfil)} className={BTN_SEC}>
-                  Ver
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-)
-
-const VerPerfil: React.FC<{
-  detalhe: PerfilJornadaDetalhe
-  catalogo: { parametro: string; unidade: string }[]
-  onEditar?: () => void
-}> = ({ detalhe, catalogo, onEditar }) => {
-  const proprios = new Set(detalhe.proprios.map((p) => p.parametro))
-  const unidades = new Map(catalogo.map((c) => [c.parametro, c.unidade]))
-  const nomes = catalogo.map((c) => c.parametro)
-  // parâmetro fora do catálogo (não deveria ocorrer): ainda aparece, na ordem alfabética
-  for (const k of Object.keys(detalhe.efetivo).sort()) if (!unidades.has(k)) nomes.push(k)
-
-  return (
-    <div className={`${CARD} overflow-hidden`}>
-      <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39] flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white font-mono">{detalhe.perfil}</h3>
-          <p className="text-xs text-[#877991] dark:text-[#a093a8] mt-0.5">
-            {detalhe.padrao
-              ? 'Referência legal, somente leitura (muda só por migração).'
-              : `${proprios.size} ${proprios.size === 1 ? 'parâmetro próprio' : 'parâmetros próprios'}; o restante é herdado do ${PERFIL_PADRAO}.`}
-          </p>
-        </div>
-        {!detalhe.padrao && onEditar && (
-          <button type="button" onClick={onEditar} className={BTN_SEC}>
-            <Pencil className="w-3.5 h-3.5" />
-            Editar
-          </button>
-        )}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[760px]">
-          <thead>
-            <tr className="bg-[#fbf9fc] dark:bg-[#1f1325] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-              <th className={TH}>Parâmetro</th>
-              <th className={TH}>Valor</th>
-              <th className={TH}>Vigência</th>
-              <th className={TH}>Base legal</th>
-              {!detalhe.padrao && <th className={TH}>Origem</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
-            {nomes.map((nome) => {
-              const ef = detalhe.efetivo[nome]
-              if (!ef) return null
-              const un = unidades.get(nome) ?? 'min'
-              const linhas = [
-                { desde: null as string | null, valor: ef.valor, base: ef.base_legal },
-                ...(ef.vigencias ?? []).map((v) => ({ desde: v.desde, valor: v.valor, base: v.base_legal })),
-              ]
-              return linhas.map((l, i) => (
-                <tr key={`${nome}-${i}`} className="hover:bg-slate-50/50 dark:hover:bg-[#23152c]/50 transition-colors">
-                  <td className={`${TD} font-semibold`}>{i === 0 ? rotuloParametro(nome) : ''}</td>
-                  <td className={TD}>{formatarValor(nome, l.valor, un)}</td>
-                  <td className={TD}>{l.desde ? `a partir de ${formatarData(l.desde)}` : 'base'}</td>
-                  <td className={TD}>{l.base}</td>
-                  {!detalhe.padrao && (
-                    <td className={TD}>
-                      {i === 0 &&
-                        (proprios.has(nome) ? <Selo tom="verde">próprio</Selo> : <Selo tom="cinza">herdado do {PERFIL_PADRAO}</Selo>)}
-                    </td>
-                  )}
-                </tr>
-              ))
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-const ContratosPerfis: React.FC<{
-  contratos: Contrato[]
-  perfis: PerfilJornadaResumo[]
-  onTrocar: (contratoId: number, perfil: string) => Promise<void>
-  modoEscolha?: boolean
-}> = ({ contratos, perfis, onTrocar, modoEscolha = false }) => {
-  const [pendente, setPendente] = useState<{ id: number; perfil: string } | null>(null)
-  const [salvando, setSalvando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
-
-  const confirmar = async () => {
-    if (!pendente) return
-    setSalvando(true)
-    setErro(null)
-    try {
-      await onTrocar(pendente.id, pendente.perfil)
-      setPendente(null)
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Erro ao trocar o perfil do contrato')
-    } finally {
-      setSalvando(false)
-    }
-  }
-
-  return (
-    <div className={`${CARD} overflow-hidden`}>
-      <div className="p-5 border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-        <h3 className="text-sm font-bold text-[#2d0a33] dark:text-white">
-          {modoEscolha ? 'Perfil de jornada da empresa' : 'Perfil de cada contrato'}
-        </h3>
-        <p className="text-xs text-[#877991] dark:text-[#a093a8] mt-0.5">
-          A troca vale para as análises feitas a partir daí. Lote sem contrato usa o {PERFIL_PADRAO}.
-        </p>
-      </div>
-      <div className="px-5 pt-4">
-        <ErroBox message={erro} />
-      </div>
-      {contratos.length === 0 ? (
-        <p className="p-5 text-xs text-[#877991] dark:text-[#a093a8]">Nenhum contrato cadastrado.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[640px]">
-            <thead>
-              <tr className="bg-[#fbf9fc] dark:bg-[#1f1325] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-                {!modoEscolha && <th className={TH}>Tomador</th>}
-                {!modoEscolha && <th className={TH}>Prestador</th>}
-                <th className={TH}>Perfil de jornada</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
-              {contratos.map((c) => {
-                const emTroca = pendente?.id === c.id && pendente.perfil !== c.perfil_jornada
-                return (
-                  <React.Fragment key={c.id}>
-                    <tr>
-                      {!modoEscolha && <td className={`${TD} font-bold`}>{c.tomador_nome}</td>}
-                      {!modoEscolha && <td className={TD}>{c.prestador_razao_social}</td>}
-                      <td className={TD}>
-                        <select
-                          aria-label={`Perfil de jornada do contrato ${c.id}`}
-                          className="px-3 py-1.5 rounded-xl text-sm font-mono bg-white dark:bg-[#150c18] border border-[#dcd4e2] dark:border-[#3d2948] text-[#2d0a33] dark:text-white"
-                          value={pendente?.id === c.id ? pendente.perfil : c.perfil_jornada}
-                          disabled={salvando}
-                          onChange={(e) => {
-                            setErro(null)
-                            setPendente(e.target.value === c.perfil_jornada ? null : { id: c.id, perfil: e.target.value })
-                          }}
-                        >
-                          {perfis.map((p) => (
-                            <option key={p.perfil} value={p.perfil}>{p.perfil}</option>
-                          ))}
-                          {!perfis.some((p) => p.perfil === c.perfil_jornada) && (
-                            <option value={c.perfil_jornada}>{c.perfil_jornada}</option>
-                          )}
-                        </select>
-                      </td>
-                    </tr>
-                    {emTroca && pendente && (
-                      <tr>
-                        <td colSpan={modoEscolha ? 1 : 3} className="px-5 pb-4">
-                          <div
-                            role="alert"
-                            className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 text-xs space-y-2"
-                          >
-                            <div className="flex items-start gap-2">
-                              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                              <span>
-                                Trocar de <b>{c.perfil_jornada}</b> para <b>{pendente.perfil}</b> vale para as próximas
-                                análises. As análises de ponto já feitas não são refeitas automaticamente: é preciso
-                                reprocessar cada documento.
-                              </span>
-                            </div>
-                            <div className="flex gap-2">
-                              <button type="button" onClick={confirmar} disabled={salvando} className={BTN_SEC}>
-                                {salvando && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                Confirmar troca
-                              </button>
-                              <button type="button" onClick={() => setPendente(null)} disabled={salvando} className={BTN_SEC}>
-                                Cancelar
-                              </button>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
       )}
     </div>
   )

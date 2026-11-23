@@ -9,7 +9,7 @@ import {
 } from '../services/api'
 import { formatCnpj, isCnpjValido, maskCnpj } from '../utils/contratos'
 import { extraEmailClasses, validarEmail } from '../utils/convites'
-import { ROTULO_PERFIL_JORNADA, rotulo } from '../utils/rotulos'
+import { ROTULO_PERFIL_JORNADA } from '../utils/rotulos'
 import { BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, TD, TH } from '../components/formUi'
 import { ConviteLink } from '../components/ConviteLink'
 import { CadastroTerceirizadaForm } from '../components/CadastroTerceirizadaForm'
@@ -652,7 +652,7 @@ const OrganizacoesPage: React.FC<OrganizacoesPageProps> = ({ onBack }) => {
                                   : '—'}
                               </td>
                               <td className={TD}><Situacao ativo={c.ativo} /></td>
-                              <td className={TD}>{rotulo(ROTULO_PERFIL_JORNADA, c.perfil_jornada)}</td>
+                              <td className={TD}>{ROTULO_PERFIL_JORNADA[c.perfil_jornada] ?? c.perfil_jornada_nome ?? 'Convenção que você não vê'}</td>
                               <td className={TD}><AcessoSelo contrato={c} /></td>
                               <td className={TD}><ReenvioBotao contrato={c} reenvio={reenvio} /></td>
                             </tr>

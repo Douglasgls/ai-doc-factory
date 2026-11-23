@@ -353,11 +353,29 @@ export interface Contrato {
   prestador_ativo: boolean;
   acesso_prestador?: 'ativo' | 'convite_pendente' | 'sem_acesso';
   perfil_jornada: string;
+  /** Nome da convenção do contrato; null quando o usuário não vê o perfil (fora do escopo dele). */
+  perfil_jornada_nome?: string | null;
+  /** O usuário vê os detalhes do perfil do contrato. */
+  perfil_jornada_visivel?: boolean;
   /** Empresa solo: o mesmo CNPJ é tomador e prestador (sem terceirização). */
   proprio?: boolean;
 }
 
-export interface PerfilJornadaResumo {
+export interface PerfilJornadaCadastro {
+  nome: string;
+  sindicato: string | null;
+  vigencia_inicio: string | null;
+  vigencia_fim: string | null;
+  /** Hoje está dentro da vigência (início e fim vazios = sempre vigente). */
+  vigente: boolean;
+  /** Visível a todos que leem perfis. */
+  geral: boolean;
+  /** Dono do perfil; só a plataforma e o próprio dono o veem. */
+  prestador_id: number | null;
+  /** O usuário que consulta pode editar o perfil (o Padrão nunca). */
+  editavel: boolean;
+}
+export interface PerfilJornadaResumo extends PerfilJornadaCadastro {
   perfil: string;
   padrao: boolean;
   parametros_proprios: number;
@@ -375,11 +393,21 @@ export interface ParametroEfetivo {
   base_legal: string;
   vigencias?: { desde: string; valor: number; base_legal: string }[];
 }
-export interface PerfilJornadaDetalhe {
+export interface PerfilJornadaDetalhe extends PerfilJornadaCadastro {
   perfil: string;
   padrao: boolean;
   proprios: ParametroProprio[];
   efetivo: Record<string, ParametroEfetivo>;
+}
+/** Campos do cadastro enviados ao criar ou editar; ausente = não muda, `null` limpa sindicato, vigência e dono. */
+export interface CadastroPerfilEntrada {
+  nome?: string;
+  sindicato?: string | null;
+  vigencia_inicio?: string | null;
+  vigencia_fim?: string | null;
+  /** Só a plataforma envia `geral` e `prestador_id`. */
+  geral?: boolean;
+  prestador_id?: number | null;
 }
 export interface ParametroEntrada {
   parametro: string;
@@ -888,7 +916,7 @@ export const apiService = {
   getPerfisJornada: async (): Promise<PerfilJornadaResumo[]> => {
     const response = await authFetch(`/perfis-jornada`);
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao listar perfis de jornada'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao listar as convenções'));
     }
     return response.json();
   },
@@ -896,19 +924,35 @@ export const apiService = {
   getPerfilJornada: async (perfil: string): Promise<PerfilJornadaDetalhe> => {
     const response = await authFetch(`/perfis-jornada/${encodeURIComponent(perfil)}`);
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao carregar o perfil de jornada'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao carregar a convenção'));
     }
     return response.json();
   },
 
-  gravarPerfilJornada: async (perfil: string, parametros: ParametroEntrada[]): Promise<PerfilJornadaDetalhe> => {
+  criarPerfilJornada: async (corpo: CadastroPerfilEntrada & { nome: string }): Promise<PerfilJornadaDetalhe> => {
+    const response = await authFetch(`/perfis-jornada`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corpo),
+    });
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Erro ao cadastrar a convenção'));
+    }
+    return response.json();
+  },
+
+  /** Sem `parametros`, edita só o cadastro; com `parametros`, substitui todos os parâmetros próprios. */
+  atualizarPerfilJornada: async (
+    perfil: string,
+    corpo: CadastroPerfilEntrada & { parametros?: ParametroEntrada[] },
+  ): Promise<PerfilJornadaDetalhe> => {
     const response = await authFetch(`/perfis-jornada/${encodeURIComponent(perfil)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parametros }),
+      body: JSON.stringify(corpo),
     });
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao salvar o perfil de jornada'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao salvar a convenção'));
     }
     return response.json();
   },
@@ -920,7 +964,7 @@ export const apiService = {
       body: JSON.stringify({ perfil }),
     });
     if (!response.ok) {
-      throw new Error(await parseErrorMessage(response, 'Erro ao trocar o perfil do contrato'));
+      throw new Error(await parseErrorMessage(response, 'Erro ao trocar a convenção do contrato'));
     }
     return response.json();
   },
