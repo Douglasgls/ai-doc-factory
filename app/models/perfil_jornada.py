@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, Numeric, Text, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Date, Numeric, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -22,3 +22,18 @@ class PerfilJornada(Base):
     unidade: Mapped[str] = mapped_column(Text)
     base_legal: Mapped[str] = mapped_column(Text)
     vigente_desde: Mapped[date | None] = mapped_column(Date)
+
+
+class PerfilJornadaCadastro(Base):
+    """Uma linha por perfil: nome legível, sindicato e vigência. A chave é o slug de `perfil_jornada.perfil`."""
+    __tablename__ = "perfil_jornada_cadastro"
+    __table_args__ = (
+        CheckConstraint("btrim(nome) <> ''", name="perfil_jornada_cadastro_nome_check"),
+        CheckConstraint("vigencia_inicio IS NULL OR vigencia_fim IS NULL OR vigencia_fim >= vigencia_inicio",
+                        name="perfil_jornada_cadastro_vigencia_check"),)
+
+    perfil: Mapped[str] = mapped_column(Text, primary_key=True)
+    nome: Mapped[str] = mapped_column(Text)
+    sindicato: Mapped[str | None] = mapped_column(Text)
+    vigencia_inicio: Mapped[date | None] = mapped_column(Date)
+    vigencia_fim: Mapped[date | None] = mapped_column(Date)

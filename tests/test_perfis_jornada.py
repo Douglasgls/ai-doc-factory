@@ -1,7 +1,7 @@
 """Perfil de jornada por contrato: herança de clt_padrao, API (só plataforma) e worker de análise usando o perfil do
 contrato do lote. Contra o Postgres e o Redis; o Gemini e o Jev são mockados (fixture `rede`)."""
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 import psycopg
 import pytest
@@ -23,6 +23,7 @@ def nome():
     yield n
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         conn.execute("DELETE FROM perfil_jornada WHERE perfil = %s", (n,))
+        conn.execute("DELETE FROM perfil_jornada_cadastro WHERE perfil = %s", (n,))
 
 
 def _p(parametro, valor, vigente_desde=None, base_legal="ACT de teste, cláusula 1ª"):
@@ -67,7 +68,9 @@ def test_cria_consulta_e_lista_perfil_com_heranca(nome):
     assert [v["desde"] for v in padrao["efetivo"]["jornada_semanal_min"]["vigencias"]] == ["2026-12-16", "2027-12-16"]
     assert client.get(f"/perfis-jornada/{nome}").json() == corpo
     lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
-    assert lista[nome] == {"perfil": nome, "padrao": False, "parametros_proprios": 2, "contratos": 0}
+    assert lista[nome] == {"perfil": nome, "padrao": False, "parametros_proprios": 2, "contratos": 0,
+                           "nome": _nome_do_slug(nome), "sindicato": None, "vigencia_inicio": None,
+                           "vigencia_fim": None, "vigente": True}
     assert lista[PERFIL_PADRAO]["padrao"] is True and lista[PERFIL_PADRAO]["parametros_proprios"] == 17
 
 
@@ -195,3 +198,128 @@ def test_lote_sem_contrato_usa_o_padrao(rede):  # noqa: F811
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
             conn.execute("DELETE FROM lote WHERE id = %s", (lote,))
+
+
+# ---------- cadastro: nome, sindicato e vigência ----------
+
+def _nome_do_slug(slug):
+    return slug.replace("_", " ").capitalize()
+
+
+@pytest.fixture
+def slugs():
+    """Slugs criados por POST neste teste; cadastro e parâmetros são apagados no fim."""
+    criados = []
+    yield criados
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("DELETE FROM perfil_jornada_cadastro WHERE perfil = ANY(%s)", (criados,))
+        conn.execute("DELETE FROM perfil_jornada WHERE perfil = ANY(%s)", (criados,))
+
+
+def _criar(slugs, corpo):
+    r = client.post("/perfis-jornada", json=corpo)
+    if r.status_code == 201:
+        slugs.append(r.json()["perfil"])
+    return r
+
+
+def test_padrao_tem_nome_padrao_e_e_vigente():
+    p = client.get(f"/perfis-jornada/{PERFIL_PADRAO}").json()
+    assert (p["nome"], p["sindicato"], p["vigencia_inicio"], p["vigencia_fim"], p["vigente"]) == (
+        "Padrão", None, None, None, True)
+    assert {x["perfil"]: x["nome"] for x in client.get("/perfis-jornada").json()}[PERFIL_PADRAO] == "Padrão"
+
+
+def test_post_gera_slug_sem_acento_e_sufixo_na_colisao(slugs):
+    nome = "Acordo Coletivo Ação 2026/27"
+    r = _criar(slugs, {"nome": nome, "sindicato": " Sindicato dos Vigilantes ", "vigencia_inicio": "2026-01-01",
+                       "vigencia_fim": "2026-12-31"})
+    assert r.status_code == 201, r.text
+    corpo = r.json()
+    base = corpo["perfil"]
+    assert base == "acordo_coletivo_acao_2026_27"
+    assert (corpo["nome"], corpo["sindicato"], corpo["vigencia_inicio"], corpo["vigencia_fim"]) == (
+        nome, "Sindicato dos Vigilantes", "2026-01-01", "2026-12-31")
+    assert corpo["padrao"] is False and corpo["proprios"] == []
+    assert corpo["efetivo"] == client.get(f"/perfis-jornada/{PERFIL_PADRAO}").json()["efetivo"]  # herda tudo
+    assert client.get(f"/perfis-jornada/{base}").json() == corpo
+    assert _criar(slugs, {"nome": nome}).json()["perfil"] == base + "_2"
+    assert _criar(slugs, {"nome": nome}).json()["perfil"] == base + "_3"
+    assert _criar(slugs, {"nome": "clt padrao"}).json()["perfil"] == "clt_padrao_2"  # não colide com o Padrão
+    assert _criar(slugs, {"nome": "!!!"}).json()["perfil"] == "perfil"
+    longo = _criar(slugs, {"nome": "a" * 100}).json()["perfil"]
+    assert len(longo) <= 50 and _criar(slugs, {"nome": "a" * 100}).json()["perfil"] == longo + "_2"
+    lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
+    assert lista[base]["parametros_proprios"] == 0 and lista[base]["nome"] == nome
+
+
+def test_post_valida_nome_e_vigencia(slugs):
+    assert _criar(slugs, {}).status_code == 422
+    assert _criar(slugs, {"nome": "   "}).status_code == 422
+    assert _criar(slugs, {"nome": "x" * 101}).status_code == 422
+    assert _criar(slugs, {"nome": "ok", "vigencia_inicio": "2027-01-02", "vigencia_fim": "2027-01-01"}).status_code == 422
+    assert _criar(slugs, {"nome": "ok", "vigencia_inicio": "2027-01-01", "vigencia_fim": "2027-01-01"}).status_code == 201
+
+
+def test_vigente_calculado_pela_data_de_hoje(slugs):
+    hoje = date.today()
+    d = lambda n: (hoje + timedelta(days=n)).isoformat()  # noqa: E731
+    casos = {"passado": (d(-30), d(-1), False), "futuro": (d(1), d(30), False), "hoje_inicio": (d(0), None, True),
+             "hoje_fim": (None, d(0), True), "aberto": (None, None, True), "dentro": (d(-5), d(5), True)}
+    lista = None
+    for nome, (ini, fim, esperado) in casos.items():
+        r = _criar(slugs, {"nome": "vig " + nome, "vigencia_inicio": ini, "vigencia_fim": fim})
+        assert r.status_code == 201 and r.json()["vigente"] is esperado, (nome, r.text)
+    lista = {p["perfil"]: p for p in client.get("/perfis-jornada").json()}
+    assert {n: lista["vig_" + n]["vigente"] for n in casos} == {n: v[2] for n, v in casos.items()}
+
+
+def test_vigente_funcao_pura():
+    from app.routers.perfis_jornada.actions import vigente as v
+    h = date(2026, 6, 1)
+    assert v(None, None, h) and v(h, h, h) and v(date(2026, 1, 1), None, h) and v(None, date(2026, 6, 1), h)
+    assert not v(date(2026, 6, 2), None, h) and not v(None, date(2026, 5, 31), h)
+
+
+def test_put_edita_cadastro_sem_mexer_nos_parametros(nome):
+    assert _gravar(nome, _p("extras_max_dia_min", 90)).status_code == 200  # cliente antigo: só parametros
+    antes = client.get(f"/perfis-jornada/{nome}").json()
+    assert antes["nome"] == _nome_do_slug(nome) and antes["sindicato"] is None
+    r = client.put(f"/perfis-jornada/{nome}", json={"nome": "Convênio Novo", "sindicato": "Sind A",
+                                                    "vigencia_inicio": "2026-02-01", "vigencia_fim": "2026-03-01"})
+    assert r.status_code == 200, r.text
+    assert r.json()["proprios"] == antes["proprios"] and r.json()["nome"] == "Convênio Novo"
+    assert (r.json()["sindicato"], r.json()["vigencia_inicio"], r.json()["vigencia_fim"]) == (
+        "Sind A", "2026-02-01", "2026-03-01")
+    r = client.put(f"/perfis-jornada/{nome}", json={"sindicato": None})  # ausente não muda; null limpa
+    assert r.json()["sindicato"] is None and r.json()["nome"] == "Convênio Novo" and r.json()["vigencia_fim"] == "2026-03-01"
+    r = _gravar(nome, _p("extras_max_dia_min", 100))  # regrava parâmetros sem perder o cadastro
+    assert r.json()["nome"] == "Convênio Novo" and r.json()["proprios"][0]["valor"] == 100
+    r = client.put(f"/perfis-jornada/{nome}", json={"nome": "Outro", "parametros": [_p("extras_max_dia_min", 70)]})
+    assert r.json()["nome"] == "Outro" and r.json()["proprios"][0]["valor"] == 70
+
+
+def test_put_valida_vigencia_nome_e_criacao_sem_parametros(nome):
+    assert client.put(f"/perfis-jornada/{nome}", json={"nome": "Sem parâmetros"}).status_code == 422  # não cria
+    assert client.get(f"/perfis-jornada/{nome}").status_code == 404
+    assert client.put(f"/perfis-jornada/{PERFIL_PADRAO}", json={"nome": "Hack"}).status_code == 409
+    assert _gravar(nome, _p("extras_max_dia_min", 90)).status_code == 200
+    ruim = {"vigencia_inicio": "2027-01-02", "vigencia_fim": "2027-01-01"}
+    assert client.put(f"/perfis-jornada/{nome}", json=ruim).status_code == 422
+    assert client.put(f"/perfis-jornada/{nome}", json={"vigencia_inicio": "2027-01-10"}).status_code == 200
+    # fim anterior ao início JÁ gravado (campos enviados em requisições separadas)
+    assert client.put(f"/perfis-jornada/{nome}", json={"vigencia_fim": "2027-01-01"}).status_code == 422
+    assert client.put(f"/perfis-jornada/{nome}", json={"nome": None}).status_code == 422
+    assert client.put(f"/perfis-jornada/{nome}", json={"nome": " "}).status_code == 422
+    assert client.get(f"/perfis-jornada/{nome}").json()["vigencia_fim"] is None
+    assert client.put(f"/perfis-jornada/{nome}", json={"parametros": []}).status_code == 422
+
+
+def test_perfil_sem_cadastro_sai_com_nome_do_slug(nome):
+    """Perfil gravado por fora da API (sem linha no cadastro) continua listado e legível."""
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("INSERT INTO perfil_jornada (perfil, parametro, valor, unidade, base_legal) "
+                     "VALUES (%s, 'extras_max_dia_min', 30, 'min', 'x')", (nome,))
+    p = client.get(f"/perfis-jornada/{nome}").json()
+    assert p["nome"] == _nome_do_slug(nome) and p["vigente"] is True
+    assert nome in {x["perfil"] for x in client.get("/perfis-jornada").json()}

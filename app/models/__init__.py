@@ -7,12 +7,12 @@ from .documento import Documento
 from .documento_campos import DocumentoCampo
 from .lote import Lote
 from .pagina import Pagina
-from .perfil_jornada import PerfilJornada
+from .perfil_jornada import PerfilJornada, PerfilJornadaCadastro
 from .prestador import Prestador
 from .tomador import Tomador
 from .usuario import Usuario
 
 __all__ = [
     "AnalisePonto", "Base", "Contrato", "Convite", "Documento", "DocumentoCampo", "Lote", "Pagina",
-    "PerfilJornada", "Prestador", "Tomador", "Usuario",
+    "PerfilJornada", "PerfilJornadaCadastro", "Prestador", "Tomador", "Usuario",
 ]
