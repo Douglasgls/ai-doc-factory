@@ -220,6 +220,14 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
   }
 
   const allDoneSuccess = activeCount === 0 && issueCount === 0
+  const resumoAcessivel =
+    activeCount > 0
+      ? `${completedCount} de ${totalCount} em análise`
+      : allDoneSuccess
+        ? `${completedCount} de ${totalCount} concluídos`
+        : completedCount === 0
+          ? `${issueCount} de ${totalCount} ${issueCount === 1 ? 'com falha' : 'com falhas'}`
+          : `${completedCount} de ${totalCount}, ${issueCount} com erro`
 
   return (
     <div ref={containerRef} className="relative flex items-center gap-2.5">
@@ -227,6 +235,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
       <button
         type="button"
         onClick={onOpenUpload}
+        aria-label="Novo envio"
         className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold border transition-all cursor-pointer bg-[#f6eaf9] border-[#dfc0e9] text-[#6d1878] hover:bg-[#eedaf4] dark:bg-[#230e2a] dark:border-[#481d55] dark:text-[#df86f9] dark:hover:bg-[#2f1338]"
       >
         <Upload className="w-4 h-4" />
@@ -240,8 +249,10 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
         onClick={onToggleOpen}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
+        aria-label={`Andamento das análises: ${resumoAcessivel}`}
+        title={resumoAcessivel}
         data-testid="header-tracker-trigger"
-        className={`flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl text-sm border transition-all cursor-pointer select-none ${
+        className={`flex items-center gap-2.5 p-1.5 sm:pl-2 sm:pr-3 py-1.5 rounded-xl text-sm border transition-all cursor-pointer select-none ${
           activeCount > 0
             ? 'bg-[#f8eefc] border-[#dfb8ee] text-[#2d0a33] dark:bg-[#26112e] dark:border-[#522361] dark:text-white'
             : allDoneSuccess
@@ -269,7 +280,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
         </span>
 
         {/* Texto de resumo */}
-        <span className="text-xs sm:text-sm whitespace-nowrap">
+        <span className="hidden sm:inline text-sm whitespace-nowrap">
           {activeCount > 0 ? (
             <>
               <strong className="font-bold">{`${completedCount} de ${totalCount}`}</strong>{' '}
@@ -297,7 +308,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
 
         {isOpen ? (
           <ChevronUp
-            className={`w-4 h-4 ${
+            className={`hidden sm:block w-4 h-4 ${
               activeCount > 0
                 ? 'text-[#7e6388] dark:text-[#c59fd3]'
                 : allDoneSuccess
@@ -307,7 +318,7 @@ export const ProcessingTrackerPopover: React.FC<ProcessingTrackerPopoverProps> =
           />
         ) : (
           <ChevronDown
-            className={`w-4 h-4 ${
+            className={`hidden sm:block w-4 h-4 ${
               activeCount > 0
                 ? 'text-[#7e6388] dark:text-[#c59fd3]'
                 : allDoneSuccess

@@ -733,6 +733,7 @@ export function App() {
                 onOpenCategory={handleOpenCategory}
                 companies={companies}
                 empresaPropria={empresaPropria}
+                contratos={usuario?.nivel === 'prestador' && !empresaPropria ? contratosDoUsuario : []}
               />
             )}
           </>

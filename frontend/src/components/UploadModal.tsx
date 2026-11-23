@@ -70,6 +70,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   if (!isOpen) return null
 
   const contratoSelecionado = contratoId === '' ? null : Number(contratoId)
+  const contratoEscolhido = contratos.find((c) => c.id === contratoSelecionado)
+  const contratoSelecionadoTexto = contratoEscolhido ? contratoLabel(contratoEscolhido) : ''
   const faltaContrato = contratoObrigatorio && contratoSelecionado === null
   // Empresa solo (um único contrato, próprio): o contrato já vem selecionado e o seletor some.
   const empresaPropria =
@@ -203,7 +205,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#1a1120] border border-[#ebe5ef] dark:border-[#2f1e39] p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+      <div className="w-full max-w-xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-white dark:bg-[#1a1120] border border-[#ebe5ef] dark:border-[#2f1e39] p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
         <button
           onClick={handleClose}
           disabled={isUploading}
@@ -242,6 +244,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </option>
                 ))}
               </select>
+              {contratoSelecionadoTexto && (
+                <p className="mt-1.5 text-xs text-[#6e6378] dark:text-[#a093a8] break-words">{contratoSelecionadoTexto}</p>
+              )}
               {contratoObrigatorio && contratosCarregados && contratos.length === 0 && (
                 <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
                   Nenhum contrato ativo disponível para envio. Fale com a equipe da plataforma.

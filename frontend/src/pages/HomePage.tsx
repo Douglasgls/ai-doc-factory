@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
-import { ChevronRight, FileText } from 'lucide-react'
+import { FileText } from 'lucide-react'
 import ConformidadeEmpresaModal from '../components/ConformidadeEmpresaModal'
-import { formatarCnpjVisual } from '../components/conformidadeEmpresa'
+import ConformidadeEmpresasLista from '../components/ConformidadeEmpresasLista'
+import { tomadoresDoPrestador } from '../utils/contratos'
+import type { Contrato } from '../services/api'
 import { ManualReviewBanner } from '../components/ManualReviewBanner'
 import { MetricsCard } from '../components/MetricsCard'
 import { FilterBar, type FilterType } from '../components/FilterBar'
@@ -23,6 +25,8 @@ interface HomePageProps {
   companies: Company[]
   /** Empresa solo: títulos neutros, sem termos de terceirização. */
   empresaPropria?: boolean
+  /** Contratos do usuário da terceirizada; mostram o tomador sob o nome de cada empresa. Vazio para os demais. */
+  contratos?: Contrato[]
 }
 
 const HomePage: React.FC<HomePageProps> = ({
@@ -38,6 +42,7 @@ const HomePage: React.FC<HomePageProps> = ({
   onOpenCategory,
   companies,
   empresaPropria = false,
+  contratos = [],
 }) => {
   const [selecionada, setSelecionada] = useState<Company | null>(null)
   return (
@@ -127,85 +132,11 @@ const HomePage: React.FC<HomePageProps> = ({
             </span>
           </h2>
           
-          <div className="overflow-hidden rounded-2xl border border-[#ebe5ef] dark:border-[#2f1e39] bg-white dark:bg-[#1a1120] shadow-sm">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#fbf9fc] dark:bg-[#1f1325] border-b border-[#ebe5ef] dark:border-[#2f1e39]">
-                  <th className="px-6 py-4 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider">Empresa</th>
-                  <th className="px-6 py-4 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider">CNPJ</th>
-                  <th className="px-6 py-4 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-xs font-bold text-[#6e6378] dark:text-[#a093a8] uppercase tracking-wider text-right">Score</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">
-                {companies.map((company) => (
-                  <tr
-                    key={company.cnpj}
-                    onClick={() => setSelecionada(company)}
-                    className="hover:bg-[#fdfbfe] dark:hover:bg-[#251831] transition-colors cursor-pointer"
-                  >
-                    <td className="px-6 py-4">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelecionada(company)
-                        }}
-                        aria-label={`Ver como a nota de ${company.razao_social} foi calculada`}
-                        className="text-left text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc] hover:underline focus-visible:outline-2 focus-visible:outline-[#9333ea] rounded cursor-pointer"
-                      >
-                        {company.razao_social}
-                      </button>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {company.provisorio && (
-                          <span
-                            title="Esta nota ainda pode mudar: há documentos não analisados ou critérios sem nada para avaliar. Abra os detalhes para ver o motivo."
-                            className="text-[10px] text-[#9333ea] dark:text-[#d67bf3] font-medium italic cursor-help"
-                          >
-                            Score provisório
-                            <span className="sr-only">: esta nota ainda pode mudar; abra os detalhes para ver o motivo.</span>
-                          </span>
-                        )}
-                        <span className="text-[10px] text-[#6e6378] dark:text-[#a093a8] inline-flex items-center gap-0.5">
-                          Ver como a nota foi calculada <ChevronRight className="w-3 h-3" aria-hidden="true" />
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-[#6e6378] dark:text-[#a093a8] font-mono">
-                      {formatarCnpjVisual(company.cnpj)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        company.classificacao == null ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' :
-                        company.classificacao === 'Regular' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                        company.classificacao === 'Atenção' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
-                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                      }`}>
-                        {company.classificacao ?? 'Sem nota'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="w-16 h-2 bg-[#f3e8ff] dark:bg-[#2e1065] rounded-full overflow-hidden hidden sm:block">
-                          <div 
-                            className={`h-full rounded-full ${
-                              company.score >= 85 ? 'bg-emerald-500' :
-                              company.score >= 65 ? 'bg-amber-500' :
-                              'bg-red-500'
-                            }`}
-                            style={{ width: `${company.score}%` }}
-                          />
-                        </div>
-                        <span className="text-sm font-bold text-[#2d0a33] dark:text-[#f8f5fc]">
-                          {company.score == null ? '—' : `${company.score}%`}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ConformidadeEmpresasLista
+            companies={companies}
+            onSelect={setSelecionada}
+            tomadoresPorCnpj={(cnpj) => tomadoresDoPrestador(contratos, cnpj)}
+          />
         </section>
       )}
 

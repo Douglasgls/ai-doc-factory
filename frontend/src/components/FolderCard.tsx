@@ -37,8 +37,17 @@ export const FolderCard: React.FC<FolderCardProps> = ({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`${category.name}: ${category.count > 0 ? `${category.count} documento${category.count > 1 ? 's' : ''}` : 'sem documentos'}`}
       onClick={() => onClick(category)}
-      className="group relative cursor-pointer transition-all duration-200 select-none flex flex-col h-full w-full"
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault()
+          onClick(category)
+        }
+      }}
+      className="group relative cursor-pointer transition-all duration-200 select-none flex flex-col h-full w-full rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea]"
     >
       {/* Folder Tab (Aba superior da pasta) */}
       <div className="relative pl-0 w-full shrink-0">

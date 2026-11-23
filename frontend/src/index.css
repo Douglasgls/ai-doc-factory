@@ -256,3 +256,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .abrir-alteracao { animation: none; }
 }
+
+html {
+  /* O cabeçalho fixo não cobre o que recebe foco ou é rolado até a tela */
+  scroll-padding-top: 5rem;
+}
