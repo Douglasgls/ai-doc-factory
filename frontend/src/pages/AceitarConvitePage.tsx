@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { Loader2, UserPlus } from 'lucide-react'
 import { aceitarConvite, consultarConvite, ConviteInvalidoError, type ConvitePublico } from '../services/api'
-import { lerTokenDoFragmento, rotuloNivel } from '../utils/convites'
+import { lerTokenDoFragmento } from '../utils/convites'
+import { rotuloNivel } from '../utils/rotulos'
 import { ErroBox, INPUT, LABEL, BTN } from '../components/formUi'
 
 const SENHA_MIN = 8

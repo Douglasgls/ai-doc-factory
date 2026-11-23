@@ -13,6 +13,7 @@ import TerceirizadasPage from './pages/TerceirizadasPage'
 import EquipePage from './pages/EquipePage'
 import AceitarConvitePage from './pages/AceitarConvitePage'
 import { estaNaTelaDeConvite } from './utils/convites'
+import { descricaoMotivoRevisao, rotuloMotivoRevisao, rotuloTipoDocumental } from './utils/rotulos'
 import { FailedDocumentsBanner, type FailedDocument } from './components/FailedDocumentsBanner'
 import { LotesStatusPanel } from './components/LotesStatusPanel'
 import { trackedStatus } from './hooks/lotePollingLogic'
@@ -273,22 +274,20 @@ export function App() {
       const mappedReviewDocs: ReviewPendingDocument[] = reviewOrdenados.map((d) => {
         const campos = d.campos || {}
         const suggestedSlug = d.tipo_sugerido || 'desconhecido'
-        const suggestedLabel =
-          tipoNameMap.get(suggestedSlug) ||
-          (suggestedSlug === 'desconhecido' ? 'Desconhecido' : suggestedSlug)
+        const suggestedLabel = rotuloTipoDocumental(suggestedSlug, Object.fromEntries(tipoNameMap))
 
         return {
           id: String(d.id),
           loteId: d.lote_id,
           filename: d.nome_arquivo || `Documento #${d.id}`,
           issueType: 'confiança_baixa',
-          issueLabel: d.motivo || 'Revisão pendente',
+          issueLabel: rotuloMotivoRevisao(d.motivo),
           timeAgo: formatTimeAgo(d.processado_em),
           processedDate: formatDatePtBr(d.processado_em),
           processedTimestamp: d.processado_em ? new Date(d.processado_em).getTime() : undefined,
           pages: d.n_paginas ?? d.pagina_fim - d.pagina_ini + 1,
           startPage: d.pagina_ini,
-          issueDescription: d.motivo || 'Documento requer verificação manual.',
+          issueDescription: descricaoMotivoRevisao(d.motivo),
           suggestedType: suggestedSlug,
           suggestedTypeLabel: suggestedLabel,
           suggestedConfidence: d.confianca ?? 0,

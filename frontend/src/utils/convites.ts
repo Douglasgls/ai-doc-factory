@@ -80,27 +80,3 @@ export function extraEmailClasses(email: string, valido: boolean): string {
     ? '!border-emerald-500 dark:!border-emerald-500 focus:!ring-emerald-500'
     : '!border-rose-500 dark:!border-rose-500 focus:!ring-rose-500'
 }
-
-export const ESTADO_CONVITE: Record<string, string> = {
-  pendente: 'Pendente',
-  usado: 'Usado',
-  expirado: 'Expirado',
-}
-
-export const ESTADO_ACESSO: Record<string, string> = {
-  ativo: 'Com acesso',
-  convite_pendente: 'Convite enviado',
-  sem_acesso: 'Sem acesso',
-}
-
-export const NIVEL_ROTULO: Record<string, string> = {
-  plataforma: 'Plataforma',
-  tomador: 'Cliente',
-  prestador: 'Terceirizada',
-}
-
-/** Rótulo do nível; na empresa própria o prestador é "Empresa" (sem o termo de terceirização). */
-export const rotuloNivel = (nivel: string, empresaPropria = false): string =>
-  nivel === 'prestador' && empresaPropria ? 'Empresa' : (NIVEL_ROTULO[nivel] ?? nivel)
-
-export const PAPEL_ROTULO: Record<string, string> = { admin: 'Administrador', membro: 'Membro' }

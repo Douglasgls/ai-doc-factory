@@ -1,7 +1,8 @@
 import React from 'react'
 import { Loader2 } from 'lucide-react'
 import { type Contrato } from '../services/api'
-import { ESTADO_ACESSO, extraEmailClasses, validarEmail } from '../utils/convites'
+import { extraEmailClasses, validarEmail } from '../utils/convites'
+import { ESTADO_ACESSO, rotulo } from '../utils/rotulos'
 import type { ReenvioConvite } from '../hooks/useReenvioConvite'
 import { BTN, BTN_SEC, CARD, EmailStatusFeedback, ErroBox, INPUT, LABEL, Selo, TD } from './formUi'
 import { ConviteLink } from './ConviteLink'
@@ -16,7 +17,7 @@ export const ConviteGeradoCard: React.FC<{ reenvio: ReenvioConvite }> = ({ reenv
 
 export const AcessoSelo: React.FC<{ contrato: Contrato }> = ({ contrato }) => (
   <Selo tom={contrato.acesso_prestador === 'ativo' ? 'verde' : contrato.acesso_prestador === 'convite_pendente' ? 'ambar' : 'cinza'}>
-    {ESTADO_ACESSO[contrato.acesso_prestador ?? 'sem_acesso']}
+    {rotulo(ESTADO_ACESSO, contrato.acesso_prestador ?? 'sem_acesso')}
   </Selo>
 )
 
