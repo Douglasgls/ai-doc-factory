@@ -56,9 +56,10 @@ def obter_documento(documento_id: int, session: Session = Depends(get_session)):
 
 @router.get("/documentos/{documento_id}/analise-ponto", response_model=AnalisePontoOut,
             response_model_exclude_unset=True, dependencies=[Depends(documento_para_leitura)])
-def analise_ponto(documento_id: int, session: Session = Depends(get_session)):
+def analise_ponto(documento_id: int, usuario: UsuarioContexto = Depends(exigir_usuario),
+                  session: Session = Depends(get_session)):
     """Apoio à auditoria, não parecer jurídico; convenção coletiva e acordo de compensação podem alterar os limites."""
-    return actions.obter_analise_ponto(session, documento_id)
+    return actions.obter_analise_ponto(session, documento_id, usuario)
 
 
 @router.get("/documentos/{documento_id}/download", dependencies=[Depends(documento_para_leitura)])

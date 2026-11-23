@@ -13,6 +13,7 @@ import { apiService } from '../services/api'
 import { formatarData } from './auditoriaPonto'
 import {
   ORDEM_CRITERIOS,
+  ROTULO_CRITERIO_NOTA,
   corDaFaixa,
   formatarPercentual,
   formatarPontos,
@@ -20,6 +21,7 @@ import {
   gerarResumo,
   listaPt,
   motivosProvisorio,
+  quemCobraDocumentos,
   regraDaPendencia,
   rotuloCampo,
   rotuloEmFrase,
@@ -39,11 +41,7 @@ interface Props {
   empresaPropria?: boolean
 }
 
-const ROTULO_CRITERIO_CARD: Record<CriterioChave, string> = {
-  completude: 'Documentos enviados',
-  validade: 'Documentos válidos',
-  consistencia: 'Dados consistentes',
-}
+const ROTULO_CRITERIO_CARD = ROTULO_CRITERIO_NOTA
 
 const CONTAGEM_CURTA: Record<CriterioChave, (bons: number, total: number) => string> = {
   completude: (b, t) => `${b} de ${t} ${t === 1 ? 'obrigatório enviado' : 'obrigatórios enviados'}`,
@@ -147,6 +145,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
   const [rotulos, setRotulos] = useState<Rotulos>({})
   const [recarga, setRecarga] = useState(0)
   const [detalhesAbertos, setDetalhesAbertos] = useState(false)
+  const [nivelUsuario, setNivelUsuario] = useState<string | null>(null)
   const acordeaoRef = useRef<HTMLDivElement>(null)
 
   const carregar = useCallback(() => {
@@ -169,6 +168,20 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
       ativo = false
     }
   }, [cnpj, recarga])
+
+  // O nível de quem está vendo decide se o texto manda "solicitar" (plataforma e cliente) ou "enviar" os documentos.
+  useEffect(() => {
+    let ativo = true
+    apiService
+      .getMe()
+      .then((u) => {
+        if (ativo) setNivelUsuario(u.nivel)
+      })
+      .catch(() => undefined)
+    return () => {
+      ativo = false
+    }
+  }, [])
 
   useEffect(() => {
     let ativo = true
@@ -200,6 +213,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
     return () => clearTimeout(timer)
   }, [detalhesAbertos])
 
+  const cobra = quemCobraDocumentos(nivelUsuario, empresaPropria)
   const g = dados?.geral
   const faixa: CorFaixa = g?.score != null ? corDaFaixa(g.classificacao) : 'ambar'
   const motivos = useMemo(() => (g ? motivosProvisorio(g, rotulos) : []), [g, rotulos])
@@ -275,7 +289,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
           ausentes.length === 1
             ? 'Falta 1 documento obrigatório'
             : `Faltam ${ausentes.length} documentos obrigatórios`,
-        subtituloHero: `Envie os documentos abaixo para melhorar a nota.${sufixoEmAnalise}`,
+        subtituloHero: `${cobra ? 'Solicite' : 'Envie'} os documentos abaixo para melhorar a nota.${sufixoEmAnalise}`,
       }
     }
 
@@ -286,7 +300,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
           vencidos.length === 1
             ? '1 documento obrigatório está vencido'
             : `${vencidos.length} documentos obrigatórios estão vencidos`,
-        subtituloHero: `${empresaPropria ? 'Renove os documentos vencidos' : 'Solicite a renovação dos documentos vencidos'} e envie um novo lote.${sufixoEmAnalise}`,
+        subtituloHero: `${cobra ? 'Solicite a renovação dos documentos vencidos' : 'Renove os documentos vencidos'} e envie um novo lote.${sufixoEmAnalise}`,
       }
     }
 
@@ -323,7 +337,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
       tituloHero: `${g.descontos.length} ${g.descontos.length === 1 ? 'ponto exige atenção' : 'pontos exigem atenção'}`,
       subtituloHero: gerarResumo(dados, rotulos, empresaPropria),
     }
-  }, [ausentes.length, dados, divergentes.length, empresaPropria, g, qtdPendenciasRevisao, rotulos, vencidos.length])
+  }, [ausentes.length, cobra, dados, divergentes.length, empresaPropria, g, qtdPendenciasRevisao, rotulos, vencidos.length])
 
   // Texto natural para o banner amarelo ("Este resultado ainda pode mudar")
   const textoBannerProvisorio = useMemo(() => {
@@ -357,7 +371,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
         chave: 'ausentes',
         icone: 'arquivo',
         cor: 'vermelho',
-        titulo: empresaPropria ? 'Envie os documentos que faltam' : 'Solicite os documentos que faltam',
+        titulo: cobra ? 'Solicite os documentos que faltam' : 'Envie os documentos que faltam',
         descricao: `${capitalizarFrase(nomes)}.`,
         badge: `${ausentes.length} ${ausentes.length === 1 ? 'documento' : 'documentos'}`,
       })
@@ -400,7 +414,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
         chave: 'vencidos',
         icone: 'alerta',
         cor: 'vermelho',
-        titulo: empresaPropria ? 'Renove os documentos vencidos' : 'Solicite a renovação dos vencidos',
+        titulo: cobra ? 'Solicite a renovação dos vencidos' : 'Renove os documentos vencidos',
         descricao: `${capitalizarFrase(listaPt(detalhes))}.`,
         badge: `${vencidos.length} ${vencidos.length === 1 ? 'vencido' : 'vencidos'}`,
       })
@@ -419,7 +433,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
     }
 
     return lista
-  }, [ausentes, divergentes, empresaPropria, g, qtdPendenciasRevisao, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio, vencidos])
+  }, [ausentes, cobra, divergentes, empresaPropria, g, qtdPendenciasRevisao, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio, vencidos])
 
   // Fórmula e explicação do "Cálculo atual"
   const { textoCalculo, formulaCalculo } = useMemo(() => {
@@ -499,14 +513,26 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
       return { ordem: 3, statusLabel: 'Não enviado', statusTipo: 'ausente' }
     }
 
+    // A API diz quais tipos são obrigatórios (Completude aplicável); os demais entram só quando foram enviados.
     return entradas
       .map(([tipo, aval]) => ({
         tipo,
         nome: rotuloTipoDoc(tipo, rotulos),
+        obrigatorio: aval.criterios.completude.aplicavel,
         ...mapearStatus(tipo, aval),
       }))
-      .sort((a, b) => a.ordem - b.ordem)
+      .sort((a, b) => Number(b.obrigatorio) - Number(a.obrigatorio) || a.ordem - b.ordem)
   }, [dados, g, rotulos, tiposEmRevisaoConfirmada, tiposPendenteObrigatorio])
+
+  // A contagem de obrigatórios sai da mesma lista que aparece na tela, para as duas sempre baterem.
+  const obrigatorios = useMemo(() => documentosConsiderados.filter((d) => d.obrigatorio), [documentosConsiderados])
+  const opcionais = useMemo(() => documentosConsiderados.filter((d) => !d.obrigatorio), [documentosConsiderados])
+  const contagemObrigatorios = useMemo(() => {
+    const enviados = obrigatorios.filter((d) => d.statusTipo === 'enviado' || d.statusTipo === 'problema').length
+    const emAnalise = obrigatorios.filter((d) => d.statusTipo === 'analise').length
+    const base = `${enviados} de ${obrigatorios.length} ${obrigatorios.length === 1 ? 'obrigatório enviado' : 'obrigatórios enviados'}`
+    return emAnalise > 0 ? `${base} (${emAnalise} em análise)` : base
+  }, [obrigatorios])
 
   const cnpjFormatado = formatarCnpjVisual(cnpj)
   const subtituloEmpresa =
@@ -553,7 +579,7 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
         </div>
 
         {/* Corpo com scroll */}
-        <div className="px-6 sm:px-8 py-6 overflow-y-auto space-y-6">
+        <div className="px-6 sm:px-8 pt-6 pb-10 scroll-pb-10 overflow-y-auto space-y-6">
           {!dados && !erro && (
             <div className="flex items-center justify-center gap-3 py-14 text-sm text-[#6e6378] dark:text-[#b4a7c0]">
               <Clock className="w-5 h-5 text-[#9333ea] animate-spin" />
@@ -774,7 +800,9 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
 
                               <div className="text-xs font-semibold text-[#1e1324] dark:text-[#e5dff0] mt-1.5">
                                 {calculado
-                                  ? CONTAGEM_CURTA[chave](bons, total)
+                                  ? chave === 'completude'
+                                    ? contagemObrigatorios
+                                    : CONTAGEM_CURTA[chave](bons, total)
                                   : c.pendente
                                     ? 'Aguardando análise'
                                     : 'Não se aplica'}
@@ -806,46 +834,65 @@ const ConformidadeEmpresaModal: React.FC<Props> = ({ cnpj, razaoSocial, onClose,
                       </div>
                     </div>
 
-                    {/* Tabela de Documentos Considerados */}
+                    {/* Tabela de Documentos Considerados: obrigatórios primeiro, opcionais depois */}
                     <div className="rounded-xl border border-[#ece6f2] dark:border-[#2f203a] overflow-hidden">
-                      <div className="px-4 py-3 flex items-center justify-between bg-[#fbf9fc] dark:bg-[#1e1426] border-b border-[#ece6f2] dark:border-[#2f203a]">
+                      <div className="px-4 py-3 flex items-center justify-between gap-3 bg-[#fbf9fc] dark:bg-[#1e1426] border-b border-[#ece6f2] dark:border-[#2f203a]">
                         <span className="text-xs sm:text-[13px] font-bold text-[#1e1324] dark:text-white">
                           Documentos considerados
                         </span>
-                        <span className="text-xs font-medium text-[#6e6378] dark:text-[#b4a7c0]">
-                          {documentosConsiderados.length}{' '}
-                          {documentosConsiderados.length === 1 ? 'tipo' : 'tipos'}
+                        <span className="text-xs font-medium text-[#6e6378] dark:text-[#b4a7c0] text-right">
+                          {contagemObrigatorios}
                         </span>
                       </div>
 
-                      <div className="divide-y divide-[#f1ecf6] dark:divide-[#281b32]">
-                        {documentosConsiderados.map((doc) => (
-                          <div
-                            key={doc.tipo}
-                            className="px-4 py-3 flex items-center justify-between gap-3 text-xs sm:text-[13px]"
-                          >
-                            <span className="text-[#2d1f36] dark:text-[#e9e1f0] font-medium truncate">
-                              {doc.nome}
-                            </span>
-
-                            {doc.statusTipo === 'analise' ? (
-                              <span className="inline-flex items-center gap-1.5 font-semibold text-[#854d0e] dark:text-amber-300 shrink-0">
-                                <Clock className="w-3.5 h-3.5" />
-                                <span>{doc.statusLabel}</span>
-                              </span>
-                            ) : doc.statusTipo === 'enviado' ? (
-                              <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
-                                <Check className="w-3.5 h-3.5" />
-                                <span>{doc.statusLabel}</span>
-                              </span>
-                            ) : (
-                              <span className="font-semibold text-[#b91c1c] dark:text-[#f87171] shrink-0">
-                                {doc.statusLabel}
-                              </span>
+                      {[
+                        { chave: 'obrigatorios', titulo: 'Obrigatórios', itens: obrigatorios },
+                        { chave: 'opcionais', titulo: 'Opcionais', itens: opcionais },
+                      ]
+                        .filter((grupo) => grupo.itens.length > 0)
+                        .map((grupo) => (
+                          <div key={grupo.chave}>
+                            {opcionais.length > 0 && (
+                              <div className="px-4 py-2 text-xs font-semibold text-[#6e6378] dark:text-[#b4a7c0] bg-[#faf8fc] dark:bg-[#1a1122] border-b border-[#f1ecf6] dark:border-[#281b32]">
+                                {grupo.titulo}
+                                {grupo.chave === 'opcionais' && ' (só contam se existirem)'}
+                              </div>
                             )}
+                            <div className="divide-y divide-[#f1ecf6] dark:divide-[#281b32]">
+                              {grupo.itens.map((doc) => (
+                                <div
+                                  key={doc.tipo}
+                                  className="px-4 py-3 flex items-center justify-between gap-3 text-xs sm:text-[13px]"
+                                >
+                                  <span className="text-[#2d1f36] dark:text-[#e9e1f0] font-medium truncate">
+                                    {doc.nome}
+                                    {!doc.obrigatorio && (
+                                      <span className="ml-2 text-[11px] font-semibold text-[#6e6378] dark:text-[#b4a7c0]">
+                                        Opcional
+                                      </span>
+                                    )}
+                                  </span>
+
+                                  {doc.statusTipo === 'analise' ? (
+                                    <span className="inline-flex items-center gap-1.5 font-semibold text-[#854d0e] dark:text-amber-300 shrink-0">
+                                      <Clock className="w-3.5 h-3.5" />
+                                      <span>{doc.statusLabel}</span>
+                                    </span>
+                                  ) : doc.statusTipo === 'enviado' ? (
+                                    <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>{doc.statusLabel}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="font-semibold text-[#b91c1c] dark:text-[#f87171] shrink-0">
+                                      {doc.statusLabel}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         ))}
-                      </div>
                     </div>
 
                     {/* Nota de Rodapé Interna */}

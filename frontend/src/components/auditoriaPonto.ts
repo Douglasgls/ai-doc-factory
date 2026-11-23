@@ -64,9 +64,23 @@ export interface PontoBritanico {
 }
 
 export interface DiferencaGemini {
-  tipo: string
+  tipo: string | null
   data: string | null
+  /** Só nas diferenças de total declarado: total_horas ou horas_extras. */
+  campo?: string | null
+  /** Minutos que o sistema calculou; null quando o sistema não apontou essa divergência. */
+  minutos_codigo?: number | null
+  /** Minutos que a leitura da IA trouxe; null quando a IA não apontou. */
+  minutos_gemini?: number | null
+  /** so_codigo | so_gemini | minutos_diferentes */
   motivo: string
+}
+
+/** Um parâmetro do perfil de jornada gravado na análise (o que valia quando a folha foi analisada). */
+export interface ParametroPerfilGravado {
+  valor: number
+  base_legal?: string
+  vigencias?: { desde: string; valor: number; base_legal?: string }[] | null
 }
 
 export type DimensaoPonto = 'horas_extras' | 'intervalos' | 'descanso' | 'registro'
@@ -102,6 +116,12 @@ export interface AnalisePonto {
   /** Risco de 0 a 1, em que maior é pior; null = indeterminado. */
   score_geral?: number | null
   requer_revisao?: boolean
+  /** Perfil de jornada gravado na análise (identificador interno). */
+  perfil_nome?: string | null
+  /** Nome legível do perfil gravado; null quando quem vê não pode ver a convenção. */
+  perfil_nome_legivel?: string | null
+  /** Perfil efetivo usado na análise, como foi gravado. */
+  perfil?: Record<string, ParametroPerfilGravado> | null
 }
 
 /** Faixas do risco em % (maior = pior): abaixo de `medio` é baixo, de `medio` a `alto - 1` é médio, `alto` ou mais é alto. */
@@ -204,11 +224,80 @@ export const agruparDivergencias = (divergencias: Divergencia[]): Grupo[] => {
   })
 }
 
-/** Texto sob o risco geral: avisa que o score é parcial quando alguma dimensão não foi avaliada. */
+/** Texto sob o risco geral: avisa que o resultado é parcial quando alguma dimensão não foi avaliada. */
 export const textoBaseRisco = (scores: AnalisePonto['scores_dimensao']): string => {
   const total = ORDEM_DIMENSOES.length
   const naoAvaliadas = ORDEM_DIMENSOES.filter((d) => scores?.[d]?.nao_avaliada).length
   return naoAvaliadas === 0
     ? `É o maior risco entre as ${total} dimensões abaixo.`
     : `É o maior risco entre as ${total - naoAvaliadas} dimensões avaliadas; ${naoAvaliadas} não avaliada${naoAvaliadas > 1 ? 's' : ''}.`
+}
+
+// ---------------------------------------------------------------------------------------------
+// Regra de jornada aplicada
+// ---------------------------------------------------------------------------------------------
+/** Valor do parâmetro na data (a última vigência com `desde` <= data), ou o valor de base. */
+const valorNaData = (p: ParametroPerfilGravado | undefined, data: string | null): number | null => {
+  if (!p || typeof p.valor !== 'number') return null
+  let valor = p.valor
+  if (data) {
+    for (const v of [...(p.vigencias ?? [])].sort((a, b) => a.desde.localeCompare(b.desde))) {
+      if (v.desde <= data) valor = v.valor
+    }
+  }
+  return valor
+}
+
+const pct = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
+
+/** "8h por dia, até 2h extras, adicional de 50%", lido do perfil gravado na análise. Vazio sem perfil gravado. */
+export const resumoValoresDoPerfil = (analise: Pick<AnalisePonto, 'perfil' | 'marcacoes'>): string => {
+  const perfil = analise.perfil
+  if (!perfil) return ''
+  const datas = (analise.marcacoes ?? []).map((m) => m.data).sort()
+  const data = datas.length > 0 ? datas[datas.length - 1] : null
+  const jornada = valorNaData(perfil.jornada_diaria_min, data)
+  const extras = valorNaData(perfil.extras_max_dia_min, data)
+  const adicional = valorNaData(perfil.adicional_extra_pct, data)
+  const partes: string[] = []
+  if (jornada != null) partes.push(`${formatarMinutos(jornada)} por dia`)
+  if (extras != null) partes.push(`até ${formatarMinutos(extras)} extras`)
+  if (adicional != null) partes.push(`adicional de ${pct.format(adicional)}%`)
+  return partes.join(', ')
+}
+
+/** Frase do topo da auditoria. Sem o nome (quem não vê a convenção), mostra só os valores. */
+export const textoRegraAplicada = (analise: AnalisePonto): string | null => {
+  const valores = resumoValoresDoPerfil(analise)
+  const nome = analise.perfil_nome_legivel?.trim() || ''
+  if (nome && valores) return `Regra aplicada: ${nome} (${valores})`
+  if (nome) return `Regra aplicada: ${nome}`
+  if (valores) return `Regra aplicada: ${valores}`
+  return null
+}
+
+// ---------------------------------------------------------------------------------------------
+// Diferenças entre o cálculo do sistema e a leitura da IA
+// ---------------------------------------------------------------------------------------------
+const ROTULO_CAMPO_DECLARADO: Record<string, string> = {
+  total_horas: 'Total de horas declarado',
+  horas_extras: 'Horas extras declaradas',
+}
+
+/** Uma frase por valor que divergiu: o que era, o valor do sistema e o lido pela IA. */
+export const descreverDiferenca = (d: DiferencaGemini): string => {
+  const base = d.campo && ROTULO_CAMPO_DECLARADO[d.campo] ? ROTULO_CAMPO_DECLARADO[d.campo] : rotuloTipo(d.tipo ?? '')
+  const nome = d.data ? `${base} em ${formatarData(d.data)}` : base
+  const sistema = d.minutos_codigo != null ? formatarMinutos(d.minutos_codigo) : null
+  const ia = d.minutos_gemini != null ? formatarMinutos(d.minutos_gemini) : null
+  if (d.motivo === 'so_codigo') {
+    return `${nome}: o sistema apontou${sistema ? ` ${sistema}` : ''}, mas a leitura da IA não apontou. Vale o cálculo do sistema.`
+  }
+  if (d.motivo === 'so_gemini') {
+    return `${nome}: a leitura da IA apontou${ia ? ` ${ia}` : ''}, mas o sistema não confirmou. Vale o cálculo do sistema.`
+  }
+  if (sistema && ia) {
+    return `${nome}: o sistema calculou ${sistema} e a leitura da IA trouxe ${ia}. Vale o cálculo do sistema.`
+  }
+  return `${nome}: o cálculo do sistema e a leitura da IA não batem. Vale o cálculo do sistema.`
 }
