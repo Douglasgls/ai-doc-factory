@@ -147,7 +147,7 @@ def test_texto_do_documento_nao_fecha_o_bloco_nem_vira_instrucao():
 
 
 def test_prompt_de_extracao_define_prestadora_como_empregadora_inclusive_sem_tomadora():
-    assert prompts.VERSAO_PROMPT_EXTRACAO == "gemini-extracao-v3"
+    assert prompts.VERSAO_PROMPT_EXTRACAO == "gemini-extracao-v4"
     p = prompts.prompt_extracao("holerite", "texto")
     assert "EMPREGADORA do funcionário, terceirizada ou não" in p
     assert "único empregador e nenhuma tomadora" in p

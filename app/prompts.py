@@ -205,7 +205,7 @@ DIMENSOES_PONTO = tuple(PERGUNTAS_PONTO)
 
 
 # --- Gemini: extração de campos para o score de conformidade (Goal 7) e renomeação ---
-VERSAO_PROMPT_EXTRACAO = "gemini-extracao-v3"
+VERSAO_PROMPT_EXTRACAO = "gemini-extracao-v4"
 FIM_TEXTO = "</texto_documento>"
 INSTRUCOES_EXTRACAO = (
     "Você extrai campos de um documento trabalhista brasileiro (tipo informado abaixo). Use a imagem da "
@@ -218,7 +218,10 @@ INSTRUCOES_EXTRACAO = (
     "nenhuma tomadora; e false se prestadora e tomadora se confundem ou se não dá para saber qual CNPJ é do "
     "empregador. "
     "`nome` é o nome completo do funcionário (nunca da empresa); `nome_empresa` é o nome da empresa empregadora. "
-    "`data_exame` e `tipo_exame` só para ASO; `data_termino` e `tipo_prazo` só para contrato de trabalho; "
+    "`data_exame` e `tipo_exame` só para ASO; `data_termino`, `tipo_prazo`, `prazo_numero` e `prazo_unidade` só para contrato de trabalho; "
+    "em contrato por prazo determinado, `data_termino` é a data de fim só se estiver escrita, e `prazo_numero` "
+    "(inteiro) e `prazo_unidade` (dias ou meses) são a duração escrita, por exemplo 45 dias ou 3 meses, mesmo "
+    "quando a data de fim não aparece (nunca calcule datas); "
     "`competencia` para holerite, folha_ponto e folha_pagamento; `inicio_periodo` e `fim_periodo` quando "
     "folha_ponto não corresponder a um mês completo; `inicio_ferias` e `fim_ferias` para recibo_ferias "
     "(período efetivo de gozo, nunca período aquisitivo); `data_emissao` para atestado_medico. "
@@ -243,6 +246,7 @@ CAMPOS_EXTRACAO_TEXTO = (
     "fim_periodo",
 )
 TIPOS_PRAZO = ("determinado", "indeterminado", "nao_informado")
+PRAZO_UNIDADES = ("dias", "meses")
 TIPOS_EXAME = ("admissional", "periodico", "retorno_trabalho", "mudanca_risco", "demissional")
 SCHEMA_EXTRACAO = {
     "type": "OBJECT",
@@ -251,6 +255,8 @@ SCHEMA_EXTRACAO = {
         "distingue_prestadora": {"type": "BOOLEAN", "nullable": True},
         "tipo_prazo": {"type": "STRING", "enum": list(TIPOS_PRAZO), "nullable": True},
         "tipo_exame": {"type": "STRING", "enum": list(TIPOS_EXAME), "nullable": True},
+        "prazo_numero": {"type": "INTEGER", "nullable": True},
+        "prazo_unidade": {"type": "STRING", "enum": list(PRAZO_UNIDADES), "nullable": True},
     },
 }
 
