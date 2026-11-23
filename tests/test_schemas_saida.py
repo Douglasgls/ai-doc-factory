@@ -524,9 +524,17 @@ def test_convites(auth_real, sessao):
         _confere_resposta("POST /convites/{token}/aceitar", r, auth_actions.emitir_token(contexto), TokenOut,
                           ignorar=("access_token", "expira_em"))
         assert r.json()["access_token"] and r.json()["expira_em"]
+        email2 = f"outro-{email}"
+        r = client.post("/convites", headers=h, json={"email": email2, "nivel": "plataforma", "papel": "membro"})
+        assert r.status_code == 201
+        r = client.post(f"/convites/{r.json()['id']}/reemitir", headers=h)
+        assert r.status_code == 201
+        listado = next(c for c in conv_actions.listar(sessao, PLATAFORMA) if c["id"] == r.json()["id"])
+        crua = {k: listado[k] for k in ("id", "email", "nivel", "papel", "expira_em")} | {"token": r.json()["token"]}
+        _confere_resposta("POST /convites/{convite_id}/reemitir", r, crua, ConviteCriadoOut, status=201)
     finally:
         with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
-            conn.execute("DELETE FROM convite WHERE lower(email) = %s", (email,))
+            conn.execute("DELETE FROM convite WHERE lower(email) IN (%s, %s)", (email, f"outro-{email}"))
             conn.execute("DELETE FROM usuario WHERE lower(email) IN (%s, %s)", (email, f"plat-{email}"))
 
 
@@ -651,6 +659,7 @@ COMPARACOES = {
     "GET /convites": ["test_convites"],
     "GET /convites/{token}": ["test_convites"],
     "POST /convites/{token}/aceitar": ["test_convites"],
+    "POST /convites/{convite_id}/reemitir": ["test_convites"],
 }
 
 

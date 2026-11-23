@@ -34,6 +34,14 @@ def revogar_convite(convite_id: IdBanco, usuario: UsuarioContexto = Depends(exig
     return Response(status_code=204)
 
 
+@router.post("/convites/{convite_id}/reemitir", status_code=201, response_model=ConviteCriadoOut)
+def reemitir_convite(convite_id: IdBanco, usuario: UsuarioContexto = Depends(exigir_usuario),
+                     session: Session = Depends(get_session)):
+    """Revoga o convite não usado e cria outro igual (e-mail, nível, papel, organização), numa transação. Mesmo escopo
+    de DELETE /convites/{id}; mesma regra de quem pode convidar. O token novo vem só nesta resposta."""
+    return actions.reemitir(session, usuario, convite_id)
+
+
 @router_publico.get("/convites/{token}", response_model=ConvitePublicoOut)
 def consultar_convite(token: str, session: Session = Depends(get_session)):
     return actions.consultar(session, token)

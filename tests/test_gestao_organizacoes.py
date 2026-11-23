@@ -324,3 +324,110 @@ def test_membro_nao_revoga_convite_403(mundo, nivel):
 
 def test_revogar_sem_token_401(mundo):
     assert client.delete("/convites/1").status_code == 401
+
+
+# ---------- reemitir convite (novo link) ----------
+
+def _reemitir(h, id_):
+    return client.post(f"/convites/{id_}/reemitir", headers=h)
+
+
+def _vale(token) -> bool:
+    return client.get(f"/convites/{token}").status_code == 200
+
+
+def test_plataforma_reemite_e_o_link_antigo_deixa_de_valer(mundo):
+    antigo = _convidar(mundo.h, nivel="prestador", papel="admin", prestador_id=mundo.p1)
+    r = _reemitir(mundo.h, antigo["id"])
+    assert r.status_code == 201, r.text
+    novo = r.json()
+    assert novo["id"] != antigo["id"] and novo["token"] != antigo["token"]
+    assert (novo["email"], novo["papel"]) == (antigo["email"], "admin")
+    assert not _vale(antigo["token"]) and _vale(novo["token"])
+    assert _estado(mundo.h, antigo["id"]) == "expirado" and _estado(mundo.h, novo["id"]) == "pendente"
+    publico = client.get(f"/convites/{novo['token']}").json()
+    assert publico["email"] == antigo["email"] and publico["nivel"] == "prestador"
+    # o token novo vem só na resposta: a listagem não o mostra
+    assert novo["token"] not in client.get("/convites", headers=mundo.h).text
+    aceite = client.post(f"/convites/{novo['token']}/aceitar", json={"nome": "Fulano de Tal", "senha": "senha-falsa-longa"})
+    assert aceite.status_code == 200, aceite.text
+    pr = mundo.db.execute("SELECT prestador_id, papel FROM usuario WHERE lower(email) = %s", (antigo["email"],)).fetchone()
+    assert pr == (mundo.p1, "admin")
+
+
+def test_reemitir_pode_ser_repetido_e_so_o_ultimo_link_vale(mundo):
+    c1 = _convidar(mundo.h, tomador_id=mundo.t1)
+    c2 = _reemitir(mundo.h, c1["id"]).json()
+    c3 = _reemitir(mundo.h, c2["id"]).json()
+    assert [_vale(c["token"]) for c in (c1, c2, c3)] == [False, False, True]
+    pendentes = mundo.db.execute("SELECT count(*) FROM convite WHERE lower(email) = %s AND usado_em IS NULL "
+                                 "AND expira_em > now()", (c1["email"],)).fetchone()[0]
+    assert pendentes == 1
+
+
+def test_reemitir_convite_ja_revogado_gera_novo(mundo):
+    c1 = _convidar(mundo.h, tomador_id=mundo.t1)
+    assert client.delete(f"/convites/{c1['id']}", headers=mundo.h).status_code == 204
+    r = _reemitir(mundo.h, c1["id"])
+    assert r.status_code == 201 and _vale(r.json()["token"])
+
+
+def test_admin_do_tomador_reemite_o_proprio_convite_de_prestador(mundo):
+    h = _h_id(mundo.usuario(nivel="tomador", papel="admin", tomador_id=mundo.t1))
+    antigo = _convidar(h, nivel="prestador", papel="admin", prestador_id=mundo.p1)
+    r = _reemitir(h, antigo["id"])
+    assert r.status_code == 201, r.text
+    assert not _vale(antigo["token"]) and _vale(r.json()["token"])
+    # herda quem convidou: continua na lista do admin
+    assert _estado(h, r.json()["id"]) == "pendente"
+    criadores = mundo.db.execute("SELECT count(DISTINCT criado_por) FROM convite WHERE id = ANY(%s)",
+                                 ([antigo["id"], r.json()["id"]],)).fetchone()[0]
+    assert criadores == 1
+
+
+def test_reemitir_checa_a_permissao_de_convidar_e_nao_revoga_se_recusar(mundo):
+    h = _h_id(mundo.usuario(nivel="tomador", papel="admin", tomador_id=mundo.t1))
+    antigo = _convidar(h, nivel="prestador", papel="admin", prestador_id=mundo.p1)
+    mundo.db.execute("UPDATE contrato SET ativo = false WHERE id = %s", (mundo.c1,))  # o tomador perde o direito
+    r = _reemitir(h, antigo["id"])
+    assert r.status_code == 403 and "token" not in r.json()
+    assert _vale(antigo["token"]) and _estado(mundo.h, antigo["id"]) == "pendente"  # nada foi revogado
+
+
+def test_reemitir_fora_do_escopo_da_404_igual_a_inexistente(mundo):
+    admin1 = _h_id(mundo.usuario(nivel="tomador", papel="admin", tomador_id=mundo.t1))
+    admin2 = _h_id(mundo.usuario(nivel="tomador", papel="admin", tomador_id=mundo.t2))
+    da_plataforma = _convidar(mundo.h, tomador_id=mundo.t1)
+    do_outro = _convidar(admin2, tomador_id=mundo.t2)
+    esperado = _reemitir(admin1, INEXISTENTE)
+    assert esperado.status_code == 404
+    for alheio in (da_plataforma, do_outro):
+        r = _reemitir(admin1, alheio["id"])
+        assert r.status_code == 404 and r.json() == esperado.json()
+        assert _vale(alheio["token"]) and _estado(mundo.h, alheio["id"]) == "pendente"
+    assert _reemitir(mundo.h, INEXISTENTE).status_code == 404
+
+
+@pytest.mark.parametrize("nivel", ["tomador", "prestador"])
+def test_membro_nao_reemite_403_e_sem_token_401(mundo, nivel):
+    vinculo = {"tomador_id": mundo.t1} if nivel == "tomador" else {"prestador_id": mundo.p1}
+    convite = _convidar(mundo.h, nivel=nivel, **vinculo)
+    h = _h_id(mundo.usuario(nivel=nivel, papel="membro", **vinculo))
+    assert _reemitir(h, convite["id"]).status_code == 403
+    assert client.post(f"/convites/{convite['id']}/reemitir").status_code == 401
+    assert _vale(convite["token"])
+
+
+def test_reemitir_convite_usado_da_409(mundo):
+    convite = _convidar(mundo.h, tomador_id=mundo.t1)
+    assert client.post(f"/convites/{convite['token']}/aceitar",
+                       json={"nome": "Fulano de Tal", "senha": "senha-falsa-longa"}).status_code == 200
+    assert _reemitir(mundo.h, convite["id"]).status_code == 409
+
+
+def test_reemitir_falhando_na_criacao_preserva_o_convite_antigo(mundo):
+    convite = _convidar(mundo.h, tomador_id=mundo.t1)
+    mundo.db.execute("UPDATE tomador SET ativo = false WHERE id = %s", (mundo.t1,))
+    assert _reemitir(mundo.h, convite["id"]).status_code == 404  # organização desativada
+    mundo.db.execute("UPDATE tomador SET ativo = true WHERE id = %s", (mundo.t1,))
+    assert _vale(convite["token"])  # a transação voltou: o link antigo segue valendo

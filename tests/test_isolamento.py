@@ -53,6 +53,7 @@ EXPLICITAS = {  # rotas sem id de lote/documento no caminho, e as que têm mas n
     ("GET", "/convites"): "organizacao", ("GET", "/usuarios"): "organizacao", ("POST", "/terceirizadas"): "organizacao",
     ("PATCH", "/usuarios/{usuario_id}"): "organizacao", ("DELETE", "/convites/{convite_id}"): "organizacao",
     ("POST", "/convites"): "convidar",  # autenticada; quem convida quem é decidido por escopo.pode_convidar
+    ("POST", "/convites/{convite_id}/reemitir"): "convidar",  # idem: escopo do convite + pode_convidar
     ("GET", "/contratos"): "lista", ("GET", "/documentos"): "lista", ("GET", "/revisao"): "lista",
     ("GET", "/busca"): "lista", ("GET", "/lotes"): "lista", ("POST", "/lotes"): "upload",
 }
