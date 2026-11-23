@@ -217,7 +217,7 @@ export const rotuloTipoDocumental = (tipo: string | null | undefined, nomes: Rec
   !tipo ? 'Documento' : tipo === 'desconhecido' ? 'Tipo não identificado' : (nomes[tipo] ?? rotuloPadrao(tipo))
 
 /** Perfil de jornada padrão do sistema (ponto.PERFIL_PADRAO); perfis criados pelo usuário usam o fallback. */
-export const ROTULO_PERFIL_JORNADA: Record<string, string> = { clt_padrao: 'CLT padrão' }
+export const ROTULO_PERFIL_JORNADA: Record<string, string> = { clt_padrao: 'Padrão' }
 
 // ---------------------------------------------------------------------------------------------
 // Convites, acesso e equipe (movidos de utils/convites.ts)
