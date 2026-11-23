@@ -731,6 +731,8 @@ def resumir_contagens(apuracao, britanico):
     intra, inter = de("intervalo_intrajornada_insuficiente"), de("interjornada_insuficiente")
     sem_descanso = de("descanso_semanal_ausente")
     total_div = de("total_declarado_divergente")
+    espelho = de("espelho_incompleto")
+    ausentes_espelho = len(espelho[0].get("campos_ausentes") or []) if espelho else 0
     decl_inf = [k for k in ("total_horas_min", "horas_extras_min") if apuracao["declarados"][k] is not None]
     if britanico.get("sinal_risco") is None:
         sinal = "inconclusivo"
@@ -762,5 +764,9 @@ def resumir_contagens(apuracao, britanico):
             "totais_declarados_informados": bool(decl_inf),
             "totais_declarados_divergentes": len(total_div),
             "maior_diferenca_do_total_declarado_min": maior(total_div),
+            # Portaria MTP 671/2021, art. 84: campos obrigatórios que faltam no espelho eletrônico (0 = completo,
+            # não verificado ou não aplicável). A conta é do código; o Jev só situa a folha.
+            "campos_obrigatorios_do_espelho": len(CAMPOS_ESPELHO),
+            "campos_do_espelho_ausentes": ausentes_espelho,
         },
     }

@@ -90,8 +90,8 @@ def test_pipeline_espelho_incompleto_presente(doc, rede):  # noqa: F811
     assert props["tipo_registro"]["enum"] == list(ponto.TIPOS_REGISTRO)
     texto = pedido["contents"][0]["parts"][0]["text"]
     assert "nem espelho_incompleto" in texto and all(f"`{c}`" in texto for c in CAMPOS_ESPELHO)
-    # a divergência não muda as contagens enviadas ao Jev (o score não considera o espelho)
-    assert "espelho" not in str(rede["corpos"]["jev"][0]["state"]["contagens"])
+    # o espelho incompleto entra nas contagens da dimensão registro (só a contagem, não a divergência)
+    assert rede["corpos"]["jev"][0]["state"]["contagens"]["registro"]["campos_do_espelho_ausentes"] == 2
 
 
 # Um caso por teste: a resposta do Gemini fica em cache por prompt, e o prompt é o mesmo nos três.
@@ -107,3 +107,53 @@ def test_pipeline_sem_divergencia_de_espelho(doc, rede, extra, situacao, tipo): 
     corpo = _rodar(doc, rede, **extra)
     assert corpo["divergencias"] == []
     assert (corpo["totais"]["espelho"]["situacao"], corpo["totais"]["espelho"]["tipo_registro"]) == (situacao, tipo)
+    assert corpo["contagens"]["registro"]["campos_do_espelho_ausentes"] == 0
+
+
+# --- espelho_incompleto pesa na dimensão `registro` do score (jev-ponto-v6) ---
+
+def _contagem_registro(espelho):
+    from app.ponto import detectar_ponto_britanico, resumir_contagens
+    folha = [regular("2025-11-04")]
+    ap = apurar_folha(folha, PERFIL, espelho=espelho)
+    return resumir_contagens(ap, detectar_ponto_britanico(folha))["registro"]
+
+
+def test_contagens_registro_com_espelho_incompleto():
+    r = _contagem_registro({"tipo_registro": "espelho_eletronico",
+                            "campos": _com(trabalhador_cpf=False, duracao_jornadas=False, periodo=False)})
+    assert r["campos_do_espelho_ausentes"] == 3 and r["campos_obrigatorios_do_espelho"] == len(CAMPOS_ESPELHO)
+
+
+@pytest.mark.parametrize("espelho", [
+    None,
+    {"tipo_registro": "espelho_eletronico", "campos": TODOS},
+    {"tipo_registro": "espelho_eletronico", "campos": _com(trabalhador_cpf=None)},  # ilegível não é ausente
+    {"tipo_registro": "registro_manual_ou_mecanico", "campos": _com(trabalhador_cpf=False)},
+])
+def test_contagens_registro_sem_espelho_incompleto(espelho):
+    r = _contagem_registro(espelho)
+    assert r["campos_do_espelho_ausentes"] == 0 and r["campos_obrigatorios_do_espelho"] == len(CAMPOS_ESPELHO)
+
+
+def test_pergunta_registro_considera_espelho_e_versao_subiu():
+    q = prompts.PERGUNTAS_PONTO["registro"]
+    assert "campos_do_espelho_ausentes" in q["instructions"] and "contagens.registro" in q["instructions"]
+    assert len(q["criteria"]) == 4
+    assert "espelho" in q["criteria"][0] and all("espelho" in n for n in q["criteria"][1:])
+    assert prompts.VERSAO_PROMPT_PONTO_JEV == "jev-ponto-v6"
+
+
+def test_state_e_pergunta_da_dimensao_registro_vao_ao_jev(doc, rede):  # noqa: F811
+    corpo = _rodar(doc, rede, tipo_registro="espelho_eletronico",
+                   campos_espelho=_com(trabalhador_data_admissao=False, horario_jornada_contratual=False))
+    assert corpo["versao_prompt_jev"] == "jev-ponto-v6"
+    pedido = rede["corpos"]["jev"][0]
+    assert pedido["state"]["contagens"]["registro"]["campos_do_espelho_ausentes"] == 2
+    assert pedido["questions"]["registro"]["criteria"] == prompts.PERGUNTAS_PONTO["registro"]["criteria"]
+
+
+def test_score_geral_continua_sendo_o_maximo_das_dimensoes():
+    r = ponto.score_geral({"horas_extras": {"score": 0, "n_niveis": 4, "confianca": 0.9},
+                           "registro": {"score": 2, "n_niveis": 4, "confianca": 0.9}})
+    assert r["score_geral"] == pytest.approx(2 / 3)

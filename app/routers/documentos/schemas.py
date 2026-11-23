@@ -232,6 +232,8 @@ class ContagemRegistroOut(BaseModel):
     totais_declarados_informados: bool | None = None
     totais_declarados_divergentes: int | None = None
     maior_diferenca_do_total_declarado_min: float | None = None
+    campos_obrigatorios_do_espelho: int | None = None
+    campos_do_espelho_ausentes: int | None = None
 
 
 class ContagensPontoOut(BaseModel):
