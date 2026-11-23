@@ -1,11 +1,14 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowLeft, Pencil } from 'lucide-react'
 import type { ParametroEfetivo, PerfilJornadaDetalhe } from '../services/api'
 import { BTN_SEC, CARD, Selo } from './formUi'
 import { ReguaDoDia } from './ReguaDoDia'
+import { AbasTema, type AbaDef } from './AbasTema'
+import { idAba, idPainel } from '../utils/abas'
 import {
   GRUPOS,
   descreverVigencia,
+  diferencasPorGrupo,
   fraseValor,
   frasePorData,
   hojeIso,
@@ -37,6 +40,7 @@ const valoresBase = (efetivo: Record<string, ParametroEfetivo>): Record<string, 
   Object.fromEntries(Object.entries(efetivo).map(([k, v]) => [k, v.valor]))
 
 const SUAVE = 'text-[#6e6378] dark:text-[#a093a8]'
+const ABA_DIFERENCAS = 'diferencas'
 
 interface Props {
   detalhe: PerfilJornadaDetalhe
@@ -51,6 +55,17 @@ export const ConvencaoDetalhe: React.FC<Props> = ({ detalhe, padrao, escopo, onE
   const ehPadrao = detalhe.padrao
   const atual = useMemo(() => parametrosDoDia(valoresBase(detalhe.efetivo)), [detalhe])
   const ref = useMemo(() => parametrosDoDia(valoresBase(padrao.efetivo)), [padrao])
+  const difs = useMemo(() => diferencasPorGrupo(detalhe.efetivo, padrao.efetivo), [detalhe, padrao])
+  const [aba, setAba] = useState<string>(ehPadrao ? GRUPOS[0].id : ABA_DIFERENCAS)
+  const abas: AbaDef[] = [
+    ...(ehPadrao ? [] : [{ id: ABA_DIFERENCAS, rotulo: 'Diferenças do Padrão' }]),
+    ...GRUPOS.map((g) => ({ id: g.id, rotulo: g.titulo, contagem: ehPadrao ? 0 : difs[g.id] })),
+  ]
+  const grupo = GRUPOS.find((g) => g.id === aba)
+  const gruposComDiferenca = GRUPOS.map((g) => ({
+    ...g,
+    parametros: g.parametros.filter((p) => detalhe.efetivo[p.chave] && !valoresIguais(detalhe.efetivo[p.chave], padrao.efetivo[p.chave])),
+  })).filter((g) => g.parametros.length > 0)
 
   return (
     <div className="space-y-5">
@@ -92,19 +107,39 @@ export const ConvencaoDetalhe: React.FC<Props> = ({ detalhe, padrao, escopo, onE
         </div>
       )}
 
-      {GRUPOS.map((g) => (
-        <Grupo key={g.id} titulo={g.titulo} parametros={g.parametros} detalhe={detalhe} padrao={padrao} />
-      ))}
+      <div className="space-y-4">
+        <AbasTema base="detalhe" rotulo="Regras por tema" abas={abas} ativa={aba} onChange={setAba} />
+        <div
+          role="tabpanel"
+          id={idPainel('detalhe', aba)}
+          aria-labelledby={idAba('detalhe', aba)}
+          tabIndex={0}
+          className="space-y-4 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea]"
+        >
+          {aba === ABA_DIFERENCAS ? (
+            gruposComDiferenca.length === 0 ? (
+              <p className={`${CARD} p-5 text-sm text-[#2d0a33] dark:text-[#f8f5fc]`}>Esta convenção segue o Padrão em tudo.</p>
+            ) : (
+              gruposComDiferenca.map((g) => (
+                <Grupo key={g.id} id={`dif-${g.id}`} titulo={g.titulo} parametros={g.parametros} detalhe={detalhe} padrao={padrao} />
+              ))
+            )
+          ) : (
+            grupo && <Grupo id={`tema-${grupo.id}`} titulo={grupo.titulo} parametros={grupo.parametros} detalhe={detalhe} padrao={padrao} />
+          )}
+        </div>
+      </div>
     </div>
   )
 }
 
 const Grupo: React.FC<{
+  id: string
   titulo: string
   parametros: DefParametro[]
   detalhe: PerfilJornadaDetalhe
   padrao: PerfilJornadaDetalhe
-}> = ({ titulo, parametros, detalhe, padrao }) => {
+}> = ({ id, titulo, parametros, detalhe, padrao }) => {
   const ehPadrao = detalhe.padrao
   const linhas = parametros.filter((p) => detalhe.efetivo[p.chave])
   if (linhas.length === 0) return null
@@ -119,8 +154,8 @@ const Grupo: React.FC<{
   ]
 
   return (
-    <section className={`${CARD} p-5`} aria-labelledby={`grupo-${titulo}`}>
-      <h3 id={`grupo-${titulo}`} className="text-sm font-bold text-[#2d0a33] dark:text-white">
+    <section className={`${CARD} p-5`} aria-labelledby={`grupo-${id}`}>
+      <h3 id={`grupo-${id}`} className="text-sm font-bold text-[#2d0a33] dark:text-white">
         {titulo}
       </h3>
       <dl className="mt-2 divide-y divide-[#ebe5ef] dark:divide-[#2f1e39]">

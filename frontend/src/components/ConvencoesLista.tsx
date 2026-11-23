@@ -9,8 +9,14 @@ const SUAVE = 'text-[#6e6378] dark:text-[#a093a8]'
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`
 
-const textoContratos = (n: number, feminino = false): string =>
-  n === 0 ? 'sem contratos' : `${feminino ? 'usada' : 'usado'} em ${plural(n, 'contrato', 'contratos')}`
+const textoContratos = (n: number, solo: boolean): string =>
+  solo
+    ? n === 0
+      ? 'não está em uso'
+      : 'em uso na sua empresa'
+    : n === 0
+      ? 'sem contratos'
+      : `usada em ${plural(n, 'contrato', 'contratos')}`
 
 interface Props {
   perfis: PerfilJornadaResumo[]
@@ -21,9 +27,11 @@ interface Props {
   /** Convite do estado vazio: só aparece para quem pode cadastrar. */
   onNova?: () => void
   onVer: (perfil: string) => void
+  /** Empresa solo: os textos não falam em contrato nem lote. */
+  solo?: boolean
 }
 
-export const ConvencoesLista: React.FC<Props> = ({ perfis, detalhes, escopoDe, onNova, onVer }) => {
+export const ConvencoesLista: React.FC<Props> = ({ perfis, detalhes, escopoDe, onNova, onVer, solo = false }) => {
   const padrao = perfis.find((p) => p.padrao)
   const hoje = hojeIso()
   const demais = perfis
@@ -49,7 +57,8 @@ export const ConvencoesLista: React.FC<Props> = ({ perfis, detalhes, escopoDe, o
           <div className="min-w-0">
             <h2 className="text-base font-bold text-[#2d0a33] dark:text-white">Padrão</h2>
             <p className={`text-xs mt-0.5 ${SUAVE}`}>
-              CLT e Portaria MTP 671/2021 · referência, não editável · {plural(padrao.contratos, 'contrato', 'contratos')}
+              CLT e Portaria MTP 671/2021 · referência, não editável
+              {solo ? (padrao.contratos > 0 ? ' · em uso na sua empresa' : '') : ` · ${plural(padrao.contratos, 'contrato', 'contratos')}`}
             </p>
           </div>
           <button type="button" onClick={() => onVer(padrao.perfil)} className={BTN_SEC}>
@@ -86,7 +95,7 @@ export const ConvencoesLista: React.FC<Props> = ({ perfis, detalhes, escopoDe, o
                   </div>
                   {p.sindicato && <p className={`text-xs ${SUAVE}`}>{p.sindicato}</p>}
                   <p className={`text-xs tabular-nums ${SUAVE}`}>
-                    {diferentes(p)} · {textoContratos(p.contratos, true)}
+                    {diferentes(p)} · {textoContratos(p.contratos, solo)}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">

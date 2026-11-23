@@ -120,10 +120,10 @@ export const GRUPOS: GrupoParametros[] = [
     id: 'intervalos',
     titulo: 'Intervalos',
     parametros: [
-      def('intervalo_longo_acima_min', 'Intervalo longo: jornada acima de', 'duracao', (v) => `jornada acima de ${formatarDuracao(v)}`),
-      def('intervalo_longo_min', 'Intervalo longo: duração mínima', 'duracao', (v) => `${formatarDuracao(v)} de intervalo`),
-      def('intervalo_curto_acima_min', 'Intervalo curto: jornada acima de', 'duracao', (v) => `jornada acima de ${formatarDuracao(v)}`),
-      def('intervalo_curto_min', 'Intervalo curto: duração mínima', 'duracao', (v) => `${formatarDuracao(v)} de intervalo`),
+      def('intervalo_longo_acima_min', 'Jornada que pede o intervalo maior', 'duracao', (v) => `jornadas acima de ${formatarDuracao(v)}`),
+      def('intervalo_longo_min', 'Intervalo maior', 'duracao', (v) => `mínimo de ${formatarDuracao(v)}`),
+      def('intervalo_curto_acima_min', 'Jornada que pede o intervalo menor', 'duracao', (v) => `jornadas acima de ${formatarDuracao(v)}`),
+      def('intervalo_curto_min', 'Intervalo menor', 'duracao', (v) => `mínimo de ${formatarDuracao(v)}`),
       def('interjornada_min', 'Intervalo entre jornadas', 'duracao', (v) => `${formatarDuracao(v)} entre jornadas`),
     ],
   },
@@ -177,6 +177,22 @@ export function contarDiferencas(
 ): number {
   return Object.keys(efetivo).filter((k) => !valoresIguais(efetivo[k], padrao[k])).length
 }
+
+/** Quantas regras diferem do Padrão em cada tema (chave = id do grupo). Temas sem diferença ficam em 0. */
+export function diferencasPorGrupo(
+  efetivo: Record<string, ValorComVigencias>,
+  padrao: Record<string, ValorComVigencias>,
+): Record<string, number> {
+  return Object.fromEntries(
+    GRUPOS.map((g) => [
+      g.id,
+      g.parametros.filter((p) => efetivo[p.chave] && !valoresIguais(efetivo[p.chave], padrao[p.chave])).length,
+    ]),
+  )
+}
+
+/** Id do tema a que um parâmetro pertence; undefined se estiver fora do catálogo. */
+export const grupoDoParametro = (chave: string): string | undefined => GRUPOS.find((g) => g.parametros.some((p) => p.chave === chave))?.id
 
 /** "A partir de 01/05/2027: 7h por dia" */
 export function frasePorData(parametro: string, desde: string, valor: number): string {
