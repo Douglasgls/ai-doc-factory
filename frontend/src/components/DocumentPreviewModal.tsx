@@ -76,6 +76,8 @@ interface PreviewModalProps {
   onClose: () => void
   /** Empresa solo: os campos da empresa aparecem como "Empresa" e "CNPJ da empresa". */
   empresaPropria?: boolean
+  /** Número da página (do lote) em que o visualizador abre; sem ele, abre na primeira do documento. */
+  paginaInicial?: number
 }
 
 /** Dados lidos do documento, só para consulta: ao lado da imagem no computador, abaixo dela no celular. */
@@ -107,10 +109,12 @@ const DadosDoDocumento: React.FC<{ doc: DetailedDocument; empresaPropria: boolea
   )
 }
 
-export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose, empresaPropria = false }) => {
+export const DocumentPreviewModal: React.FC<PreviewModalProps> = ({ doc, onClose, empresaPropria = false, paginaInicial }) => {
   const startPage = doc.startPage ?? 1
   const totalPages = Math.max(1, doc.pages || 1)
-  const [pageOffset, setPageOffset] = useState(0)
+  const [pageOffset, setPageOffset] = useState(() =>
+    paginaInicial == null ? 0 : Math.min(Math.max(0, paginaInicial - startPage), totalPages - 1),
+  )
   const [downloading, setDownloading] = useState(false)
   const [isZoomEnabled, setIsZoomEnabled] = useState(false)
   const [isHoveringImage, setIsHoveringImage] = useState(false)
