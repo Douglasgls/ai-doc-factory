@@ -268,6 +268,7 @@ def test_lote_busca_documentos(cenario, sessao):
     sem_campos = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[4]}", DocumentoOut,
                           doc_actions.obter_documento(sessao, ids[4]))
     assert sem_campos["campos"] == {} and sem_campos["pessoa"] is None and sem_campos["confianca"] is None
+    assert sem_campos["modelo"] is None and sem_campos["versao_prompt"] is None and sem_campos["segunda_opiniao"] is None
 
     grupos = _confere("GET /documentos", "/documentos", DocumentosAgrupadosOut, doc_actions.listar_documentos(sessao, usuario=PLATAFORMA))
     assert grupos["grupos"]
@@ -275,6 +276,17 @@ def test_lote_busca_documentos(cenario, sessao):
              doc_actions.listar_documentos(sessao, None, True, usuario=PLATAFORMA))
     _confere("GET /documentos", "/documentos?falhou=false", DocumentosAgrupadosOut,
              doc_actions.listar_documentos(sessao, None, False, usuario=PLATAFORMA))
+
+
+def test_documento_expoe_modelo_prompt_e_segunda_opiniao(cenario, sessao):
+    _, ids = cenario
+    segunda = {"modelo": "gemini-x", "versao_prompt": "v2", "tipo": "aso", "status": "concordou"}
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
+        conn.execute("UPDATE documento SET modelo = 'jev-x', versao_prompt = 'v1', segunda_opiniao = %s WHERE id = %s",
+                     (psycopg.types.json.Jsonb(segunda), ids[0]))
+    doc = _confere("GET /documentos/{documento_id}", f"/documentos/{ids[0]}", DocumentoOut,
+                   doc_actions.obter_documento(sessao, ids[0]))
+    assert (doc["modelo"], doc["versao_prompt"], doc["segunda_opiniao"]) == ("jev-x", "v1", segunda)
 
 
 def test_revisao_e_correcoes(cenario, extracoes, sessao):

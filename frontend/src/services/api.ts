@@ -153,6 +153,9 @@ export interface DocumentoResponse {
   confianca: number | null;
   segmentacao_ambigua?: boolean;
   probabilidades?: Record<string, number> | null;
+  modelo?: string | null;
+  versao_prompt?: string | null;
+  segunda_opiniao?: { modelo?: string; versao_prompt?: string; tipo?: string | null; status?: string } | null;
   tipo_original?: string | null;
   contrato_id?: number | null;
   campos?: Record<string, string>;

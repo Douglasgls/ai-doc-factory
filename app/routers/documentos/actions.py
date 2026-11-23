@@ -62,7 +62,8 @@ def obter_documento(session: Session, documento_id: int) -> dict:
         select(Documento.id, Documento.lote_id, Documento.ordem, Documento.pagina_ini, Documento.pagina_fim,
                Documento.estado, Documento.tipo, Documento.confianca, Documento.segmentacao_ambigua,
                Documento.tipo_original, Documento.revisor, Documento.revisado_em, Documento.motivo_revisao,
-               Documento.probabilidades, Lote.nome_arquivo, Lote.criado_em, Documento.nome_padronizado)
+               Documento.probabilidades, Lote.nome_arquivo, Lote.criado_em, Documento.nome_padronizado,
+               Documento.modelo, Documento.versao_prompt, Documento.segunda_opiniao)
         .join(Lote, Lote.id == Documento.lote_id).where(Documento.id == documento_id)).first()
     if d is None:
         raise HTTPException(404, "documento não encontrado")
@@ -73,7 +74,7 @@ def obter_documento(session: Session, documento_id: int) -> dict:
         "id": d[0], "lote_id": d[1], "ordem": d[2], "pagina_ini": d[3], "pagina_fim": d[4], "estado": d[5],
         "tipo": d[6], "confianca": d[7], "segmentacao_ambigua": d[8],
         "tipo_original": d[9], "revisor": d[10], "revisado_em": d[11], "motivo_revisao": d[12],
-        "probabilidades": d[13],
+        "probabilidades": d[13], "modelo": d[17], "versao_prompt": d[18], "segunda_opiniao": d[19],
         **extras_documento(campos, d[14], d[3], d[4], d[15], d[16]),
         "paginas": [
             {"numero": n, "imagem_url": f"/lotes/{d[1]}/paginas/{n}/imagem", "texto": mascarar_documentos(t)}

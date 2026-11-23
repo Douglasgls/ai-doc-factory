@@ -322,6 +322,8 @@ def test_analise_de_ponto_usa_perfil_fora_do_escopo_do_admin(cena, rede):  # noq
             "SELECT perfil_nome, perfil, divergencias FROM analise_ponto WHERE documento_id = %s", (doc,)).fetchone()
         assert perfil_nome == cena.OY and perfil["extras_max_dia_min"] == {"valor": 300, "base_legal": "ACT de Y"}
         assert "horas_extras_acima_limite" not in [d["tipo"] for d in divs]  # 4h extras cabem nos 300 min do perfil de Y
-        assert client.get(f"/documentos/{doc}/analise-ponto", headers=cena.hx).status_code in (200, 404)
+        r = client.get(f"/documentos/{doc}/analise-ponto", headers=cena.hx)
+        assert r.status_code == 200 and r.json()["perfil_nome"] == cena.OY
+        assert r.json()["perfil"]["extras_max_dia_min"]["valor"] == 300
     finally:
         cena.mundo.db.execute("DELETE FROM lote WHERE id = %s", (lote,))
