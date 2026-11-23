@@ -47,6 +47,9 @@ class DocumentoOut(ExtrasDocumentoOut):
     revisado_em: DataHora | None
     motivo_revisao: str | None
     probabilidades: dict[str, float] | None
+    modelo: str | None = None  # modelo que classificou (Jev, regras...)
+    versao_prompt: str | None = None
+    segunda_opiniao: dict[str, Any] | None = None  # Gemini: {modelo, versao_prompt, tipo, status}
     paginas: list[PaginaOut]
 
 
