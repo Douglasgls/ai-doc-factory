@@ -1,5 +1,5 @@
-import React from 'react'
-import { Briefcase, Building2, Clock, FileText, LogOut, Moon, Sun, Users } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Briefcase, Building2, Clock, FileText, LogOut, Menu, Moon, Sun, Users, X, type LucideIcon } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
 import { EviDocsBrand } from './EviDocsBrand'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
@@ -41,6 +41,12 @@ interface HeaderProps {
   onNavigateCategory?: (slug: string) => void
 }
 
+type Aba = HeaderProps['activeTab']
+
+const CLASSE_ATIVA = 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
+const CLASSE_INATIVA =
+  'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+
 export const Header: React.FC<HeaderProps> = ({
   isDark,
   onToggleTheme,
@@ -70,124 +76,126 @@ export const Header: React.FC<HeaderProps> = ({
   onClearFinishedLotes = () => {},
   onNavigateCategory,
 }) => {
+  const itens: { tab: Aba; rotulo: string; icone: LucideIcon }[] = [
+    { tab: 'documentos', rotulo: empresaPropria ? 'Seus documentos' : 'Documentos', icone: FileText },
+    ...(showOrganizacoes ? [{ tab: 'organizacoes' as const, rotulo: 'Organizações', icone: Building2 }] : []),
+    ...(showPerfis ? [{ tab: 'perfis' as const, rotulo: 'Convenções coletivas', icone: Clock }] : []),
+    ...(showTerceirizadas ? [{ tab: 'terceirizadas' as const, rotulo: 'Terceirizadas', icone: Briefcase }] : []),
+    ...(showEquipe ? [{ tab: 'equipe' as const, rotulo: 'Equipe', icone: Users }] : []),
+  ]
+
+  const [menuAberto, setMenuAberto] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuBotaoRef = useRef<HTMLButtonElement>(null)
+  const primeiroItemRef = useRef<HTMLButtonElement>(null)
+
+  // Aberto, o foco vai para o primeiro item; Esc ou clique fora fecham.
+  useEffect(() => {
+    if (!menuAberto) return
+    primeiroItemRef.current?.focus()
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuAberto(false)
+        menuBotaoRef.current?.focus()
+      }
+    }
+    const aoClicarFora = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuAberto(false)
+    }
+    document.addEventListener('keydown', aoTeclar)
+    document.addEventListener('mousedown', aoClicarFora)
+    return () => {
+      document.removeEventListener('keydown', aoTeclar)
+      document.removeEventListener('mousedown', aoClicarFora)
+    }
+  }, [menuAberto])
+
+  // Se a janela passar de 640px com o menu aberto, ele fecha.
+  useEffect(() => {
+    const consulta = window.matchMedia('(min-width: 640px)')
+    const aoMudar = () => {
+      if (consulta.matches) setMenuAberto(false)
+    }
+    consulta.addEventListener('change', aoMudar)
+    return () => consulta.removeEventListener('change', aoMudar)
+  }, [])
+
+  const escolherItem = (tab: Aba) => {
+    setMenuAberto(false)
+    menuBotaoRef.current?.focus()
+    onSelectTab(tab)
+  }
+
   return (
     <header className="w-full border-b border-[#ece8ef] dark:border-[#27192f] bg-white/90 dark:bg-[#140c17]/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Logo & Navigation Tabs */}
-        <div className="flex items-center gap-6 sm:gap-8">
+        <div className="flex items-center gap-2 sm:gap-8 min-w-0">
           {/* Marca EviDocs */}
           <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
             <EviDocsBrand sizeClass="text-xl sm:text-2xl" />
           </div>
 
-          {/* Navigation Tabs */}
-          <nav className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onSelectTab('documentos')}
-              title={empresaPropria ? 'Seus documentos' : 'Documentos'}
-              aria-label={empresaPropria ? 'Seus documentos' : 'Documentos'}
-              className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
-                activeTab === 'documentos'
-                  ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
-                  : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span className="hidden lg:inline">{empresaPropria ? 'Seus documentos' : 'Documentos'}</span>
-            </button>
-
-            {showOrganizacoes && (
+          {/* Navigation Tabs: a partir de 640px ficam na barra; abaixo disso, no menu */}
+          <nav aria-label="Principal" className="hidden sm:flex items-center gap-2">
+            {itens.map((item) => (
               <button
+                key={item.tab}
                 type="button"
-                onClick={() => onSelectTab('organizacoes')}
-                title="Organizações"
-                aria-label="Organizações"
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
-                  activeTab === 'organizacoes'
-                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
-                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
+                onClick={() => onSelectTab(item.tab)}
+                title={item.rotulo}
+                aria-label={item.rotulo}
+                aria-current={activeTab === item.tab ? 'page' : undefined}
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea] ${
+                  activeTab === item.tab ? CLASSE_ATIVA : CLASSE_INATIVA
                 }`}
               >
-                <Building2 className="w-4 h-4" />
-                <span className="hidden lg:inline">Organizações</span>
+                <item.icone className="w-4 h-4" aria-hidden="true" />
+                <span className="hidden lg:inline">{item.rotulo}</span>
               </button>
-            )}
-
-            {showPerfis && (
-              <button
-                type="button"
-                onClick={() => onSelectTab('perfis')}
-                title="Convenções coletivas"
-                aria-label="Convenções coletivas"
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
-                  activeTab === 'perfis'
-                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
-                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
-                }`}
-              >
-                <Clock className="w-4 h-4" />
-                <span className="hidden lg:inline">Convenções</span>
-              </button>
-            )}
-
-            {showTerceirizadas && (
-              <button
-                type="button"
-                onClick={() => onSelectTab('terceirizadas')}
-                title="Terceirizadas"
-                aria-label="Terceirizadas"
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
-                  activeTab === 'terceirizadas'
-                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
-                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
-                }`}
-              >
-                <Briefcase className="w-4 h-4" />
-                <span className="hidden lg:inline">Terceirizadas</span>
-              </button>
-            )}
-
-            {showEquipe && (
-              <button
-                type="button"
-                onClick={() => onSelectTab('equipe')}
-                title="Equipe"
-                aria-label="Equipe"
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 ${
-                  activeTab === 'equipe'
-                    ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
-                    : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span className="hidden lg:inline">Equipe</span>
-              </button>
-            )}
-
-            {/* 
-            <button
-              type="button"
-              onClick={onOpenReview}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                activeTab === 'revisao'
-                  ? 'bg-[#f4e8f7] text-[#5c1363] dark:bg-[#34163d] dark:text-[#f38df9]'
-                  : 'text-[#6e6378] dark:text-[#a093a8] hover:text-[#2d0a33] dark:hover:text-white'
-              }`}
-            >
-              <span>Revisão manual</span>
-              {reviewCount > 0 && (
-                <span className="bg-[#e11d48] text-white text-[11px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-xs">
-                  {reviewCount}
-                </span>
-              )}
-            </button>
-            */}
+            ))}
           </nav>
+
+          {/* Menu do celular */}
+          <div ref={menuRef} className="relative sm:hidden">
+            <button
+              ref={menuBotaoRef}
+              type="button"
+              onClick={() => setMenuAberto((aberto) => !aberto)}
+              aria-expanded={menuAberto}
+              aria-controls="menu-navegacao"
+              aria-label="Menu"
+              className="p-2 rounded-lg text-[#6e6378] dark:text-[#d3c7dc] hover:bg-[#f3edf6] dark:hover:bg-[#281831] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea]"
+            >
+              {menuAberto ? <X className="w-5 h-5" aria-hidden="true" /> : <Menu className="w-5 h-5" aria-hidden="true" />}
+            </button>
+            {menuAberto && (
+              <div
+                id="menu-navegacao"
+                className="absolute left-0 top-[calc(100%+8px)] w-56 rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
+              >
+                {itens.map((item, indice) => (
+                  <button
+                    key={item.tab}
+                    ref={indice === 0 ? primeiroItemRef : undefined}
+                    type="button"
+                    onClick={() => escolherItem(item.tab)}
+                    aria-current={activeTab === item.tab ? 'page' : undefined}
+                    className={`w-full px-3 py-2.5 rounded-lg text-sm font-medium text-left inline-flex items-center gap-2.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#9333ea] ${
+                      activeTab === item.tab ? CLASSE_ATIVA : CLASSE_INATIVA
+                    }`}
+                  >
+                    <item.icone className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    {item.rotulo}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Search, Upload Button & Theme Toggle */}
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
           {/* Global Search Input (Comentado temporariamente)
           <div className="relative hidden md:block">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8f8298] dark:text-[#83748d]" />

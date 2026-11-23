@@ -45,3 +45,12 @@ export function contratoLabel(
 export function contratoUtilizavel(c: Contrato): boolean {
   return c.ativo && c.tomador_ativo && c.prestador_ativo
 }
+
+/** Nomes dos tomadores dos contratos (de terceirização, ativos) de uma empresa prestadora, sem repetição. */
+export function tomadoresDoPrestador(contratos: Contrato[], cnpj: string): string[] {
+  const alvo = cnpj.replace(/\D/g, '')
+  const nomes = contratos
+    .filter((c) => c.ativo && c.proprio !== true && c.prestador_cnpj.replace(/\D/g, '') === alvo)
+    .map((c) => c.tomador_nome)
+  return [...new Set(nomes)]
+}
