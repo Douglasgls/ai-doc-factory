@@ -7,7 +7,7 @@ Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O q
 ## Stack e serviços
 
 - Python 3.12, FastAPI, PostgreSQL 16, Redis 7, Docker Compose.
-- Leitura de páginas e OCR (`app/ocr.py`): híbrida por página com **PyMuPDF (`fitz`)** e **Tesseract (`-l por`)** a 150 dpi (4 páginas em paralelo). Se a página do PDF possui camada de texto digital nativo válida e não é coberta por imagem escaneada (`>= 65%` da área da página), o PyMuPDF extrai o texto diretamente ordenado por blocos visuais (`pagina.texto_nativo = true`), sem acionar o Tesseract; caso contrário, roda o Tesseract sobre o PNG rasterizado (`pagina.texto_nativo = false`).
+- Leitura de páginas e OCR (`app/ocr.py`): híbrida por página com **PyMuPDF (`fitz`)** e **Tesseract (`-l por`)** a 150 dpi. O PyMuPDF percorre o PDF em sequência numa única thread (pois `fitz` não é thread-safe), gera o PNG da página para visualização/fallback e, quando a página possui camada de texto digital nativo válida e não é coberta por imagem escaneada (`>= 65%` da área), extrai o texto diretamente ordenado por blocos visuais (`pagina.texto_nativo = true`), sem acionar o Tesseract; as páginas escaneadas (`pagina.texto_nativo = false`) rodam o Tesseract em paralelo (até 4 páginas por worker).
 - Classificação: Jev (via OpenRouter) como classificador principal e Gemini como segunda opinião quando a confiança é baixa; ou um classificador por palavras-chave (`CLASSIFICADOR=regras`) que roda sem rede.
 - Arquivos do lote em volume Docker (`/data/lote_<id>/`).
 
@@ -49,7 +49,7 @@ POST /lotes (PDF/imagem)
 
 **Roteamento** (`app/roteamento.py`): confiança >= `CONF_AUTO` e sem desacordo entre modelos vira `classificado`; entre `CONF_MIN` e `CONF_AUTO`, ou com desacordo, ou segmentação ambígua, vira `em_revisao` com o tipo sugerido; abaixo de `CONF_MIN`, `em_revisao` com tipo `desconhecido`.
 
-**Extração de campos em cascata** (`app/extracao.py`): quando a 1ª página do documento tem `texto_nativo = true`, o `worker_extracao` chama o Gemini enviando **apenas o texto** (`imagem_png=None`, zero tokens de imagem). Em seguida, `campos_essenciais_completos()` confere se os campos obrigatórios e dígitos verificadores (CNPJ/CPF) esperados para aquele tipo documental vieram completos; se faltar qualquer campo essencial (por exemplo, data ou parecer em carimbo de imagem dentro de um PDF digital), o worker faz fallback automático chamando o Gemini com a imagem PNG da 1ª página e mescla os resultados. Páginas escaneadas (`texto_nativo = false`) enviam texto + imagem PNG diretamente na primeira chamada.
+**Extração de campos em cascata** (`app/extracao.py`): quando a 1ª página do documento tem `texto_nativo = true`, o `worker_extracao` chama primeiro o Gemini enviando **apenas o texto** (`imagem_png=None`, zero tokens de imagem) com prompt dedicado (`VERSAO_PROMPT_EXTRACAO_TEXTO`, hoje `gemini-extracao-texto-v1`). Em seguida, `campos_essenciais_completos()` confere se os campos obrigatórios e dígitos verificadores (CNPJ/CPF) esperados para aquele tipo documental vieram preenchidos; se faltar algum campo essencial (por exemplo, data ou parecer em carimbo de imagem dentro de um PDF digital), o worker faz fallback automático chamando o Gemini com texto + imagem PNG da 1ª página (`VERSAO_PROMPT_EXTRACAO`, hoje `gemini-extracao-v4`) e mescla os resultados dando prevalência à resposta com imagem (preservando CNPJ/CPF válidos do texto nativo caso a leitura por imagem venha inválida). Páginas escaneadas (`texto_nativo = false`) enviam texto + imagem PNG diretamente na primeira chamada. **Limite da trava:** `campos_essenciais_completos()` detecta campos ausentes ou CNPJ/CPF com dígito verificador inválido, não valores trocados que tenham formato válido (por exemplo, confundir CNPJ da tomadora com o da prestadora quando só o layout visual os separa).
 
 **Tipos documentais** (`app/config.py`): `aso`, `folha_pagamento`, `folha_ponto`, `holerite`, `recibo_ferias`, `atestado_medico`, `contrato_trabalho`.
 
@@ -144,7 +144,7 @@ Com `CLASSIFICADOR=regras` no `.env`, a classificação usa palavras-chave (`app
 
 ### 6. Mudança de schema e dados locais
 
-O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo. As seguintes: `0002_modelo_acesso` (tabelas `tomador`, `prestador`, `contrato` e `usuario`), `0003_nome_padronizado_documento`, `0004_lote_contrato` (liga o lote a um contrato, `lote.contrato_id`, opcional; troca a unicidade global de `lote.sha256` por unicidade por contrato; **remove a tabela `empresa` e `lote.empresa_id`, com todos os seus dados**; o downgrade recria `empresa` vazia e falha, sem apagar lote, se o mesmo arquivo existir em mais de um lote), `0005_convite`, `0006_perfil_jornada_vigencia` (vigência por data, EC 141/2026), `0007_contrato_perfil_jornada`, `0008_documento_campos_autor`, `0009_contrato_proprio`, `0010_perfil_jornada_cadastro` (nome, sindicato e vigência da convenção) e `0011_perfil_jornada_escopo` (convenção geral ou de um prestador). O filtro de dados por organização (`app/escopo.py`) usa `lote.contrato_id`: ver "Autenticação".
+O schema é versionado com Alembic (`alembic.ini`, `migrations/versions/`). As migrações são SQL cru via `op.execute`/`exec_driver_sql` (o app usa `psycopg` direto, sem models SQLAlchemy). O serviço `migrate` do Compose roda `alembic upgrade head` a cada `docker compose up`, antes da `api` e dos workers; `migrations/env.py` lê `DATABASE_URL` do ambiente. A revisão `0001_baseline` reproduz o schema inicial completo. As seguintes: `0002_modelo_acesso` (tabelas `tomador`, `prestador`, `contrato` e `usuario`), `0003_nome_padronizado_documento`, `0004_lote_contrato` (liga o lote a um contrato, `lote.contrato_id`, opcional; troca a unicidade global de `lote.sha256` por unicidade por contrato; **remove a tabela `empresa` e `lote.empresa_id`, com todos os seus dados**; o downgrade recria `empresa` vazia e falha, sem apagar lote, se o mesmo arquivo existir em mais de um lote), `0005_convite`, `0006_perfil_jornada_vigencia` (vigência por data, EC 141/2026), `0007_contrato_perfil_jornada`, `0008_documento_campos_autor`, `0009_contrato_proprio`, `0010_perfil_jornada_cadastro` (nome, sindicato e vigência da convenção), `0011_perfil_jornada_escopo` (convenção geral ou de um prestador) e `0012_pagina_texto_nativo` (`pagina.texto_nativo`, flag de página digital nativa extraída via PyMuPDF). O filtro de dados por organização (`app/escopo.py`) usa `lote.contrato_id`: ver "Autenticação".
 
 Criar uma nova revisão (dentro do container, o arquivo gerado fica na imagem; copie-o para `migrations/versions/` do repositório):
 
@@ -174,7 +174,7 @@ O `-v` apaga os volumes: **todos os dados locais** (lotes, documentos, arquivos 
 
 ### 7. Reextrair campos de documentos antigos
 
-Quando o prompt de extração muda (`VERSAO_PROMPT_EXTRACAO`, hoje `gemini-extracao-v4`) ou um documento ficou sem extração, `scripts/reextrair_campos.py` reenfileira em `extrair_campos` os documentos em `classificado`, `revisado` ou `em_revisao` cuja extração gravada é de outra versão ou não existe. **Por padrão é dry-run: só lista, não enfileira nada.**
+Quando o prompt de extração muda (`VERSAO_PROMPT_EXTRACAO`, hoje `gemini-extracao-v4`, ou `VERSAO_PROMPT_EXTRACAO_TEXTO`, hoje `gemini-extracao-texto-v1`) ou um documento ficou sem extração, `scripts/reextrair_campos.py` reenfileira em `extrair_campos` os documentos em `classificado`, `revisado` ou `em_revisao` cuja extração gravada não é de uma das versões atuais ou não existe. **Por padrão é dry-run: só lista, não enfileira nada.**
 
 ```bash
 docker compose exec api python scripts/reextrair_campos.py                 # dry-run: lista e conta por versão
@@ -183,7 +183,7 @@ docker compose exec api python scripts/reextrair_campos.py --lote 3 --limite 10 
 ```
 
 - `--lote ID` limita a um lote; `--limite N` limita a quantidade; `--executar` enfileira.
-- **Cada documento enfileirado com `--executar` gasta uma chamada ao Gemini** (extração com a imagem da primeira página). Use `--lote` e `--limite` para controlar o custo.
+- **Cada documento enfileirado com `--executar` gasta uma chamada ao Gemini** (ou duas, se um documento com texto nativo acionar o fallback com imagem). Use `--lote` e `--limite` para controlar o custo.
 - Só substitui campos de origem `gemini:*`. Campo corrigido por humano (origem `humano`) nunca é apagado.
 - Saída de um dry-run real (2026-11-23, `--lote 1` de um banco de teste com 5 documentos sem extração):
 
@@ -534,16 +534,22 @@ Sobre os 77 documentos previstos (a precisão compara com o tipo real do documen
 
 Tempo desde o envio dos lotes até todos `concluido`: treino (20 lotes, `CLASSIFICADOR=regras`) 120,1 s; ajuste (5 lotes, Jev) 27,7 s; teste (10 lotes, Jev) 55,3 s. Em todos os conjuntos, a `dlq` ficou vazia e nenhum documento ficou em `erro`. Foram 116 registros `llm_chamada` (ajuste e teste juntos, 115 do Jev e 1 do Gemini).
 
-### Leitura híbrida (PyMuPDF) e economia de tokens na extração (`gemini-3.5-flash`)
+### Leitura híbrida (PyMuPDF) e tokens de imagem na extração (`gemini-3.5-flash`)
 
-Medição real nos logs de `app.llm` (`usageMetadata.promptTokensDetails` devolvido pela API do Gemini) comparando documentos processados no mesmo ambiente:
+Observação nos logs de `app.llm` (`usageMetadata.promptTokensDetails` devolvido pela API do Gemini) em testes locais com documentos sintéticos no mesmo ambiente:
 
 | Origem da 1ª página | Modo de leitura (`app/ocr.py`) | Modo de extração (`app/extracao.py`) | Tokens de Imagem (`IMAGE`) | Tokens de Texto (`TEXT`) | Total de entrada (`promptTokenCount`) |
 |---|---|---|---|---|---|
-| **PDF digital nativo** (`texto_nativo = true`, holerite) | PyMuPDF direto (Tesseract pulado) | Só texto (`imagem_png=None`, 9 campos extraídos sem fallback) | **0** | 825 | **825** |
-| **PDF escaneado** (`texto_nativo = false`, ASO / holerite / ponto) | Tesseract OCR (`150 dpi`) | Texto + imagem PNG da 1ª página | **1.092** | 760 a 2.327 | **1.852 a 3.419** |
+| **PDF digital nativo** (`texto_nativo = true`, holerite de 1 página) | PyMuPDF direto (Tesseract pulado) | Só texto (`imagem_png=None`, `gemini-extracao-texto-v1`, sem fallback) | **0** | 825 | **825** |
+| **PDF escaneado** (`texto_nativo = false`, ASO / holerite / ponto de 1 página) | Tesseract OCR (`150 dpi`) | Texto + imagem PNG da 1ª página (`gemini-extracao-v4`) | **1.092** | 760 a 2.327 | **1.852 a 3.419** |
 
-Em páginas digitais nativas de 1 página a 150 dpi, a extração somente por texto elimina os **1.092 tokens fixos de imagem** por documento (redução de **55,5%** no `promptTokenCount` em comparação ao documento de tamanho equivalente com imagem), mantendo o fallback automático com PNG caso algum campo essencial do tipo documental não venha preenchido.
+Em um PDF digital nativo de 1 página a 150 dpi que conclui sem fallback, o envio somente de texto elimina os **1.092 tokens fixos de imagem (`IMAGE`)** na entrada do Gemini e evita rodar o Tesseract naquela página.
+
+**Ressalvas importantes:**
+
+- **Custo financeiro líquido não medido:** a tabela compara documentos de tipos/tamanhos diferentes apenas para mostrar o custo fixo de imagem (1.092 tokens) e não representa uma redução percentual fixa de custo. Quando o fallback dispara, o worker faz **duas chamadas** ao Gemini (só texto + texto com imagem), e no modelo usado os tokens de raciocínio (`thoughtsTokenCount`, cobrados como saída) têm peso relevante no custo total. A economia líquida depende da fração de PDFs nativos e da taxa de fallback em documentos reais de RH, ainda não medidas.
+- **Acurácia e trava de fallback:** não houve medição controlada comparando a extração do mesmo documento com e sem imagem. A trava `campos_essenciais_completos()` aciona fallback quando falta algum campo obrigatório ou quando CNPJ/CPF tem dígito verificador inválido; ela não detecta um valor errado com formato válido (por exemplo, trocar o CNPJ da prestadora pelo da tomadora).
+- **Efeito em outras etapas não remedido:** para páginas digitais nativas, trocar a leitura de Poppler + Tesseract para PyMuPDF (`get_text("blocks")`) e a rasterização para MuPDF também altera a entrada da segmentação (Goal 1), da classificação (Goal 3) e da busca full-text. As métricas das seções anteriores do README não foram repetidas após esta mudança.
 
 ### Rodada de 23/11/2026
 
@@ -606,3 +612,4 @@ As notas **não são comparáveis estatisticamente**: é uma execução por roda
 - Documentos reais; páginas giradas; efeito da anonimização sobre o Jev (sem comparação com e sem).
 - Os valores das seções anteriores à rodada de 23/11/2026 valem para os conjuntos sintéticos descritos e não foram repetidos nela; a rodada tem só 10 documentos.
 - Usabilidade com pessoas reais, acerto da extração fora dos 2 lotes do teste manual e o efeito de convenções coletivas reais no score de ponto.
+- Taxa de fallback, economia financeira líquida e efeito da leitura nativa via PyMuPDF (e rasterização via MuPDF) sobre segmentação, classificação e extração em lotes reais de RH.

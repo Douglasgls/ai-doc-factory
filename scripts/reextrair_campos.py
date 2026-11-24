@@ -1,13 +1,14 @@
 """Reenfileira a extração de campos (Goal 7) dos documentos com extração de versão antiga ou sem extração.
 
-ATENÇÃO: cada documento enfileirado com --executar gasta UMA chamada ao Gemini (extração com imagem da primeira
-página). Use --lote e --limite para controlar o custo. Sem --executar só lista (dry-run) e não enfileira nada.
+ATENÇÃO: cada documento enfileirado com --executar gasta uma chamada ao Gemini (ou duas, se um documento
+com texto nativo precisar de fallback com imagem). Use --lote e --limite para controlar o custo. Sem
+--executar só lista (dry-run) e não enfileira nada.
 
 Uso: python scripts/reextrair_campos.py [--lote ID] [--limite N] [--executar]
 
 Entra: documento em estado classificado, revisado ou em_revisao (os mesmos que o handler de extração aceita)
 cuja extração gravada (documento_campos.origem = 'gemini:<versao>') seja de uma versão diferente de
-VERSAO_PROMPT_EXTRACAO, ou que não tenha nenhuma extração do Gemini. Documento cuja extração anterior não
+VERSAO_PROMPT_EXTRACAO e VERSAO_PROMPT_EXTRACAO_TEXTO, ou que não tenha nenhuma extração do Gemini. Documento cuja extração anterior não
 devolveu nenhum campo também conta como sem extração. O handler só substitui campos de origem gemini:*;
 correção humana (origem 'humano') nunca é apagada. Usa a fila e o payload de sempre: {"documento_id": id}.
 """
@@ -25,9 +26,12 @@ ESTADOS = ("classificado", "revisado", "em_revisao")
 SEM_EXTRACAO = "(sem extração)"
 
 
-def selecionar(conn, versao_atual: str, lote: int | None = None, limite: int | None = None) -> list[tuple[int, str]]:
+def selecionar(
+    conn, versao_atual: str | tuple[str, ...], lote: int | None = None, limite: int | None = None
+) -> list[tuple[int, str]]:
     """[(documento_id, versao_gravada ou SEM_EXTRACAO)] dos documentos que precisam de nova extração, por id."""
-    atual = f"gemini:{versao_atual}"
+    versoes = (versao_atual,) if isinstance(versao_atual, str) else tuple(versao_atual)
+    atuais = {f"gemini:{v}" for v in versoes}
     linhas = conn.execute(
         "SELECT d.id, "
         "  (SELECT string_agg(DISTINCT c.origem, ',' ORDER BY c.origem) FROM documento_campos c "
@@ -40,7 +44,7 @@ def selecionar(conn, versao_atual: str, lote: int | None = None, limite: int | N
     for doc_id, origens in linhas:
         if origens is None:
             saida.append((doc_id, SEM_EXTRACAO))
-        elif origens != atual:
+        elif origens not in atuais:
             saida.append((doc_id, ",".join(o.removeprefix("gemini:") for o in origens.split(","))))
     return saida[:limite] if limite else saida
 
@@ -55,9 +59,10 @@ def main(argv=None) -> int:
     if args.limite is not None and args.limite <= 0:
         ap.error("--limite deve ser positivo")
 
+    versoes_atuais = (prompts.VERSAO_PROMPT_EXTRACAO, prompts.VERSAO_PROMPT_EXTRACAO_TEXTO)
     with psycopg.connect(config.DATABASE_URL) as conn:
-        docs = selecionar(conn, prompts.VERSAO_PROMPT_EXTRACAO, args.lote, args.limite)
-    print(f"versão atual do prompt: {prompts.VERSAO_PROMPT_EXTRACAO}")
+        docs = selecionar(conn, versoes_atuais, args.lote, args.limite)
+    print(f"versões atuais do prompt: {', '.join(versoes_atuais)}")
     print(f"documentos a reextrair: {len(docs)}")
     for versao, n in sorted(Counter(v for _, v in docs).items()):
         print(f"  {versao}: {n}")

@@ -5,9 +5,10 @@ pendência no cálculo. O texto do documento é dado não confiável: só o que 
 (lista fixa de campos, formatos e enum) chega ao banco.
 
 Quando a primeira página do documento possui camada de texto digital nativo (`pagina.texto_nativo = True`,
-extraída diretamente pelo PyMuPDF sem OCR), a extração tenta primeiro enviar apenas o texto (`imagem_png=None`).
-Se faltar qualquer campo essencial esperado para aquele tipo documental (ex.: dado presente apenas em carimbo
-ou figura dentro do PDF), faz fallback automático enviando a imagem PNG da primeira página ao Gemini Vision.
+extraída diretamente pelo PyMuPDF sem OCR), a extração tenta primeiro enviar apenas o texto (`imagem_png=None`)
+com o prompt específico `VERSAO_PROMPT_EXTRACAO_TEXTO`. Se faltar qualquer campo essencial esperado para aquele
+tipo documental (ex.: dado presente apenas em carimbo ou figura dentro do PDF), faz fallback automático
+enviando a imagem PNG da primeira página com o prompt `VERSAO_PROMPT_EXTRACAO`.
 """
 import calendar
 import logging
@@ -123,7 +124,6 @@ def limpar(dados) -> dict[str, str]:
     return saida
 
 
-# Melhorar essa função e remover essa cadeia de ifs
 def campos_essenciais_completos(tipo: str | None, campos: dict[str, str]) -> bool:
     """Verifica se a extração somente por texto preencheu todos os campos críticos e matematicamente
     válidos esperados para o tipo documental. Se faltar qualquer um, o fallback com imagem PNG é acionado."""
@@ -160,13 +160,13 @@ def campos_essenciais_completos(tipo: str | None, campos: dict[str, str]) -> boo
 
 
 def _mesclar_campos_fallback(campos_texto: dict[str, str], campos_imagem: dict[str, str]) -> dict[str, str]:
-    """Combina os campos extraídos do texto digital com os do fallback por imagem.
-    Campos presentes no texto digital prevalecem, exceto se CNPJ ou CPF do texto for inválido e o da imagem for válido."""
-    mesclado = {**campos_imagem, **campos_texto}
-    if validar_cnpj(campos_texto.get("cnpj_prestadora")) is None and validar_cnpj(campos_imagem.get("cnpj_prestadora")):
-        mesclado["cnpj_prestadora"] = campos_imagem["cnpj_prestadora"]
-    if validar_cpf(campos_texto.get("cpf")) is None and validar_cpf(campos_imagem.get("cpf")):
-        mesclado["cpf"] = campos_imagem["cpf"]
+    """Combina os campos da tentativa só-texto com os do fallback com imagem (que enxergou texto + imagem).
+    A resposta com imagem prevalece, exceto se CNPJ/CPF dela vier inválido e o do texto nativo for válido."""
+    mesclado = {**campos_texto, **campos_imagem}
+    if validar_cnpj(campos_imagem.get("cnpj_prestadora")) is None and validar_cnpj(campos_texto.get("cnpj_prestadora")):
+        mesclado["cnpj_prestadora"] = campos_texto["cnpj_prestadora"]
+    if validar_cpf(campos_imagem.get("cpf")) is None and validar_cpf(campos_texto.get("cpf")):
+        mesclado["cpf"] = campos_texto["cpf"]
     return mesclado
 
 
@@ -218,27 +218,27 @@ def extrair_campos(payload: dict) -> None:
             (doc_id,),
         ).fetchall()
     lote_id, pagina_ini, tipo_doc = doc[1], doc[2], doc[3]
-    textos = [t for t, _ in paginas]
+    texto_doc = montar_texto([t for t, _ in paginas], TEXTO_MAX)
     primeira_nativa = bool(paginas and paginas[0][1])
 
-    modo_str = "PDF NATIVO (só texto, sem PNG)" if primeira_nativa else "PDF ESCANEADO (texto + imagem PNG)"
-    msg_ini = f"[EXTRACAO-DEBUG] lote_{lote_id} | doc #{doc_id} ({tipo_doc}) -> Iniciando extração em modo: {modo_str}"
-    print(msg_ini, flush=True)
-    log.info(msg_ini)
-
+    log.info(
+        "lote_%s | doc #%s (%s) -> extração iniciada em modo %s",
+        lote_id, doc_id, tipo_doc, "nativo (só texto)" if primeira_nativa else "escaneado (texto + imagem)",
+    )
     publicar_evento(
         lote_id,
         "extracao",
         f"Extraindo dados cadastrais (Gemini) do documento #{doc_id}...",
         documento_id=doc_id,
     )
-    prompt = prompts.prompt_extracao(tipo_doc, montar_texto(textos, TEXTO_MAX))
+    prompt_img = prompts.prompt_extracao(tipo_doc, texto_doc, com_imagem=True)
+    prompt_texto = prompts.prompt_extracao(tipo_doc, texto_doc, com_imagem=False) if primeira_nativa else None
     try:
         if primeira_nativa:
-            dados = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, None))
+            dados = llm.texto_gemini(llm.gemini_gerar(prompt_texto, prompts.SCHEMA_EXTRACAO, None))
         else:
             dados = llm.texto_gemini(
-                llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, pagina_ini))
+                llm.gemini_gerar(prompt_img, prompts.SCHEMA_EXTRACAO, _imagem_primeira_pagina(lote_id, pagina_ini))
             )
     except llm.LLMErro as e:
         log.warning("extração do documento %s indisponível: %s", doc_id, e)
@@ -272,30 +272,29 @@ def extrair_campos(payload: dict) -> None:
         return
 
     campos_limpos = limpar(dados)
+    usou_imagem = not primeira_nativa
     if primeira_nativa and not campos_essenciais_completos(tipo_doc, campos_limpos):
-        msg_fb = (
-            f"[EXTRACAO-DEBUG] lote_{lote_id} | doc #{doc_id} ({tipo_doc}) -> "
-            f"Campos essenciais incompletos só com texto ({list(campos_limpos.keys())}); acionando FALLBACK COM IMAGEM PNG!"
+        log.info(
+            "lote_%s | doc #%s (%s) -> campos essenciais incompletos só com texto (%s); acionando fallback com imagem",
+            lote_id, doc_id, tipo_doc, sorted(campos_limpos),
         )
-        print(msg_fb, flush=True)
-        log.info(msg_fb)
         imagem_fallback = _imagem_primeira_pagina(lote_id, pagina_ini)
         if imagem_fallback is not None:
             try:
-                dados_img = llm.texto_gemini(llm.gemini_gerar(prompt, prompts.SCHEMA_EXTRACAO, imagem_fallback))
+                dados_img = llm.texto_gemini(llm.gemini_gerar(prompt_img, prompts.SCHEMA_EXTRACAO, imagem_fallback))
                 if isinstance(dados_img, dict):
                     campos_limpos = _mesclar_campos_fallback(campos_limpos, limpar(dados_img))
+                    usou_imagem = True
             except llm.LLMErro as e:
                 log.warning("fallback com imagem na extração do documento %s falhou: %s", doc_id, e)
     elif primeira_nativa:
-        msg_ok = (
-            f"[EXTRACAO-DEBUG] lote_{lote_id} | doc #{doc_id} ({tipo_doc}) -> "
-            f"Extração NATIVA (só texto) 100% completa sem enviar PNG! Campos: {list(campos_limpos.keys())}"
+        log.info(
+            "lote_%s | doc #%s (%s) -> extração nativa só texto completa (%d campos, sem PNG)",
+            lote_id, doc_id, tipo_doc, len(campos_limpos),
         )
-        print(msg_ok, flush=True)
-        log.info(msg_ok)
 
-    origem = f"gemini:{prompts.VERSAO_PROMPT_EXTRACAO}"
+    versao_usada = prompts.VERSAO_PROMPT_EXTRACAO if usou_imagem else prompts.VERSAO_PROMPT_EXTRACAO_TEXTO
+    origem = f"gemini:{versao_usada}"
     with psycopg.connect(config.DATABASE_URL) as conn:  # substitui o que o Gemini gravou antes; correção humana fica
         if cancelado(lote_id):
             concluir_tarefa_pos(lote_id, f"extracao:{doc_id}")

@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -26,6 +27,9 @@ PARALELISMO = 4
 # Uma thread OpenMP por processo do Tesseract: o paralelismo fica no pool acima (e nas réplicas do worker).
 # Sem isso cada tesseract abre uma thread por núcleo e réplicas x pool x núcleos disputam a CPU.
 _ENV_TESSERACT = {**os.environ, "OMP_THREAD_LIMIT": "1"}
+# PyMuPDF (fitz) não é thread-safe segundo a documentação oficial: toda leitura/rasterização com fitz
+# roda serializada numa única thread; apenas o subprocesso do Tesseract roda em paralelo no ThreadPoolExecutor.
+_FITZ_LOCK = threading.Lock()
 
 MIN_PALAVRAS_NATIVAS = 5
 MIN_CHARS_NATIVOS = 40
@@ -99,27 +103,64 @@ def processar_pagina(pdf: Path, pasta: Path, numero: int) -> tuple[int, str, boo
     Se a página for um PDF digital nativo válido, extrai o texto via PyMuPDF sem rodar o Tesseract."""
     png = pasta / f"pag_{numero:04d}.png"
     if fitz is not None:
-        with fitz.open(str(pdf)) as doc:
-            page = doc[numero - 1]
-            page.get_pixmap(dpi=DPI, alpha=False).save(str(png))
-            texto_nativo = extrair_texto_nativo_pagina(page)
+        with _FITZ_LOCK:
+            with fitz.open(str(pdf)) as doc:
+                page = doc[numero - 1]
+                page.get_pixmap(dpi=DPI, alpha=False).save(str(png))
+                texto_nativo = extrair_texto_nativo_pagina(page)
         if texto_nativo is not None:
-            msg = f"[OCR-DEBUG] {pasta.name} | página {numero:04d} -> PDF NATIVO DIGITAL (PyMuPDF, {len(texto_nativo)} chars, Tesseract PULADO)"
-            print(msg, flush=True)
-            log.info(msg)
+            log.info("%s | página %04d -> texto nativo (PyMuPDF, %d chars; Tesseract pulado)",
+                     pasta.name, numero, len(texto_nativo))
             return numero, texto_nativo, True
         texto_ocr = ocr_imagem(png)
-        msg = f"[OCR-DEBUG] {pasta.name} | página {numero:04d} -> PDF ESCANEADO / IMAGEM (Tesseract OCR, {len(texto_ocr)} chars)"
-        print(msg, flush=True)
-        log.info(msg)
+        log.info("%s | página %04d -> escaneada/imagem (Tesseract OCR, %d chars)",
+                 pasta.name, numero, len(texto_ocr))
         return numero, texto_ocr, False
     imagem = convert_from_path(str(pdf), dpi=DPI, first_page=numero, last_page=numero)[0]
     imagem.save(png)
     texto_ocr = ocr_imagem(png)
-    msg = f"[OCR-DEBUG] {pasta.name} | página {numero:04d} -> PDF ESCANEADO / FALLBACK (Tesseract OCR, {len(texto_ocr)} chars)"
-    print(msg, flush=True)
-    log.info(msg)
+    log.info("%s | página %04d -> fallback Poppler + Tesseract OCR (%d chars)",
+             pasta.name, numero, len(texto_ocr))
     return numero, texto_ocr, False
+
+
+def _processar_paginas_lote(pdf: Path, pasta: Path, total: int) -> list[tuple[int, str, bool]]:
+    """Extrai páginas nativas e gera PNGs em sequência numa única thread (PyMuPDF não é thread-safe),
+    deixando apenas o Tesseract OCR das páginas escaneadas rodando em paralelo no ThreadPoolExecutor."""
+    if fitz is None:
+        with ThreadPoolExecutor(PARALELISMO) as pool:
+            return list(pool.map(lambda n: processar_pagina(pdf, pasta, n), range(1, total + 1)))
+
+    resultados: dict[int, tuple[int, str, bool]] = {}
+    pendentes_ocr: list[tuple[int, Path]] = []
+
+    with _FITZ_LOCK:
+        with fitz.open(str(pdf)) as doc:
+            for numero in range(1, total + 1):
+                png = pasta / f"pag_{numero:04d}.png"
+                page = doc[numero - 1]
+                page.get_pixmap(dpi=DPI, alpha=False).save(str(png))
+                texto_nativo = extrair_texto_nativo_pagina(page)
+                if texto_nativo is not None:
+                    log.info("%s | página %04d -> texto nativo (PyMuPDF, %d chars; Tesseract pulado)",
+                             pasta.name, numero, len(texto_nativo))
+                    resultados[numero] = (numero, texto_nativo, True)
+                else:
+                    pendentes_ocr.append((numero, png))
+
+    if pendentes_ocr:
+        def _rodar_ocr(item: tuple[int, Path]) -> tuple[int, str, bool]:
+            numero, png = item
+            texto_ocr = ocr_imagem(png)
+            log.info("%s | página %04d -> escaneada/imagem (Tesseract OCR, %d chars)",
+                     pasta.name, numero, len(texto_ocr))
+            return numero, texto_ocr, False
+
+        with ThreadPoolExecutor(PARALELISMO) as pool:
+            for res in pool.map(_rodar_ocr, pendentes_ocr):
+                resultados[res[0]] = res
+
+    return [resultados[n] for n in range(1, total + 1)]
 
 
 def _estado(lote_id: int, estado: str) -> None:
@@ -241,8 +282,7 @@ def processar_lote(payload: dict) -> None:
     try:
         total = pdfinfo_from_path(str(pdf))["Pages"]
         publicar_evento(lote_id, "ocr", f"Lendo OCR de {total} página(s)...", pagina_atual=0, total_paginas=total)
-        with ThreadPoolExecutor(PARALELISMO) as pool:
-            resultados = list(pool.map(lambda n: processar_pagina(pdf, pasta, n), range(1, total + 1)))
+        resultados = _processar_paginas_lote(pdf, pasta, total)
         if lote_cancelado(lote_id):
             _marcar_lote_cancelado_db(lote_id)
             limpar_tarefas_pos(lote_id)
@@ -277,7 +317,7 @@ def processar_lote(payload: dict) -> None:
         return
     if not ids:
         return
-    log.info("lote %s: OCR de %s páginas e segmentação em %s documentos", lote_id, total, len(ids))
+    log.info("lote %s: leitura de %s páginas e segmentação em %s documentos", lote_id, total, len(ids))
     registrar_tarefas_pos(lote_id, [f"extracao:{id_}" for id_ in ids])
     publicar_evento(
         lote_id,
