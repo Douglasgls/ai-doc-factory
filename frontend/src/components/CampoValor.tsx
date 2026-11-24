@@ -1,7 +1,7 @@
 import React from 'react'
 import { INPUT } from './formUi'
-import type { TipoCampo } from '../utils/convencoes'
-import type { Entrada } from '../utils/convencaoForm'
+import type { TipoCampo } from '../utils/perfisJornadaFormato'
+import type { Entrada } from '../utils/perfilJornadaForm'
 
 const PEQUENO = `${INPUT} !w-20 text-right tabular-nums`
 

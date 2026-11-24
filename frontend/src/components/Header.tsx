@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Briefcase, Building2, Clock, FileText, LogOut, Menu, Moon, Sun, Users, X, type LucideIcon } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
 import { EviDocsBrand } from './EviDocsBrand'
+import { BuscaDocumentos } from './BuscaDocumentos'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
-// import { Search } from 'lucide-react'
 
 interface HeaderProps {
   isDark: boolean
@@ -100,7 +100,11 @@ export const Header: React.FC<HeaderProps> = ({
       }
     }
     const aoClicarFora = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuAberto(false)
+      const alvo = e.target as Element
+      // O visualizador aberto por um resultado da busca fica fora do menu, mas não deve fechá-lo.
+      if (menuRef.current && !menuRef.current.contains(alvo) && !alvo.closest?.('[data-visualizador-busca]')) {
+        setMenuAberto(false)
+      }
     }
     document.addEventListener('keydown', aoTeclar)
     document.addEventListener('mousedown', aoClicarFora)
@@ -157,7 +161,7 @@ export const Header: React.FC<HeaderProps> = ({
           </nav>
 
           {/* Menu do celular */}
-          <div ref={menuRef} className="relative sm:hidden">
+          <div ref={menuRef} className="sm:hidden">
             <button
               ref={menuBotaoRef}
               type="button"
@@ -172,8 +176,9 @@ export const Header: React.FC<HeaderProps> = ({
             {menuAberto && (
               <div
                 id="menu-navegacao"
-                className="absolute left-0 top-[calc(100%+8px)] w-56 rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
+                className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
               >
+                <BuscaDocumentos variante="menu" empresaPropria={empresaPropria} />
                 {itens.map((item, indice) => (
                   <button
                     key={item.tab}
@@ -196,18 +201,10 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: Search, Upload Button & Theme Toggle */}
         <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
-          {/* Global Search Input (Comentado temporariamente)
-          <div className="relative hidden md:block">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8f8298] dark:text-[#83748d]" />
-            <input
-              type="text"
-              placeholder="Buscar em todos os documentos"
-              value={globalSearch}
-              onChange={(e) => onGlobalSearchChange(e.target.value)}
-              className="w-64 lg:w-72 pl-10 pr-4 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#8f8298] dark:placeholder-[#776881] focus:outline-none focus:ring-1 focus:ring-[#9333ea] dark:focus:ring-[#c026d3] transition-all"
-            />
+          {/* Busca por texto: a partir de 640px fica na barra; abaixo disso, dentro do menu */}
+          <div className="hidden sm:block">
+            <BuscaDocumentos variante="barra" empresaPropria={empresaPropria} />
           </div>
-          */}
 
           {/* Upload Button / Real-time Processing Tracker Bubble */}
           {mostrarEnvio && (

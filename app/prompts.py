@@ -99,9 +99,11 @@ CRITERIOS_FRONTEIRA = {
 # "44 horas" e "24 horas" e as contagens viraram `semanas_acima_do_limite_semanal` e `semanas_sem_descanso_semanal`.
 # gemini-ponto-v4: novos campos `tipo_registro` e `campos_espelho` (Portaria MTP 671/2021, art. 84); o Gemini só diz
 # o que aparece, a divergência espelho_incompleto é decidida em código.
+# jev-ponto-v6: a dimensão `registro` passou a considerar o espelho eletrônico sem campos do art. 84 da Portaria MTP
+# 671/2021 (`campos_do_espelho_ausentes`, contado em código); antes a divergência espelho_incompleto não pesava no score.
 # NÃO conferido com chamada real ao Gemini nem ao Jev (só com mock).
 VERSAO_PROMPT_PONTO_GEMINI = "gemini-ponto-v4"
-VERSAO_PROMPT_PONTO_JEV = "jev-ponto-v5"
+VERSAO_PROMPT_PONTO_JEV = "jev-ponto-v6"
 
 
 def prompt_gemini_ponto(texto: str, perfil_json: str, tipos: tuple, campos_espelho: dict) -> str:
@@ -191,13 +193,13 @@ PERGUNTAS_PONTO = {
         "instructions": (
             "Considerando só `contagens.registro` (contagens já calculadas), qual situação de qualidade do "
             "registro de ponto descreve a folha? `totais_declarados_divergentes` conta os totais da folha (horas e "
-            "horas extras) que não batem com o recalculado; 0 também vale quando a folha não declara totais. Ponto britânico é horário quase idêntico todos os dias; é um sinal "
+            "horas extras) que não batem com o recalculado; 0 também vale quando a folha não declara totais. `campos_do_espelho_ausentes` conta os campos obrigatórios que faltam no espelho de ponto eletrônico, de `campos_obrigatorios_do_espelho` no total; 0 também vale quando a folha não é espelho eletrônico ou o espelho não pôde ser conferido. Ponto britânico é horário quase idêntico todos os dias; é um sinal "
             "de risco, não prova." + AVISO_ANALISE),
         "criteria": [
-            "Todos os dias com marcações legíveis e completas, sem sinal de ponto britânico e sem total declarado divergente",
-            "Poucos dias com marcação incompleta ou ilegível, e sem sinal de ponto britânico",
-            "Sinal de ponto britânico, ou marcação incompleta ou ilegível em vários dias, ou total declarado na folha diferente do recalculado por pequena diferença",
-            "Sinal de ponto britânico e marcação incompleta ou ilegível em grande parte dos dias, ou total de horas extras declarado na folha muito diferente do recalculado",
+            "Todos os dias com marcações legíveis e completas, sem sinal de ponto britânico, sem total declarado divergente e sem campo ausente no espelho",
+            "Poucos dias com marcação incompleta ou ilegível, ou espelho eletrônico sem 1 ou 2 campos obrigatórios, e sem sinal de ponto britânico",
+            "Sinal de ponto britânico, ou marcação incompleta ou ilegível em vários dias, ou total declarado na folha diferente do recalculado por pequena diferença, ou espelho eletrônico sem 3 a 5 campos obrigatórios",
+            "Sinal de ponto britânico e marcação incompleta ou ilegível em grande parte dos dias, ou total de horas extras declarado na folha muito diferente do recalculado, ou espelho eletrônico sem 6 ou mais campos obrigatórios",
         ],
     },
 }

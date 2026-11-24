@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { formatarDuracao, minutosParaHorario } from '../utils/convencoes'
+import { formatarDuracao, minutosParaHorario } from '../utils/perfisJornadaFormato'
 import { blocosDoDia, descricaoDoDia, diferencas, type Faixa, type ParametrosDia } from '../utils/reguaDia'
 
 const X0 = 20

@@ -69,4 +69,4 @@ def test_niveis_do_descanso_cobrem_uma_semana_avaliada_e_reprovada():
     assert len(niveis) == 4 and "nenhuma semana completa pôde ser avaliada" not in " ".join(niveis)
     assert "só uma semana foi avaliada" in niveis[1]
     assert all("descanso semanal exigido" in n and "24 horas" not in n for n in niveis)  # a regra muda por data
-    assert prompts.VERSAO_PROMPT_PONTO_JEV == "jev-ponto-v5"
+    assert prompts.VERSAO_PROMPT_PONTO_JEV == "jev-ponto-v6"

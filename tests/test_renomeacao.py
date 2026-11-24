@@ -166,7 +166,9 @@ def test_rota_download_documento_retorna_pdf_e_content_disposition(monkeypatch):
         app.dependency_overrides.pop(documento_para_leitura, None)
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
-    assert resp.headers["content-disposition"] == 'attachment; filename="holerite_douglas_paz_2026-03.pdf"'
+    assert resp.headers["content-disposition"] == (
+        'attachment; filename="holerite_douglas_paz_2026-03.pdf"; '
+        "filename*=UTF-8''holerite_douglas_paz_2026-03.pdf")
     assert resp.content.startswith(b"%PDF-1.4")
 
 

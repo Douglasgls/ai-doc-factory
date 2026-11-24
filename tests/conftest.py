@@ -20,6 +20,12 @@ def sem_rede(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def sem_espera_na_fila(monkeypatch):
+    """Retentativas imediatas nos testes; test_filas_espera.py define as esperas reais."""
+    monkeypatch.setattr(config, "ESPERAS_TENTATIVA", (0.0, 0.0, 0.0))
+
+
+@pytest.fixture(autouse=True)
 def autenticacao(monkeypatch):
     """Valores falsos de autenticação e a dependência de login substituída, para os testes de rotas não
     precisarem de token. tests/test_autenticacao.py remove o override (fixture `auth_real`)."""
