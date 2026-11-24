@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, Text, UniqueConstraint, column, func
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, Text, UniqueConstraint, column, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -21,6 +21,7 @@ class Pagina(Base):
     numero: Mapped[int] = mapped_column(Integer)
     documento_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("documento.id", ondelete="SET NULL"))
     texto: Mapped[str | None] = mapped_column(Text)
+    texto_nativo: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
     lote: Mapped["Lote"] = relationship(back_populates="paginas")
     documento: Mapped["Documento | None"] = relationship(back_populates="paginas")

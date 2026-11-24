@@ -7,7 +7,7 @@ Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O q
 ## Stack e serviços
 
 - Python 3.12, FastAPI, PostgreSQL 16, Redis 7, Docker Compose.
-- OCR: Tesseract (`-l por`) sobre páginas rasterizadas a 150 dpi com `pdf2image`/Poppler, 4 páginas em paralelo.
+- Leitura de páginas e OCR (`app/ocr.py`): híbrida por página com **PyMuPDF (`fitz`)** e **Tesseract (`-l por`)** a 150 dpi (4 páginas em paralelo). Se a página do PDF possui camada de texto digital nativo válida e não é coberta por imagem escaneada (`>= 65%` da área da página), o PyMuPDF extrai o texto diretamente ordenado por blocos visuais (`pagina.texto_nativo = true`), sem acionar o Tesseract; caso contrário, roda o Tesseract sobre o PNG rasterizado (`pagina.texto_nativo = false`).
 - Classificação: Jev (via OpenRouter) como classificador principal e Gemini como segunda opinião quando a confiança é baixa; ou um classificador por palavras-chave (`CLASSIFICADOR=regras`) que roda sem rede.
 - Arquivos do lote em volume Docker (`/data/lote_<id>/`).
 
@@ -48,6 +48,8 @@ POST /lotes (PDF/imagem)
 **Segmentação em cascata** (`app/segmentacao.py`): página em branco herda o documento anterior; "Página 1 de N" abre documento e "Página k de N" (k>1) continua só se for coerente com a última página paginada do documento (mesmo N e k maior; salto tolerado), senão abre documento novo marcado como ambíguo (revisão); a paginação só vale nas primeiras e últimas `SEG_PAG_LINHAS` linhas da página; senão, sem paginação, dois CNPJs válidos (dígitos verificadores) e diferentes abrem documento mesmo com similaridade alta (sem perguntar ao Jev; CNPJ que não fecha os dígitos é erro de OCR, não outra empresa); um CPF válido em cada página, diferentes, também abrem mesmo com similaridade alta (mesma empresa e mesmo modelo, outra pessoa); página anterior com a linha de total geral (`SEG_FECHO_REGEX`) fechou a tabela, e a página seguinte com conteúdo próprio abre; depois, similaridade TF-IDF entre páginas consecutivas (a partir de `SEG_SIM_ALTO` continua, abaixo de `SEG_SIM_BAIXO` abre) e página residual (continua); na faixa ambígua pergunta Sim/Não ao Jev (só com `CLASSIFICADOR=jev`). Se o Jev não responde ou fica no meio, o sistema abre documento novo e marca `segmentacao_ambigua`, o que leva o documento à revisão. Exceção, a continuação esperada: quando o documento anunciou a página ("Página k de N" com k < N e a paginação da página seguinte não foi lida) ou quando a linha de total geral está na página atual, a página continua e o Jev só veta (abre se P <= `SEG_LLM_ABRE`); com o Jev no meio da faixa, continua e marca o documento como ambíguo; sem Jev, abre e marca. Os limiares ainda não foram calibrados.
 
 **Roteamento** (`app/roteamento.py`): confiança >= `CONF_AUTO` e sem desacordo entre modelos vira `classificado`; entre `CONF_MIN` e `CONF_AUTO`, ou com desacordo, ou segmentação ambígua, vira `em_revisao` com o tipo sugerido; abaixo de `CONF_MIN`, `em_revisao` com tipo `desconhecido`.
+
+**Extração de campos em cascata** (`app/extracao.py`): quando a 1ª página do documento tem `texto_nativo = true`, o `worker_extracao` chama o Gemini enviando **apenas o texto** (`imagem_png=None`, zero tokens de imagem). Em seguida, `campos_essenciais_completos()` confere se os campos obrigatórios e dígitos verificadores (CNPJ/CPF) esperados para aquele tipo documental vieram completos; se faltar qualquer campo essencial (por exemplo, data ou parecer em carimbo de imagem dentro de um PDF digital), o worker faz fallback automático chamando o Gemini com a imagem PNG da 1ª página e mescla os resultados. Páginas escaneadas (`texto_nativo = false`) enviam texto + imagem PNG diretamente na primeira chamada.
 
 **Tipos documentais** (`app/config.py`): `aso`, `folha_pagamento`, `folha_ponto`, `holerite`, `recibo_ferias`, `atestado_medico`, `contrato_trabalho`.
 
@@ -299,7 +301,7 @@ Também podem ser ajustadas por ambiente (valores em `app/config.py`, não lista
 
 **Limitações**
 
-- As imagens das páginas enviadas ao Gemini (segunda opinião, análise de ponto e extração) não são mascaradas, e a extração de campos (`app/extracao.py`) envia o texto sem anonimizar, porque precisa ler nome e CPF.
+- As imagens das páginas enviadas ao Gemini (segunda opinião, análise de ponto e extração de páginas escaneadas ou em fallback) não são mascaradas, e a extração de campos (`app/extracao.py`) envia o texto sem anonimizar, porque precisa ler nome e CPF. Em páginas digitais nativas (`pagina.texto_nativo = true`) cujos campos essenciais já vêm completos no texto, a imagem da página não é enviada ao Gemini.
 - O banco, o volume de arquivos (`/data`, com as imagens das páginas) e o cache de LLM (`/cache`) guardam dados reais. Não há hash nem cifragem. O cache guarda as respostas dos LLMs, e a da extração contém nome e CPF.
 - Nomes visíveis na API (decisão acima).
 - A heurística de nome (2 a 6 palavras capitalizadas numa linha, mais rótulos) não é garantia: erra em nomes de uma palavra só, em nomes quebrados de forma incomum pelo OCR e em lixo de OCR, e pode mascarar expressões capitalizadas que não estejam na lista de exclusão. Só foi ajustada em documentos sintéticos.
@@ -440,6 +442,17 @@ Sobre os 77 documentos previstos (a precisão compara com o tipo real do documen
 ### Tempos e filas
 
 Tempo desde o envio dos lotes até todos `concluido`: treino (20 lotes, `CLASSIFICADOR=regras`) 120,1 s; ajuste (5 lotes, Jev) 27,7 s; teste (10 lotes, Jev) 55,3 s. Em todos os conjuntos, a `dlq` ficou vazia e nenhum documento ficou em `erro`. Foram 116 registros `llm_chamada` (ajuste e teste juntos, 115 do Jev e 1 do Gemini).
+
+### Leitura híbrida (PyMuPDF) e economia de tokens na extração (`gemini-3.5-flash`)
+
+Medição real nos logs de `app.llm` (`usageMetadata.promptTokensDetails` devolvido pela API do Gemini) comparando documentos processados no mesmo ambiente:
+
+| Origem da 1ª página | Modo de leitura (`app/ocr.py`) | Modo de extração (`app/extracao.py`) | Tokens de Imagem (`IMAGE`) | Tokens de Texto (`TEXT`) | Total de entrada (`promptTokenCount`) |
+|---|---|---|---|---|---|
+| **PDF digital nativo** (`texto_nativo = true`, holerite) | PyMuPDF direto (Tesseract pulado) | Só texto (`imagem_png=None`, 9 campos extraídos sem fallback) | **0** | 825 | **825** |
+| **PDF escaneado** (`texto_nativo = false`, ASO / holerite / ponto) | Tesseract OCR (`150 dpi`) | Texto + imagem PNG da 1ª página | **1.092** | 760 a 2.327 | **1.852 a 3.419** |
+
+Em páginas digitais nativas de 1 página a 150 dpi, a extração somente por texto elimina os **1.092 tokens fixos de imagem** por documento (redução de **55,5%** no `promptTokenCount` em comparação ao documento de tamanho equivalente com imagem), mantendo o fallback automático com PNG caso algum campo essencial do tipo documental não venha preenchido.
 
 ### O que não foi medido
 
