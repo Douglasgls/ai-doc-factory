@@ -30,7 +30,7 @@ const NAV_LINKS = [
   { path: '/duvidas', id: 'duvidas', label: 'Dúvidas' },
 ]
 
-const DEMO_URL = (import.meta.env.VITE_DEMO_URL || 'https://dreamy-tapioca-f55acc.netlify.app/').trim()
+const DEMO_URL = (import.meta.env.VITE_DEMO_URL || 'https://evidocs.netlify.app/').trim()
 
 const PATH_TO_ID: Record<string, string> = Object.fromEntries(NAV_LINKS.map((l) => [l.path, l.id]))
 
