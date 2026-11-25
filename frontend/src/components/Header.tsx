@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Briefcase, Building2, Clock, FileText, LogOut, Menu, Moon, Sun, Users, X, type LucideIcon } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
 import { EviDocsBrand } from './EviDocsBrand'
-import { BuscaDocumentos } from './BuscaDocumentos'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
 
 interface HeaderProps {
@@ -76,10 +75,10 @@ export const Header: React.FC<HeaderProps> = ({
   onClearFinishedLotes = () => {},
   onNavigateCategory,
 }) => {
-  const itens: { tab: Aba; rotulo: string; icone: LucideIcon }[] = [
+  const itens: { tab: Aba; rotulo: string; rotuloCurto?: string; icone: LucideIcon }[] = [
     { tab: 'documentos', rotulo: empresaPropria ? 'Seus documentos' : 'Documentos', icone: FileText },
     ...(showOrganizacoes ? [{ tab: 'organizacoes' as const, rotulo: 'Organizações', icone: Building2 }] : []),
-    ...(showPerfis ? [{ tab: 'perfis' as const, rotulo: 'Convenções coletivas', icone: Clock }] : []),
+    ...(showPerfis ? [{ tab: 'perfis' as const, rotulo: 'Convenções coletivas', rotuloCurto: 'Convenções', icone: Clock }] : []),
     ...(showTerceirizadas ? [{ tab: 'terceirizadas' as const, rotulo: 'Terceirizadas', icone: Briefcase }] : []),
     ...(showEquipe ? [{ tab: 'equipe' as const, rotulo: 'Equipe', icone: Users }] : []),
   ]
@@ -132,16 +131,16 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="w-full border-b border-[#ece8ef] dark:border-[#27192f] bg-white/90 dark:bg-[#140c17]/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
         {/* Left: Logo & Navigation Tabs */}
-        <div className="flex items-center gap-2 sm:gap-8 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-4 xl:gap-5 min-w-0">
           {/* Marca EviDocs */}
-          <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => onSelectTab('documentos')}>
+          <div className="flex items-center gap-2 cursor-pointer select-none shrink-0" onClick={() => onSelectTab('documentos')}>
             <EviDocsBrand sizeClass="text-xl sm:text-2xl" />
           </div>
 
           {/* Navigation Tabs: a partir de 640px ficam na barra; abaixo disso, no menu */}
-          <nav aria-label="Principal" className="hidden sm:flex items-center gap-2">
+          <nav aria-label="Principal" className="hidden sm:flex items-center gap-1">
             {itens.map((item) => (
               <button
                 key={item.tab}
@@ -150,12 +149,19 @@ export const Header: React.FC<HeaderProps> = ({
                 title={item.rotulo}
                 aria-label={item.rotulo}
                 aria-current={activeTab === item.tab ? 'page' : undefined}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all inline-flex items-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea] ${
+                className={`px-2.5 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap shrink-0 transition-all inline-flex items-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9333ea] ${
                   activeTab === item.tab ? CLASSE_ATIVA : CLASSE_INATIVA
                 }`}
               >
-                <item.icone className="w-4 h-4" aria-hidden="true" />
-                <span className="hidden lg:inline">{item.rotulo}</span>
+                <item.icone className="w-4 h-4 shrink-0" aria-hidden="true" />
+                {item.rotuloCurto ? (
+                  <>
+                    <span className="hidden xl:inline 2xl:hidden">{item.rotuloCurto}</span>
+                    <span className="hidden 2xl:inline">{item.rotulo}</span>
+                  </>
+                ) : (
+                  <span className="hidden xl:inline">{item.rotulo}</span>
+                )}
               </button>
             ))}
           </nav>
@@ -178,7 +184,6 @@ export const Header: React.FC<HeaderProps> = ({
                 id="menu-navegacao"
                 className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
               >
-                <BuscaDocumentos variante="menu" empresaPropria={empresaPropria} />
                 {itens.map((item, indice) => (
                   <button
                     key={item.tab}
@@ -199,13 +204,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Search, Upload Button & Theme Toggle */}
-        <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
-          {/* Busca por texto: a partir de 640px fica na barra; abaixo disso, dentro do menu */}
-          <div className="hidden sm:block">
-            <BuscaDocumentos variante="barra" empresaPropria={empresaPropria} />
-          </div>
-
+        {/* Right: Upload Button & Theme Toggle */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Upload Button / Real-time Processing Tracker Bubble */}
           {mostrarEnvio && (
             <ProcessingTrackerPopover
@@ -246,10 +246,10 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onLogout}
             aria-label="Sair"
             title="Sair"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-[#6e6378] dark:text-[#d3c7dc] hover:bg-[#f3edf6] dark:hover:bg-[#281831] transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 p-2 2xl:px-3 2xl:py-2 rounded-lg text-sm font-medium text-[#6e6378] dark:text-[#d3c7dc] hover:bg-[#f3edf6] dark:hover:bg-[#281831] transition-colors cursor-pointer"
           >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Sair</span>
+            <LogOut className="w-4 h-4 shrink-0" />
+            <span className="hidden 2xl:inline">Sair</span>
           </button>
         </div>
       </div>

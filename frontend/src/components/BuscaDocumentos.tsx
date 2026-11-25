@@ -304,7 +304,7 @@ export const BuscaDocumentos: React.FC<BuscaDocumentosProps> = ({ variante, empr
           onKeyDown={aoTeclarCampo}
           aria-controls={mostrarPainel ? idPainel : undefined}
           aria-describedby={mostrarPainel ? idStatus : undefined}
-          className={`w-full ${variante === 'barra' ? 'sm:w-44 lg:w-64' : ''} pl-9 pr-9 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#6e6378] dark:placeholder-[#a093a8] [&::-webkit-search-cancel-button]:hidden ${FOCO}`}
+          className={`w-full ${variante === 'barra' ? 'sm:w-36 xl:w-40 2xl:w-48' : ''} pl-9 pr-9 py-1.5 text-sm rounded-lg bg-[#f8f6fa] dark:bg-[#1d1222] border border-[#e5dfec] dark:border-[#311f3d] text-[#2d0a33] dark:text-[#f5edf9] placeholder-[#6e6378] dark:placeholder-[#a093a8] [&::-webkit-search-cancel-button]:hidden ${FOCO}`}
         />
         {texto !== '' && (
           <button

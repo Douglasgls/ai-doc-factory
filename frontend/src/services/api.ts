@@ -1,5 +1,6 @@
 import type { Company } from '../types';
 import type { AnalisePonto } from '../components/auditoriaPonto';
+import { demoFetch, isDemoMode } from './demoApi';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const API_PREFIX = import.meta.env.VITE_API_PREFIX ?? '';
@@ -15,7 +16,7 @@ export const AUTH_EXPIRED_EVENT = 'auth:expired';
  * em localStorage (sobrevive ao fechar o navegador). Lê de um e do outro; grava em só um; limpa os dois.
  */
 export const authToken = {
-  get: (): string | null => sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY),
+  get: (): string | null => (isDemoMode() ? 'demo-token' : sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY)),
   set: (token: string, manterConectado = false) => {
     authToken.clear();
     (manterConectado ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
@@ -31,6 +32,9 @@ export const authToken = {
  * (inclusive upload) e, em 401, limpa o token e avisa o App para voltar ao login.
  */
 export const authFetch = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  if (isDemoMode()) {
+    return demoFetch(path, init);
+  }
   const headers = new Headers(init.headers);
   const token = authToken.get();
   if (token) headers.set('Authorization', `Bearer ${token}`);
