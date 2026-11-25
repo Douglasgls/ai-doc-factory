@@ -102,7 +102,7 @@ export const ScreenShowcase: React.FC = () => {
   return (
     <div className="space-y-10">
       {/* Cabeçalho + seletor segmentado */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div className="flex flex-col items-start gap-6">
         <div className="space-y-2">
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7e22ce] dark:text-[#f38df9]">
             {grupo.etiqueta}
@@ -112,7 +112,7 @@ export const ScreenShowcase: React.FC = () => {
           </h2>
         </div>
 
-        <div className="inline-flex flex-wrap gap-1 p-1.5 rounded-2xl border border-[#e6dfec] dark:border-[#2e1e38] bg-white/85 dark:bg-[#1a1020]/90 shadow-sm">
+        <div className="grid grid-cols-1 sm:inline-flex sm:flex-nowrap w-full sm:w-auto gap-1 p-1.5 rounded-2xl border border-[#e6dfec] dark:border-[#2e1e38] bg-white/85 dark:bg-[#1a1020]/90 shadow-sm">
           {GRUPOS.map((g) => {
             const selecionado = g.id === ativo
             return (
@@ -120,7 +120,7 @@ export const ScreenShowcase: React.FC = () => {
                 key={g.id}
                 type="button"
                 onClick={() => setAtivo(g.id)}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap text-left sm:text-center transition-all duration-200 cursor-pointer ${
                   selecionado
                     ? 'bg-gradient-to-r from-[#9333ea] to-[#7e22ce] text-white shadow-md shadow-[#9333ea]/25'
                     : 'text-[#6e6378] dark:text-[#b2a4bc] hover:text-[#2d0a33] dark:hover:text-white'
