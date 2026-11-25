@@ -27,7 +27,7 @@ const GRUPOS: GrupoTela[] = [
         src: '/screens/image-4-1.png',
         rota: 'evidocs / documentos',
         alt: 'Tela Documentos do EviDocs mostrando 11 documentos classificados automaticamente pela IA em 7 tipos documentais',
-        legenda: 'Um PDF de 12 páginas virou 10 documentos, separados e classificados sem ninguém revisar.',
+        legenda: 'Um PDF de 12 páginas virou 11 documentos, separados e classificados sem ninguém revisar.',
       },
       {
         src: '/screens/image-4-2.png',
