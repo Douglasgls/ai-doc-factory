@@ -41,7 +41,7 @@ export function isDemoMode(): boolean {
 export function getDemoSiteUrl(): string {
   const envUrl = (import.meta.env.VITE_SITE_URL as string | undefined)?.trim()
   if (envUrl) return envUrl
-  return 'http://localhost:5173'
+  return 'https://evidocs.douglaspaz.site/'
 }
 
 let state: DemoState = createInitialDemoState()
