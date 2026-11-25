@@ -16,6 +16,7 @@ import {
   UserCheck,
 } from 'lucide-react'
 import { EviDocsBrand } from './components/EviDocsBrand'
+import { FaqSection } from './components/FaqSection'
 import { CountUp, Reveal } from './components/Reveal'
 import { ScreenShowcase } from './components/ScreenShowcase'
 
@@ -26,6 +27,7 @@ const NAV_LINKS = [
   { path: '/resultados', id: 'resultados', label: 'Resultados' },
   { path: '/negocio', id: 'negocio', label: 'Negócio' },
   { path: '/confianca', id: 'confianca', label: 'Confiança' },
+  { path: '/duvidas', id: 'duvidas', label: 'Dúvidas' },
 ]
 
 const PATH_TO_ID: Record<string, string> = Object.fromEntries(NAV_LINKS.map((l) => [l.path, l.id]))
@@ -619,6 +621,13 @@ export const App: React.FC = () => {
                 </div>
               </div>
             </Reveal>
+          </div>
+        </section>
+
+        {/* 8. DÚVIDAS FREQUENTES */}
+        <section id="duvidas" className="py-20 sm:py-28 border-t border-[#ece8ef] dark:border-[#27192f]/70">
+          <div className="max-w-5xl mx-auto px-5 sm:px-8">
+            <FaqSection />
           </div>
         </section>
       </main>
