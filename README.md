@@ -7,7 +7,7 @@ Hoje existem o backend (API + workers) e uma interface React em `frontend/`. O q
 ## Stack e serviços
 
 - Python 3.12, FastAPI, PostgreSQL 16, Redis 7, Docker Compose.
-- Leitura de páginas e OCR (`app/ocr.py`): híbrida por página com **PyMuPDF (`fitz`)** e **Tesseract (`-l por`)** a 150 dpi. O PyMuPDF percorre o PDF em sequência numa única thread (pois `fitz` não é thread-safe), gera o PNG da página para visualização/fallback e, quando a página possui camada de texto digital nativo válida e não é coberta por imagem escaneada (`>= 65%` da área), extrai o texto diretamente ordenado por blocos visuais (`pagina.texto_nativo = true`), sem acionar o Tesseract; as páginas escaneadas (`pagina.texto_nativo = false`) rodam o Tesseract em paralelo (até 4 páginas por worker).
+- Leitura de páginas e OCR (`app/ocr.py`): híbrida por página com **PyMuPDF (`fitz`)** e **Tesseract (`-l por`)** a 150 dpi. O PyMuPDF percorre o PDF em sequência numa única thread (pois `fitz` não é thread-safe), libera o cache interno de imagens (`fitz.TOOLS.store_shrink(100)`) após cada página/documento para evitar retenção de RAM, gera o PNG da página para visualização/fallback e, quando a página possui camada de texto digital nativo válida e não é coberta por imagem escaneada (`>= 65%` da área), extrai o texto diretamente ordenado por blocos visuais (`pagina.texto_nativo = true`), sem acionar o Tesseract; as páginas escaneadas (`pagina.texto_nativo = false`) rodam o Tesseract em paralelo (até 4 páginas por worker).
 - Classificação: Jev (via OpenRouter) como classificador principal e Gemini como segunda opinião quando a confiança é baixa; ou um classificador por palavras-chave (`CLASSIFICADOR=regras`) que roda sem rede.
 - Arquivos do lote em volume Docker (`/data/lote_<id>/`).
 
@@ -534,22 +534,25 @@ Sobre os 77 documentos previstos (a precisão compara com o tipo real do documen
 
 Tempo desde o envio dos lotes até todos `concluido`: treino (20 lotes, `CLASSIFICADOR=regras`) 120,1 s; ajuste (5 lotes, Jev) 27,7 s; teste (10 lotes, Jev) 55,3 s. Em todos os conjuntos, a `dlq` ficou vazia e nenhum documento ficou em `erro`. Foram 116 registros `llm_chamada` (ajuste e teste juntos, 115 do Jev e 1 do Gemini).
 
-### Leitura híbrida (PyMuPDF) e tokens de imagem na extração (`gemini-3.5-flash`)
+### Leitura híbrida (PyMuPDF): benchmark A/B local e extração no Gemini (`gemini-3.6-flash`)
 
-Observação nos logs de `app.llm` (`usageMetadata.promptTokensDetails` devolvido pela API do Gemini) em testes locais com documentos sintéticos no mesmo ambiente:
+Medição controlada A/B em 25/11/2026 (`--sem-cache`, diretórios de cache isolados, 0 cache hits, 0 retentativas; `GEMINI_MODEL=gemini-3.5-flash` roteado pela API para `gemini-3.6-flash`, `serviceTier=standard`) sobre **29 PDFs sintéticos / 30 páginas** (15 páginas digitais nativas + 15 páginas raster/escaneadas, cobrindo os 7 tipos documentais e 1 PDF misto de 2 páginas), comparando **Antes** (Poppler + Tesseract em 100% das páginas + PNG em todas as extrações) vs. **Depois** (PyMuPDF com `store_shrink(100)` + extração em cascata):
 
-| Origem da 1ª página | Modo de leitura (`app/ocr.py`) | Modo de extração (`app/extracao.py`) | Tokens de Imagem (`IMAGE`) | Tokens de Texto (`TEXT`) | Total de entrada (`promptTokenCount`) |
-|---|---|---|---|---|---|
-| **PDF digital nativo** (`texto_nativo = true`, holerite de 1 página) | PyMuPDF direto (Tesseract pulado) | Só texto (`imagem_png=None`, `gemini-extracao-texto-v1`, sem fallback) | **0** | 825 | **825** |
-| **PDF escaneado** (`texto_nativo = false`, ASO / holerite / ponto de 1 página) | Tesseract OCR (`150 dpi`) | Texto + imagem PNG da 1ª página (`gemini-extracao-v4`) | **1.092** | 760 a 2.327 | **1.852 a 3.419** |
+| Recorte medido | Tempo local (A→D) | CPU local (A→D) | Subprocessos (A→D) | Tokens entrada (A→D) | Saída + thoughts (A→D) | Custo est. 2026¹ (A→D) | Fallbacks | Divergências |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Lote local isolado (29 PDFs / 30 págs)** | `32,58 → 24,88 s` (**-23,6%**) | `33,49 → 24,86 s` (**-25,8%**) | `149 → 44` (**-70,5%**) | `78.253 → 76.859` | `33.735 → 46.340` | `US$ 0,1852 → US$ 0,2314` (`+25,0%`) | `6 / 15` | `4` *(ver abaixo)* |
+| **7 PDFs nativos válidos** (`01_nativos_validos`) | `5,13 → 0,36 s` (**-93,0%**) | `5,16 → 0,36 s` (**-93,1%**) | `35 → 7` (**-80,0%**) | `15.758 → 8.231` (**-47,8%**, `IMAGE: 7.644 → 0`) | `8.645 → 10.165` (`+17,6%`) | `US$ 0,0442 → US$ 0,0443` (**+0,1%**) | `0 / 7` | **`0`** |
+| **7 PDFs nativos com CNPJ/CPF inválidos** *(pior caso)* | `5,17 → 0,33 s` (**-93,6%**) | `5,20 → 0,33 s` (**-93,6%**) | `35 → 7` (**-80,0%**) | `15.759 → 22.122` (`+40,4%`) | `7.836 → 17.567` (`+124,2%`) | `US$ 0,0412 → US$ 0,0825` (**+100,1%**) | `6 / 7` | `1` *(equivalente)* |
+| **14 PDFs escaneados/raster** (`pdf/` + `scans`) | `19,09 → 19,67 s` (`+3,0%`) | `19,15 → 19,67 s` (`+2,7%`) | `70 → 28` (**-60,0%**) | `42.489 → 43.322` (`+2,0%`) | `16.160 → 16.743` (`+3,6%`) | `US$ 0,0925 → US$ 0,0953` (`+3,0%`) | `N/A` | `3` *(2 acertos a mais no híbrido)* |
+| **1 PDF misto (2 págs: 1 nativa + 1 scan)** | `1,73 → 1,51 s` (`-12,6%`) | `2,53 → 1,51 s` (**-40,3%**) | `9 → 2` (**-77,8%**) | `4.247 → 3.184` (`-25,0%`, `IMAGE: 1.092 → 0`) | `1.094 → 1.865` (`+70,5%`) | `US$ 0,0073 → US$ 0,0094` (`+28,7%`) | `0 / 1` | **`0`** |
 
-Em um PDF digital nativo de 1 página a 150 dpi que conclui sem fallback, o envio somente de texto elimina os **1.092 tokens fixos de imagem (`IMAGE`)** na entrada do Gemini e evita rodar o Tesseract naquela página.
+*¹ Custo estimado na tabela pública vigente do `gemini-3.6-flash` até 31/12/2026 (`US$ 0,75 / 1M` entrada; `US$ 3,75 / 1M` saída + `thoughtsTokenCount`); a partir de 01/01/2027 os valores dobram (`US$ 1,50 / US$ 7,50`).*
 
-**Ressalvas importantes:**
+**O que os dados comprovam — e ressalvas importantes:**
 
-- **Custo financeiro líquido não medido:** a tabela compara documentos de tipos/tamanhos diferentes apenas para mostrar o custo fixo de imagem (1.092 tokens) e não representa uma redução percentual fixa de custo. Quando o fallback dispara, o worker faz **duas chamadas** ao Gemini (só texto + texto com imagem), e no modelo usado os tokens de raciocínio (`thoughtsTokenCount`, cobrados como saída) têm peso relevante no custo total. A economia líquida depende da fração de PDFs nativos e da taxa de fallback em documentos reais de RH, ainda não medidas.
-- **Acurácia e trava de fallback:** não houve medição controlada comparando a extração do mesmo documento com e sem imagem. A trava `campos_essenciais_completos()` aciona fallback quando falta algum campo obrigatório ou quando CNPJ/CPF tem dígito verificador inválido; ela não detecta um valor errado com formato válido (por exemplo, trocar o CNPJ da prestadora pelo da tomadora).
-- **Efeito em outras etapas não remedido:** para páginas digitais nativas, trocar a leitura de Poppler + Tesseract para PyMuPDF (`get_text("blocks")`) e a rasterização para MuPDF também altera a entrada da segmentação (Goal 1), da classificação (Goal 3) e da busca full-text. As métricas das seções anteriores do README não foram repetidas após esta mudança.
+- **Ganho local comprovado (velocidade, CPU, RAM e processos):** no lote isolado de 29 PDFs (30 páginas), com `fitz.TOOLS.store_shrink(100)` ativo, o pico de RAM do worker Python caiu de **148,7 MB para 123,1 MB (-17,2%)** (antes do `store_shrink`, o cache padrão de 256 MB do MuPDF havia elevado o pico para 267,0 MB em 14 PDFs). Nos PDFs digitais nativos, pular o Tesseract reduziu tempo e CPU local em **93%** (~14× mais rápido) com **0 divergências** frente ao modo com imagem.
+- **Custo financeiro no Gemini NÃO caiu sob `thinking` irrestrito:** embora os tokens de entrada tenham caído **47,8%** nos 7 nativos válidos (eliminando os `1.092` tokens fixos de imagem por página), o custo em dólares ficou em **empate técnico (`+0,1%`)**, porque os tokens de raciocínio (`thoughtsTokenCount`, cobrados a 5× o preço da entrada) responderam por >55% da conta e oscilaram para cima (`+20,4%`) nas chamadas só-texto. Além disso, quando o documento nativo contém CNPJ/CPF com dígito verificador inválido, o fallback faz uma 2ª chamada completa e **dobra o custo (`+100,1%`)**. A principal alavanca futura de redução de custo na API é limitar o `thinkingBudget` na extração estruturada.
+- **Qualidade e outras etapas:** nos 29 PDFs, nenhum erro foi introduzido pelo modo híbrido (`0` divergências nos 7 nativos válidos e no PDF misto; nos scans, o híbrido acertou `data_admissao` em `recibo_ferias_scan.pdf` e `razao_social_prestadora` em `folha_pagamento.pdf` onde o fluxo anterior falhou). Ainda assim, a amostra é sintética (`N = 29` PDFs) e o efeito da leitura via PyMuPDF/MuPDF sobre segmentação (Goal 1), classificação (Goal 3) e busca em documentos reais de RH não foi remedido.
 
 ### Rodada de 23/11/2026
 

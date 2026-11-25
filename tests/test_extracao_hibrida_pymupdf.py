@@ -377,12 +377,21 @@ def test_processar_paginas_lote_roda_pymupdf_sequencial_e_tesseract_so_em_escane
         return fitz_open_real(*args, **kwargs)
 
     paginas_tesseract = []
+    limpezas_cache = []
+    orig_limpar = ocr._limpar_cache_fitz
+
+    def rastrear_limpeza():
+        limpezas_cache.append(True)
+        orig_limpar()
+
     monkeypatch.setattr(ocr.fitz, "open", rastrear_fitz_open)
+    monkeypatch.setattr(ocr, "_limpar_cache_fitz", rastrear_limpeza)
     monkeypatch.setattr(ocr, "ocr_imagem", lambda png: (paginas_tesseract.append(png.name) or "OCR pagina 2"))
 
     resultados = ocr._processar_paginas_lote(pdf, tmp_path, 3)
 
     assert aberturas_fitz == [thread_principal]  # 1 única abertura sequencial na thread chamadora
+    assert len(limpezas_cache) >= 3  # cache interno do MuPDF liberado para conter picos de RAM
     assert [n for n, _, _ in resultados] == [1, 2, 3]
     assert [nat for _, _, nat in resultados] == [True, False, True]
     assert "Joao Carlos Pereira" in resultados[0][1]

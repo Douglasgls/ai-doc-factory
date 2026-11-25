@@ -98,16 +98,30 @@ def ocr_imagem(png: Path) -> str:
     return saida.replace("\x00", "").strip()  # Postgres não aceita NUL em TEXT
 
 
+def _limpar_cache_fitz() -> None:
+    """Libera o cache interno de imagens do MuPDF (padrão ~256 MB) para conter o pico de RAM nos workers."""
+    if fitz is not None:
+        try:
+            fitz.TOOLS.store_shrink(100)
+        except Exception:
+            pass
+
+
 def processar_pagina(pdf: Path, pasta: Path, numero: int) -> tuple[int, str, bool]:
     """Gera o PNG da página (150 DPI) para visualização/fallback e devolve (numero, texto, texto_nativo).
     Se a página for um PDF digital nativo válido, extrai o texto via PyMuPDF sem rodar o Tesseract."""
     png = pasta / f"pag_{numero:04d}.png"
     if fitz is not None:
         with _FITZ_LOCK:
-            with fitz.open(str(pdf)) as doc:
-                page = doc[numero - 1]
-                page.get_pixmap(dpi=DPI, alpha=False).save(str(png))
-                texto_nativo = extrair_texto_nativo_pagina(page)
+            try:
+                with fitz.open(str(pdf)) as doc:
+                    page = doc[numero - 1]
+                    pix = page.get_pixmap(dpi=DPI, alpha=False)
+                    pix.save(str(png))
+                    del pix
+                    texto_nativo = extrair_texto_nativo_pagina(page)
+            finally:
+                _limpar_cache_fitz()
         if texto_nativo is not None:
             log.info("%s | página %04d -> texto nativo (PyMuPDF, %d chars; Tesseract pulado)",
                      pasta.name, numero, len(texto_nativo))
@@ -135,18 +149,24 @@ def _processar_paginas_lote(pdf: Path, pasta: Path, total: int) -> list[tuple[in
     pendentes_ocr: list[tuple[int, Path]] = []
 
     with _FITZ_LOCK:
-        with fitz.open(str(pdf)) as doc:
-            for numero in range(1, total + 1):
-                png = pasta / f"pag_{numero:04d}.png"
-                page = doc[numero - 1]
-                page.get_pixmap(dpi=DPI, alpha=False).save(str(png))
-                texto_nativo = extrair_texto_nativo_pagina(page)
-                if texto_nativo is not None:
-                    log.info("%s | página %04d -> texto nativo (PyMuPDF, %d chars; Tesseract pulado)",
-                             pasta.name, numero, len(texto_nativo))
-                    resultados[numero] = (numero, texto_nativo, True)
-                else:
-                    pendentes_ocr.append((numero, png))
+        try:
+            with fitz.open(str(pdf)) as doc:
+                for numero in range(1, total + 1):
+                    png = pasta / f"pag_{numero:04d}.png"
+                    page = doc[numero - 1]
+                    pix = page.get_pixmap(dpi=DPI, alpha=False)
+                    pix.save(str(png))
+                    del pix
+                    texto_nativo = extrair_texto_nativo_pagina(page)
+                    if texto_nativo is not None:
+                        log.info("%s | página %04d -> texto nativo (PyMuPDF, %d chars; Tesseract pulado)",
+                                 pasta.name, numero, len(texto_nativo))
+                        resultados[numero] = (numero, texto_nativo, True)
+                    else:
+                        pendentes_ocr.append((numero, png))
+                    _limpar_cache_fitz()
+        finally:
+            _limpar_cache_fitz()
 
     if pendentes_ocr:
         def _rodar_ocr(item: tuple[int, Path]) -> tuple[int, str, bool]:
