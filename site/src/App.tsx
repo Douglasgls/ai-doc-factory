@@ -28,7 +28,7 @@ const NAV_LINKS = [
   { path: '/confianca', id: 'confianca', label: 'Confiança' },
 ]
 
-const DEMO_URL = (import.meta.env.VITE_DEMO_URL || 'http://localhost:5174/?demo=1').trim()
+const DEMO_URL = (import.meta.env.VITE_DEMO_URL || 'https://dreamy-tapioca-f55acc.netlify.app/').trim()
 
 const PATH_TO_ID: Record<string, string> = Object.fromEntries(NAV_LINKS.map((l) => [l.path, l.id]))
 
