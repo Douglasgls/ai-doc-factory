@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Briefcase, Building2, Clock, FileText, LogOut, Menu, Moon, Sun, Users, X, type LucideIcon } from 'lucide-react'
 import { ProcessingTrackerPopover } from './ProcessingTrackerPopover'
 import { EviDocsBrand } from './EviDocsBrand'
-import { BuscaDocumentos } from './BuscaDocumentos'
 import type { TrackedLote } from '../hooks/lotePollingLogic'
 
 interface HeaderProps {
@@ -185,7 +184,6 @@ export const Header: React.FC<HeaderProps> = ({
                 id="menu-navegacao"
                 className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-[#e6dfec] dark:border-[#2a1d32] bg-white dark:bg-[#140d18] shadow-xl p-1.5 z-50"
               >
-                <BuscaDocumentos variante="menu" empresaPropria={empresaPropria} />
                 {itens.map((item, indice) => (
                   <button
                     key={item.tab}
@@ -206,13 +204,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Search, Upload Button & Theme Toggle */}
+        {/* Right: Upload Button & Theme Toggle */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Busca por texto: a partir de 640px fica na barra; abaixo disso, dentro do menu */}
-          <div className="hidden sm:block">
-            <BuscaDocumentos variante="barra" empresaPropria={empresaPropria} />
-          </div>
-
           {/* Upload Button / Real-time Processing Tracker Bubble */}
           {mostrarEnvio && (
             <ProcessingTrackerPopover
