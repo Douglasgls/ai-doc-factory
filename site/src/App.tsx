@@ -28,6 +28,8 @@ const NAV_LINKS = [
   { path: '/confianca', id: 'confianca', label: 'Confiança' },
 ]
 
+const DEMO_URL = (import.meta.env.VITE_DEMO_URL || 'http://localhost:5174/?demo=1').trim()
+
 const PATH_TO_ID: Record<string, string> = Object.fromEntries(NAV_LINKS.map((l) => [l.path, l.id]))
 
 const DORES = [
@@ -208,15 +210,25 @@ export const App: React.FC = () => {
             })}
           </nav>
 
-          <button
-            type="button"
-            onClick={() => setIsDark((d) => !d)}
-            aria-label="Alternar tema"
-            title={isDark ? 'Modo claro' : 'Modo escuro'}
-            className="p-2 rounded-xl border border-transparent hover:border-[#e6dfec] dark:hover:border-[#2e1e38] text-[#6e6378] dark:text-[#d3c7dc] hover:bg-[#f3edf6] dark:hover:bg-[#23142c] transition-all cursor-pointer"
-          >
-            {isDark ? <Sun className="w-5 h-5 text-amber-300" /> : <Moon className="w-5 h-5 text-[#3e0b48]" />}
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={DEMO_URL}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold bg-gradient-to-r from-[#9333ea] to-[#7e22ce] hover:brightness-110 text-white shadow-sm shadow-[#9333ea]/25 transition-all"
+            >
+              Demo
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
+
+            <button
+              type="button"
+              onClick={() => setIsDark((d) => !d)}
+              aria-label="Alternar tema"
+              title={isDark ? 'Modo claro' : 'Modo escuro'}
+              className="p-2 rounded-xl border border-transparent hover:border-[#e6dfec] dark:hover:border-[#2e1e38] text-[#6e6378] dark:text-[#d3c7dc] hover:bg-[#f3edf6] dark:hover:bg-[#23142c] transition-all cursor-pointer"
+            >
+              {isDark ? <Sun className="w-5 h-5 text-amber-300" /> : <Moon className="w-5 h-5 text-[#3e0b48]" />}
+            </button>
+          </div>
         </div>
 
         {/* Progresso de leitura com o gradiente oficial EviDocs */}
@@ -245,19 +257,18 @@ export const App: React.FC = () => {
 
               <div className="flex flex-wrap items-center justify-center gap-3.5 pt-2">
                 <a
-                  href="/na-tela"
-                  onClick={(e) => navegarPara('/na-tela', e)}
+                  href={DEMO_URL}
                   className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[#9333ea] to-[#7e22ce] hover:brightness-110 text-white shadow-lg shadow-[#9333ea]/30 transition-all"
                 >
-                  Ver o produto na tela
+                  Acessar demo do sistema
                   <ArrowRight className="w-4 h-4" />
                 </a>
                 <a
-                  href="/resultados"
-                  onClick={(e) => navegarPara('/resultados', e)}
+                  href="/na-tela"
+                  onClick={(e) => navegarPara('/na-tela', e)}
                   className="inline-flex items-center gap-2 px-5 py-3.5 rounded-xl text-sm font-semibold border border-[#e2d8ea] dark:border-[#2e1e38] bg-white/75 dark:bg-[#1a1020]/75 text-[#4c3e57] dark:text-[#d3c7dc] hover:border-[#bd79ff]/60 hover:text-[#2d0a33] dark:hover:text-white transition-all"
                 >
-                  Ver resultados
+                  Ver o produto na tela
                   <ArrowDown className="w-4 h-4" />
                 </a>
               </div>
