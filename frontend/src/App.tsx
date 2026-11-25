@@ -19,6 +19,7 @@ import { LotesStatusPanel } from './components/LotesStatusPanel'
 import { trackedStatus } from './hooks/lotePollingLogic'
 import { useLotePolling } from './hooks/useLotePolling'
 import { apiService, authToken, AUTH_EXPIRED_EVENT, type Contrato, type DocumentoResponse, type UsuarioAtual } from './services/api'
+import { getDemoSiteUrl, isDemoMode, resetDemoState } from './services/demoApi'
 import type { DocumentCategory, DetailedDocument, ReviewPendingDocument, Company } from './types'
 import type { FilterType } from './components/FilterBar'
 import { ehEmpresaPropria, podeConvidar, podeEditar, podeEnviar, veConformidade, veOrganizacoes, escolhePerfilJornada, vePerfisJornada, veTerceirizadas } from './utils/permissoes'
@@ -64,6 +65,8 @@ export function App() {
     }
     return true // Default dark mode
   })
+
+  const demoMode = isDemoMode()
 
   // Autenticação: o token fica em sessionStorage (ou em localStorage, se marcou "Manter conectado"); sem ele só o login aparece e nenhuma chamada de dados é feita
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authToken.get() !== null)
@@ -593,11 +596,48 @@ export function App() {
       {/* Background fluid wave */}
       <BackgroundWave />
 
+      {/* Faixa discreta exclusiva do modo demonstração (VITE_DEMO_MODE=true ou ?demo=1) */}
+      {demoMode && (
+        <div className="relative z-40 border-b border-[#bd79ff]/30 bg-gradient-to-r from-[#f4e8f7] via-[#efe6fb] to-[#e6f7fc] dark:from-[#261233] dark:via-[#201230] dark:to-[#132230] text-xs text-[#2d0a33] dark:text-[#efe6f7]">
+          <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">
+              <strong className="font-bold text-[#7e22ce] dark:text-[#f38df9]">Modo demonstração</strong> · Dados
+              simulados em memória (suas ações não alteram nenhum servidor).
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  resetDemoState()
+                  setCurrentView('home')
+                  void fetchData(true)
+                }}
+                className="font-semibold text-[#7e22ce] dark:text-[#5ddfff] hover:underline cursor-pointer"
+              >
+                Reiniciar dados
+              </button>
+              <a
+                href={getDemoSiteUrl()}
+                className="font-semibold text-[#5c1363] dark:text-[#f38df9] hover:underline"
+              >
+                Voltar ao site →
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Navbar */}
       <Header
         isDark={isDark}
         onToggleTheme={toggleTheme}
-        onLogout={handleLogout}
+        onLogout={
+          demoMode
+            ? () => {
+                window.location.href = getDemoSiteUrl()
+              }
+            : handleLogout
+        }
         onOpenUpload={() => setIsUploadModalOpen(true)}
         onOpenReview={handleOpenReview}
         reviewCount={reviewCount}
